@@ -236,9 +236,13 @@ class ArticleService:
                 logger.error("Failed to upload cover image: %s", e)
 
         # Push to draft
+        # WeChat limits author to 8 Chinese characters (approx 24 bytes)
+        author_name = agent.name
+        if len(author_name) > 8:
+            author_name = author_name[:8]
         draft_article = {
             "title": article.title,
-            "author": agent.name,
+            "author": author_name,
             "digest": article.digest,
             "content": article.html_content,
             "thumb_media_id": thumb_media_id,
