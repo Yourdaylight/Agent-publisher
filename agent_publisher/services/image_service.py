@@ -34,8 +34,8 @@ def _sign_tc3(
     canonical_uri = "/"
     canonical_querystring = ""
     ct = "application/json"
-    canonical_headers = f"content-type:{ct}\nhost:{HUNYUAN_HOST}\nx-tc-action:{action.lower()}\n"
-    signed_headers = "content-type;host;x-tc-action"
+    canonical_headers = f"content-type:{ct}\nhost:{HUNYUAN_HOST}\n"
+    signed_headers = "content-type;host"
     payload_str = json.dumps(payload)
     hashed_payload = hashlib.sha256(payload_str.encode()).hexdigest()
     canonical_request = (
