@@ -7,7 +7,6 @@ dist/
 build/
 .ruff_cache/
 .pytest_cache/
-agent_publisher/static/
 web/node_modules/
 web/dist/
 .venv/
