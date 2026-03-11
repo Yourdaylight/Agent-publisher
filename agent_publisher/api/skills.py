@@ -116,6 +116,17 @@ class SkillAccountOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class SkillArticleCreate(BaseModel):
+    """Request body for creating an article manually via skill API."""
+    agent_id: int
+    title: str
+    digest: str = ""
+    content: str = ""  # Markdown content
+    html_content: str = ""  # Pre-rendered HTML (used if content is empty)
+    cover_image_url: str = ""  # URL or media library path e.g. media:<id>
+    status: str = "draft"
+
+
 class BatchPublishRequest(BaseModel):
     article_ids: list[int]
 
@@ -456,8 +467,82 @@ async def skill_get_article(
         "agent_id": article.agent_id,
         "title": article.title,
         "digest": article.digest,
-        "content_html": article.content_html,
-        "thumb_media_id": article.thumb_media_id,
+        "content": article.content,
+        "html_content": article.html_content,
+        "cover_image_url": article.cover_image_url,
+        "wechat_media_id": article.wechat_media_id,
+        "status": article.status,
+        "created_at": article.created_at.isoformat() if article.created_at else None,
+    }
+
+
+@router.post("/articles")
+async def skill_create_article(
+    data: SkillArticleCreate,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Create an article manually (with custom content and optional media library cover).
+
+    - Set `cover_image_url` to `media:<id>` to use an image from the media library.
+    - Set `cover_image_url` to any `http(s)://...` URL to use an external image.
+    - If `content` (Markdown) is provided, it will be auto-converted to HTML.
+    - If only `html_content` is provided, it will be used directly.
+    """
+    email = _get_skill_email(request)
+    is_admin = settings.is_admin(email)
+
+    # Verify agent ownership
+    agent = await db.get(Agent, data.agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    if not is_admin:
+        account = await db.get(Account, agent.account_id)
+        if not account or account.owner_email != email:
+            raise HTTPException(status_code=403, detail="You do not own this agent's account")
+
+    # Resolve cover image from media library if needed
+    cover_image_url = data.cover_image_url
+    if cover_image_url.startswith("media:"):
+        try:
+            media_id = int(cover_image_url.split(":", 1)[1])
+            asset = await db.get(MediaAsset, media_id)
+            if not asset:
+                raise HTTPException(status_code=404, detail=f"Media asset {media_id} not found")
+            # Use the download URL so publish_article can fetch it
+            cover_image_url = f"/api/media/{media_id}/download"
+        except (ValueError, IndexError):
+            raise HTTPException(status_code=400, detail="Invalid media reference. Use media:<id>")
+
+    # Convert Markdown to HTML if content is provided
+    html_content = data.html_content
+    content = data.content
+    if content and not html_content:
+        html_content = ArticleService._markdown_to_html(content)
+
+    article = Article(
+        agent_id=data.agent_id,
+        title=data.title,
+        digest=data.digest,
+        content=content,
+        html_content=html_content,
+        cover_image_url=cover_image_url,
+        images=[],
+        source_news=[],
+        status=data.status,
+    )
+    db.add(article)
+    await db.commit()
+    await db.refresh(article)
+
+    logger.info("Skill created article id=%d title=%s for email=%s", article.id, article.title, email)
+    return {
+        "id": article.id,
+        "agent_id": article.agent_id,
+        "title": article.title,
+        "digest": article.digest,
+        "cover_image_url": article.cover_image_url,
         "status": article.status,
         "created_at": article.created_at.isoformat() if article.created_at else None,
     }

@@ -204,7 +204,23 @@ class ArticleService:
         if article.cover_image_url:
             try:
                 cover_url = article.cover_image_url
-                if cover_url.startswith("http"):
+                if cover_url.startswith("/api/media/") and cover_url.endswith("/download"):
+                    # Local media library image — read from disk
+                    from pathlib import Path
+                    from agent_publisher.api.media import UPLOAD_DIR
+
+                    media_id_str = cover_url.split("/api/media/")[1].split("/download")[0]
+                    from agent_publisher.models.media import MediaAsset
+                    media_asset = await self.session.get(MediaAsset, int(media_id_str))
+                    if media_asset:
+                        local_path = UPLOAD_DIR / media_asset.stored_filename
+                        if local_path.is_file():
+                            image_bytes = local_path.read_bytes()
+                        else:
+                            raise FileNotFoundError(f"Media file not found on disk: {local_path}")
+                    else:
+                        raise ValueError(f"Media asset {media_id_str} not found")
+                elif cover_url.startswith("http"):
                     # Download image from URL (e.g. Tencent COS)
                     async with httpx.AsyncClient(timeout=30) as client:
                         img_resp = await client.get(cover_url)
