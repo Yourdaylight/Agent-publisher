@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["agent_publisher"]
+
+[project]
+name = "agent-publisher"
+version = "0.1.0"
+description = "AI-driven multi-account WeChat article publisher"
+readme = "readme.md"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.110.0",
+    "uvicorn[standard]>=0.27.0",
+    "sqlalchemy[asyncio]>=2.0.0",
+    "asyncpg>=0.29.0",
+    "alembic>=1.13.0",
+    "pydantic>=2.6.0",
+    "pydantic-settings>=2.1.0",
+    "typer[all]>=0.9.0",
+    "feedparser>=6.0.0",
+    "httpx>=0.27.0",
+    "apscheduler>=3.10.0",
+    "tencentcloud-sdk-python>=3.0.0",
+    "anthropic>=0.40.0",
+    "openai>=1.12.0",
+    "python-dotenv>=1.0.0",
+    "rich>=13.0.0",
+    "Jinja2>=3.1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-httpx>=0.30.0",
+    "ruff>=0.3.0",
+]
+
+[project.scripts]
+agent-pub = "agent_publisher.cli:app"
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
