@@ -96,7 +96,13 @@ class HunyuanImageService:
         """Submit a text-to-image job. Returns JobId."""
         payload = {"Prompt": prompt, "Resolution": resolution, "Revise": 0, "LogoAdd": 0}
         data = await self._call_api("SubmitTextToImageJob", payload)
-        job_id = data["Response"]["JobId"]
+        response = data.get("Response", {})
+        if "Error" in response:
+            err = response["Error"]
+            raise RuntimeError(
+                f"Hunyuan API error: [{err.get('Code')}] {err.get('Message')}"
+            )
+        job_id = response["JobId"]
         logger.info("Hunyuan image job submitted: %s", job_id)
         return job_id
 
@@ -104,7 +110,13 @@ class HunyuanImageService:
         """Query the result of a text-to-image job."""
         payload = {"JobId": job_id}
         data = await self._call_api("QueryTextToImageJob", payload)
-        return data["Response"]
+        response = data.get("Response", {})
+        if "Error" in response:
+            err = response["Error"]
+            raise RuntimeError(
+                f"Hunyuan API error: [{err.get('Code')}] {err.get('Message')}"
+            )
+        return response
 
     async def generate_image(
         self,
