@@ -2,73 +2,20 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import hashlib
-import hmac
 import json
 import logging
-import time
-from datetime import datetime, timezone
+from functools import partial
 
-import httpx
+from tencentcloud.common import credential
+from tencentcloud.common.profile.client_profile import ClientProfile
+from tencentcloud.common.profile.http_profile import HttpProfile
+from tencentcloud.aiart.v20221229 import aiart_client, models
 
 from agent_publisher.config import settings
 
 logger = logging.getLogger(__name__)
 
-HUNYUAN_HOST = "aiart.tencentcloudapi.com"
-HUNYUAN_SERVICE = "aiart"
-HUNYUAN_VERSION = "2022-12-29"
 HUNYUAN_REGION = "ap-guangzhou"
-
-
-def _sign_tc3(
-    secret_id: str,
-    secret_key: str,
-    action: str,
-    payload: dict,
-    timestamp: int,
-) -> dict[str, str]:
-    """Generate Tencent Cloud TC3-HMAC-SHA256 signature headers."""
-    date = datetime.fromtimestamp(timestamp, tz=timezone.utc).strftime("%Y-%m-%d")
-    http_request_method = "POST"
-    canonical_uri = "/"
-    canonical_querystring = ""
-    ct = "application/json"
-    canonical_headers = f"content-type:{ct}\nhost:{HUNYUAN_HOST}\n"
-    signed_headers = "content-type;host"
-    payload_str = json.dumps(payload)
-    hashed_payload = hashlib.sha256(payload_str.encode()).hexdigest()
-    canonical_request = (
-        f"{http_request_method}\n{canonical_uri}\n{canonical_querystring}\n"
-        f"{canonical_headers}\n{signed_headers}\n{hashed_payload}"
-    )
-    credential_scope = f"{date}/{HUNYUAN_SERVICE}/tc3_request"
-    string_to_sign = (
-        f"TC3-HMAC-SHA256\n{timestamp}\n{credential_scope}\n"
-        + hashlib.sha256(canonical_request.encode()).hexdigest()
-    )
-
-    def _hmac_sha256(key: bytes, msg: str) -> bytes:
-        return hmac.new(key, msg.encode(), hashlib.sha256).digest()
-
-    secret_date = _hmac_sha256(f"TC3{secret_key}".encode(), date)
-    secret_service = _hmac_sha256(secret_date, HUNYUAN_SERVICE)
-    secret_signing = _hmac_sha256(secret_service, "tc3_request")
-    signature = hmac.new(secret_signing, string_to_sign.encode(), hashlib.sha256).hexdigest()
-
-    authorization = (
-        f"TC3-HMAC-SHA256 Credential={secret_id}/{credential_scope}, "
-        f"SignedHeaders={signed_headers}, Signature={signature}"
-    )
-    return {
-        "Authorization": authorization,
-        "Content-Type": ct,
-        "Host": HUNYUAN_HOST,
-        "X-TC-Action": action,
-        "X-TC-Version": HUNYUAN_VERSION,
-        "X-TC-Timestamp": str(timestamp),
-        "X-TC-Region": HUNYUAN_REGION,
-    }
 
 
 class HunyuanImageService:
@@ -79,44 +26,44 @@ class HunyuanImageService:
     ):
         self.secret_id = secret_id or settings.tencent_secret_id
         self.secret_key = secret_key or settings.tencent_secret_key
+        self._client: aiart_client.AiartClient | None = None
 
-    async def _call_api(self, action: str, payload: dict) -> dict:
-        timestamp = int(time.time())
-        headers = _sign_tc3(self.secret_id, self.secret_key, action, payload, timestamp)
-        async with httpx.AsyncClient(timeout=60) as client:
-            resp = await client.post(
-                f"https://{HUNYUAN_HOST}/",
-                json=payload,
-                headers=headers,
-            )
-            resp.raise_for_status()
-        return resp.json()
+    def _get_client(self) -> aiart_client.AiartClient:
+        """Lazily create and cache the Tencent Cloud Aiart client."""
+        if self._client is None:
+            cred = credential.Credential(self.secret_id, self.secret_key)
+            http_profile = HttpProfile()
+            http_profile.endpoint = "aiart.tencentcloudapi.com"
+            client_profile = ClientProfile()
+            client_profile.httpProfile = http_profile
+            self._client = aiart_client.AiartClient(cred, HUNYUAN_REGION, client_profile)
+        return self._client
 
     async def submit_job(self, prompt: str, resolution: str = "1024:1024") -> str:
         """Submit a text-to-image job. Returns JobId."""
-        payload = {"Prompt": prompt, "Resolution": resolution, "Revise": 0, "LogoAdd": 0}
-        data = await self._call_api("SubmitTextToImageJob", payload)
-        response = data.get("Response", {})
-        if "Error" in response:
-            err = response["Error"]
-            raise RuntimeError(
-                f"Hunyuan API error: [{err.get('Code')}] {err.get('Message')}"
-            )
-        job_id = response["JobId"]
+        req = models.SubmitTextToImageJobRequest()
+        params = {"Prompt": prompt, "Resolution": resolution, "Revise": 0, "LogoAdd": 0}
+        req.from_json_string(json.dumps(params))
+
+        loop = asyncio.get_event_loop()
+        resp = await loop.run_in_executor(
+            None, partial(self._get_client().SubmitTextToImageJob, req)
+        )
+        job_id = resp.JobId
         logger.info("Hunyuan image job submitted: %s", job_id)
         return job_id
 
     async def query_result(self, job_id: str) -> dict:
         """Query the result of a text-to-image job."""
-        payload = {"JobId": job_id}
-        data = await self._call_api("QueryTextToImageJob", payload)
-        response = data.get("Response", {})
-        if "Error" in response:
-            err = response["Error"]
-            raise RuntimeError(
-                f"Hunyuan API error: [{err.get('Code')}] {err.get('Message')}"
-            )
-        return response
+        req = models.QueryTextToImageJobRequest()
+        req.from_json_string(json.dumps({"JobId": job_id}))
+
+        loop = asyncio.get_event_loop()
+        resp = await loop.run_in_executor(
+            None, partial(self._get_client().QueryTextToImageJob, req)
+        )
+        # Convert SDK response to dict for easier access
+        return json.loads(resp.to_json_string())
 
     async def generate_image(
         self,
