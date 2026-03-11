@@ -241,6 +241,20 @@ class ArticleService:
                 logger.error("Failed to upload cover image: %s", e)
 
         # Push to draft
+        # If html_content is not already wenyan-rendered and we have raw markdown,
+        # re-render it through wenyan for beautiful formatting
+        publish_html = article.html_content
+        if article.content and 'data-provider="WenYan"' not in (publish_html or ""):
+            logger.info(
+                "Article %d html not wenyan-rendered, re-rendering markdown",
+                article.id,
+            )
+            rendered = self._markdown_to_html(article.content)
+            if 'data-provider="WenYan"' in rendered:
+                publish_html = rendered
+                # Persist the improved html_content
+                article.html_content = rendered
+
         # WeChat limits author to 8 Chinese characters (approx 24 bytes)
         author_name = agent.name
         if len(author_name) > 8:
@@ -249,7 +263,7 @@ class ArticleService:
             "title": article.title,
             "author": author_name,
             "digest": article.digest,
-            "content": article.html_content,
+            "content": publish_html,
             "thumb_media_id": thumb_media_id,
             "content_source_url": "",
         }
@@ -264,8 +278,64 @@ class ArticleService:
         return media_id
 
     @staticmethod
-    def _markdown_to_html(markdown_text: str) -> str:
-        """Basic Markdown to HTML conversion for WeChat."""
+    def _markdown_to_html(
+        markdown_text: str,
+        theme: str = "default",
+    ) -> str:
+        """Convert Markdown to styled HTML using wenyan-md CLI.
+
+        Uses `wenyan render` from @wenyan-md/cli for beautiful WeChat-ready
+        formatting with inline styles.  Falls back to a basic regex converter
+        if wenyan is not installed.
+
+        Args:
+            markdown_text: Raw Markdown content.
+            theme: Wenyan theme id (default, orangeheart, rainbow, etc.).
+        """
+        import shutil
+        import subprocess
+        import tempfile
+
+        wenyan_bin = shutil.which("wenyan")
+        if wenyan_bin:
+            try:
+                # Write markdown to a temp file so wenyan can read it
+                with tempfile.NamedTemporaryFile(
+                    mode="w", suffix=".md", delete=False, encoding="utf-8"
+                ) as tmp:
+                    tmp.write(markdown_text)
+                    tmp_path = tmp.name
+
+                result = subprocess.run(
+                    [wenyan_bin, "render", "-f", tmp_path, "-t", theme],
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+
+                import os
+                os.unlink(tmp_path)
+
+                if result.returncode == 0 and result.stdout.strip():
+                    logger.info("Markdown rendered with wenyan (theme=%s)", theme)
+                    return result.stdout.strip()
+                else:
+                    logger.warning(
+                        "wenyan render failed (rc=%d): %s",
+                        result.returncode,
+                        result.stderr[:200],
+                    )
+            except Exception as e:
+                logger.warning("wenyan render error: %s, falling back to basic converter", e)
+        else:
+            logger.info("wenyan not found, using basic Markdown converter")
+
+        # Fallback: basic regex-based Markdown to HTML
+        return ArticleService._basic_markdown_to_html(markdown_text)
+
+    @staticmethod
+    def _basic_markdown_to_html(markdown_text: str) -> str:
+        """Fallback basic Markdown to HTML conversion."""
         import re
 
         html = markdown_text
