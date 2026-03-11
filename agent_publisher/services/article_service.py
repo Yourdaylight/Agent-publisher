@@ -191,7 +191,12 @@ class ArticleService:
 
         # Refresh token if needed
         now = datetime.now(timezone.utc)
-        if not account.access_token or not account.token_expires_at or account.token_expires_at < now:
+        token_expired = (
+            not account.access_token
+            or not account.token_expires_at
+            or account.token_expires_at.replace(tzinfo=timezone.utc) < now
+        )
+        if token_expired:
             token, expires_at = await WeChatService.get_access_token(
                 account.appid, account.appsecret
             )
