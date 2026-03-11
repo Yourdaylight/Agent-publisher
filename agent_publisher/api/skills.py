@@ -278,3 +278,215 @@ async def skill_whoami(request: Request):
         "email": email,
         "is_admin": settings.is_admin(email),
     }
+
+
+# ---------------------------------------------------------------------------
+# Agent management (scoped by account ownership)
+# ---------------------------------------------------------------------------
+
+class SkillAgentCreate(BaseModel):
+    name: str
+    topic: str
+    description: str = ""
+    account_id: int
+    rss_sources: list[dict] = []
+    llm_provider: str = "openai"
+    llm_model: str = "gpt-4o"
+    llm_api_key: str = ""
+    llm_base_url: str = ""
+    prompt_template: str = ""
+    image_style: str = "现代简约风格，色彩鲜明"
+    schedule_cron: str = "0 8 * * *"
+    is_active: bool = True
+
+
+@router.get("/agents")
+async def skill_list_agents(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """List agents. Normal users see only agents on their own accounts; admins see all."""
+    email = _get_skill_email(request)
+    is_admin = settings.is_admin(email)
+
+    if is_admin:
+        stmt = select(Agent).order_by(Agent.id)
+    else:
+        stmt = (
+            select(Agent)
+            .join(Account, Agent.account_id == Account.id)
+            .where(Account.owner_email == email)
+            .order_by(Agent.id)
+        )
+
+    result = await db.execute(stmt)
+    agents = result.scalars().all()
+    return [
+        {
+            "id": a.id,
+            "name": a.name,
+            "topic": a.topic,
+            "description": a.description,
+            "account_id": a.account_id,
+            "llm_provider": a.llm_provider,
+            "llm_model": a.llm_model,
+            "schedule_cron": a.schedule_cron,
+            "is_active": a.is_active,
+            "created_at": a.created_at.isoformat() if a.created_at else None,
+        }
+        for a in agents
+    ]
+
+
+@router.post("/agents")
+async def skill_create_agent(
+    data: SkillAgentCreate,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Create an agent. The target account must be owned by the caller (or caller is admin)."""
+    email = _get_skill_email(request)
+    is_admin = settings.is_admin(email)
+
+    # Verify account ownership
+    account = await db.get(Account, data.account_id)
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+    if not is_admin and account.owner_email != email:
+        raise HTTPException(status_code=403, detail="You do not own this account")
+
+    agent = Agent(**data.model_dump())
+    db.add(agent)
+    await db.commit()
+    await db.refresh(agent)
+    logger.info("Skill created agent id=%d name=%s for email=%s", agent.id, agent.name, email)
+    return {
+        "id": agent.id,
+        "name": agent.name,
+        "topic": agent.topic,
+        "account_id": agent.account_id,
+        "schedule_cron": agent.schedule_cron,
+        "is_active": agent.is_active,
+    }
+
+
+@router.post("/agents/{agent_id}/generate")
+async def skill_generate(
+    agent_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Trigger article generation for an agent (ownership check)."""
+    from agent_publisher.services.task_service import TaskService
+
+    email = _get_skill_email(request)
+    is_admin = settings.is_admin(email)
+
+    agent = await db.get(Agent, agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    if not is_admin:
+        account = await db.get(Account, agent.account_id)
+        if not account or account.owner_email != email:
+            raise HTTPException(status_code=403, detail="You do not own this agent's account")
+
+    task_svc = TaskService(db)
+    task = await task_svc.run_generate(agent_id)
+    return {"task_id": task.id, "status": task.status}
+
+
+# ---------------------------------------------------------------------------
+# Task status
+# ---------------------------------------------------------------------------
+
+@router.get("/tasks/{task_id}")
+async def skill_get_task(
+    task_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Get task status."""
+    from agent_publisher.models.task import Task
+
+    _get_skill_email(request)  # auth check
+    task = await db.get(Task, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return {
+        "id": task.id,
+        "agent_id": task.agent_id,
+        "status": task.status,
+        "steps": task.steps or [],
+        "result": {k: v for k, v in (task.result or {}).items() if k != "llm_partial"},
+        "started_at": task.started_at.isoformat() if task.started_at else None,
+        "finished_at": task.finished_at.isoformat() if task.finished_at else None,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Article detail & single publish
+# ---------------------------------------------------------------------------
+
+@router.get("/articles/{article_id}")
+async def skill_get_article(
+    article_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Get a single article detail."""
+    email = _get_skill_email(request)
+    is_admin = settings.is_admin(email)
+
+    article = await db.get(Article, article_id)
+    if not article:
+        raise HTTPException(status_code=404, detail="Article not found")
+
+    # Ownership check for non-admin
+    if not is_admin:
+        agent = await db.get(Agent, article.agent_id)
+        if agent:
+            account = await db.get(Account, agent.account_id)
+            if not account or account.owner_email != email:
+                raise HTTPException(status_code=403, detail="Access denied")
+
+    return {
+        "id": article.id,
+        "agent_id": article.agent_id,
+        "title": article.title,
+        "digest": article.digest,
+        "content_html": article.content_html,
+        "thumb_media_id": article.thumb_media_id,
+        "status": article.status,
+        "created_at": article.created_at.isoformat() if article.created_at else None,
+    }
+
+
+@router.post("/articles/{article_id}/publish")
+async def skill_publish_article(
+    article_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Publish a single article to WeChat draft box."""
+    email = _get_skill_email(request)
+    is_admin = settings.is_admin(email)
+
+    article = await db.get(Article, article_id)
+    if not article:
+        raise HTTPException(status_code=404, detail="Article not found")
+
+    # Ownership check for non-admin
+    if not is_admin:
+        agent = await db.get(Agent, article.agent_id)
+        if agent:
+            account = await db.get(Account, agent.account_id)
+            if not account or account.owner_email != email:
+                raise HTTPException(status_code=403, detail="Access denied")
+
+    article_svc = ArticleService(db)
+    try:
+        media_id = await article_svc.publish_article(article_id)
+        return {"ok": True, "media_id": media_id}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
