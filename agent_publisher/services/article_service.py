@@ -63,7 +63,14 @@ class ArticleService:
             )
 
         # 2. Generate article via LLM (streaming when chunk_callback is provided)
-        api_key = agent.llm_api_key or ""
+        # Fallback to global defaults when agent-level config is empty
+        from agent_publisher.config import settings
+
+        provider = agent.llm_provider or settings.default_llm_provider
+        model = agent.llm_model or settings.default_llm_model
+        api_key = agent.llm_api_key or settings.default_llm_api_key
+        base_url = agent.llm_base_url or settings.default_llm_base_url
+
         messages = self.llm.build_article_messages(
             topic=agent.topic,
             news_list=news_text,
@@ -75,22 +82,22 @@ class ArticleService:
             # Use streaming mode
             raw_response = ""
             stream = self.llm.generate_stream(
-                provider=agent.llm_provider,
-                model=agent.llm_model,
+                provider=provider,
+                model=model,
                 api_key=api_key,
                 messages=messages,
-                base_url=agent.llm_base_url or "",
+                base_url=base_url,
             )
             async for chunk in stream:
                 raw_response += chunk
                 await chunk_callback(chunk)
         else:
             raw_response = await self.llm.generate(
-                provider=agent.llm_provider,
-                model=agent.llm_model,
+                provider=provider,
+                model=model,
                 api_key=api_key,
                 messages=messages,
-                base_url=agent.llm_base_url or "",
+                base_url=base_url,
             )
 
         parsed = self.llm.parse_article_response(raw_response)
@@ -102,8 +109,8 @@ class ArticleService:
                 {
                     "title": parsed.get("title", ""),
                     "content_length": len(parsed.get("content", "")),
-                    "provider": agent.llm_provider,
-                    "model": agent.llm_model,
+                    "provider": provider,
+                    "model": model,
                 },
             )
 
