@@ -84,6 +84,9 @@ class HunyuanImageService:
 
             if job_status == "5":  # completed
                 result_image = result.get("ResultImage", "")
+                # ResultImage may be a list of URLs; extract the first one
+                if isinstance(result_image, list):
+                    result_image = result_image[0] if result_image else ""
                 if result_image:
                     logger.info("Hunyuan image generated successfully for job %s", job_id)
                     return result_image
