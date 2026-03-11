@@ -4,6 +4,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 
+import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -202,7 +203,16 @@ class ArticleService:
         thumb_media_id = ""
         if article.cover_image_url:
             try:
-                image_bytes = HunyuanImageService.base64_to_bytes(article.cover_image_url)
+                cover_url = article.cover_image_url
+                if cover_url.startswith("http"):
+                    # Download image from URL (e.g. Tencent COS)
+                    async with httpx.AsyncClient(timeout=30) as client:
+                        img_resp = await client.get(cover_url)
+                        img_resp.raise_for_status()
+                        image_bytes = img_resp.content
+                else:
+                    # Legacy: base64-encoded image
+                    image_bytes = HunyuanImageService.base64_to_bytes(cover_url)
                 thumb_media_id = await WeChatService.upload_thumb(
                     account.access_token, image_bytes
                 )
