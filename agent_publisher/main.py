@@ -14,6 +14,7 @@ from agent_publisher.api.accounts import router as accounts_router
 from agent_publisher.api.agents import router as agents_router
 from agent_publisher.api.articles import router as articles_router
 from agent_publisher.api.auth import router as auth_router, verify_token
+from agent_publisher.api.media import router as media_router
 from agent_publisher.api.settings import router as settings_router
 from agent_publisher.api.skills import router as skills_router, verify_skill_token
 from agent_publisher.api.tasks import router as tasks_router
@@ -22,6 +23,7 @@ from agent_publisher.config import settings
 from agent_publisher.models.account import Account
 from agent_publisher.models.agent import Agent
 from agent_publisher.models.article import Article
+from agent_publisher.models.media import MediaAsset
 from agent_publisher.models.task import Task
 from agent_publisher.database import engine
 from agent_publisher.models.base import Base
@@ -68,6 +70,10 @@ async def auth_middleware(request: Request, call_next) -> Response:
     if not path.startswith("/api/") or any(path.startswith(p) for p in PUBLIC_PREFIXES):
         return await call_next(request)
 
+    # Allow media download without auth (public access for images)
+    if path.startswith("/api/media/") and path.endswith("/download"):
+        return await call_next(request)
+
     # Require Bearer token for all other API routes
     auth_header = request.headers.get("authorization", "")
     if not auth_header.startswith("Bearer "):
@@ -94,6 +100,7 @@ app.include_router(accounts_router)
 app.include_router(agents_router)
 app.include_router(articles_router)
 app.include_router(tasks_router)
+app.include_router(media_router)
 app.include_router(skills_router)
 
 
@@ -103,7 +110,8 @@ async def stats(db: AsyncSession = Depends(get_db)):
     agents = (await db.execute(select(func.count(Agent.id)))).scalar() or 0
     articles = (await db.execute(select(func.count(Article.id)))).scalar() or 0
     tasks = (await db.execute(select(func.count(Task.id)))).scalar() or 0
-    return {"accounts": accounts, "agents": agents, "articles": articles, "tasks": tasks}
+    media = (await db.execute(select(func.count(MediaAsset.id)))).scalar() or 0
+    return {"accounts": accounts, "agents": agents, "articles": articles, "tasks": tasks, "media": media}
 
 
 # Serve static files (Vue build output) if the directory exists

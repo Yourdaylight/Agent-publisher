@@ -18,6 +18,7 @@ from agent_publisher.config import settings
 from agent_publisher.models.account import Account
 from agent_publisher.models.article import Article
 from agent_publisher.models.agent import Agent
+from agent_publisher.models.media import MediaAsset
 from agent_publisher.services.article_service import ArticleService
 
 logger = logging.getLogger(__name__)
@@ -490,3 +491,170 @@ async def skill_publish_article(
         return {"ok": True, "media_id": media_id}
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# Media Asset Library (Skills)
+# ---------------------------------------------------------------------------
+
+@router.get("/media")
+async def skill_list_media(
+    request: Request,
+    tag: str = "",
+    page: int = 1,
+    page_size: int = 50,
+    db: AsyncSession = Depends(get_db),
+):
+    """List media assets. Normal users see their own; admins see all."""
+    email = _get_skill_email(request)
+    is_admin = settings.is_admin(email)
+
+    stmt = select(MediaAsset).order_by(MediaAsset.id.desc())
+    if not is_admin:
+        stmt = stmt.where(MediaAsset.owner_email == email)
+
+    if tag:
+        stmt = stmt.where(MediaAsset.tags.contains(tag))
+
+    stmt = stmt.offset((page - 1) * page_size).limit(page_size)
+    result = await db.execute(stmt)
+    assets = result.scalars().all()
+
+    return [
+        {
+            "id": a.id,
+            "filename": a.filename,
+            "content_type": a.content_type,
+            "file_size": a.file_size,
+            "tags": a.tags or [],
+            "description": a.description,
+            "owner_email": a.owner_email,
+            "url": f"/api/media/{a.id}/download",
+            "created_at": a.created_at.isoformat() if a.created_at else None,
+        }
+        for a in assets
+    ]
+
+
+@router.post("/media")
+async def skill_upload_media(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Upload a media asset via multipart form or base64 JSON.
+
+    Multipart: POST with file field.
+    JSON: POST with {"filename": "...", "data_base64": "...", "tags": [...], "description": "..."}.
+    """
+    import base64
+    import uuid
+    from pathlib import Path
+    from agent_publisher.api.media import UPLOAD_DIR, ALLOWED_TYPES, MAX_FILE_SIZE
+
+    email = _get_skill_email(request)
+    content_type_header = request.headers.get("content-type", "")
+
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+    if "multipart/form-data" in content_type_header:
+        # Handle multipart upload
+        from fastapi import UploadFile
+        form = await request.form()
+        file = form.get("file")
+        if not file:
+            raise HTTPException(status_code=400, detail="No file field in form data")
+
+        file_content_type = file.content_type or "application/octet-stream"
+        if file_content_type not in ALLOWED_TYPES:
+            raise HTTPException(status_code=400, detail=f"Unsupported type: {file_content_type}")
+
+        content = await file.read()
+        original_filename = file.filename or "unnamed"
+        tags_str = form.get("tags", "")
+        description = form.get("description", "")
+        tag_list = [t.strip() for t in str(tags_str).split(",") if t.strip()] if tags_str else []
+    else:
+        # Handle JSON upload (base64-encoded)
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(status_code=400, detail="Expected multipart/form-data or JSON body")
+
+        data_b64 = body.get("data_base64", "")
+        if not data_b64:
+            raise HTTPException(status_code=400, detail="Missing data_base64 field")
+
+        try:
+            content = base64.b64decode(data_b64)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid base64 data")
+
+        original_filename = body.get("filename", "unnamed.png")
+        file_content_type = body.get("content_type", "image/png")
+        tag_list = body.get("tags", [])
+        description = body.get("description", "")
+
+    file_size = len(content)
+    if file_size > MAX_FILE_SIZE:
+        raise HTTPException(status_code=400, detail=f"File too large ({file_size} bytes)")
+    if file_size == 0:
+        raise HTTPException(status_code=400, detail="Empty file")
+
+    ext = Path(original_filename).suffix or ".png"
+    stored_filename = f"{uuid.uuid4().hex}{ext}"
+    (UPLOAD_DIR / stored_filename).write_bytes(content)
+
+    asset = MediaAsset(
+        filename=original_filename,
+        stored_filename=stored_filename,
+        content_type=file_content_type if "multipart" not in content_type_header else file_content_type,
+        file_size=file_size,
+        tags=tag_list,
+        description=description,
+        owner_email=email,
+    )
+    db.add(asset)
+    await db.commit()
+    await db.refresh(asset)
+
+    logger.info("Skill media uploaded: id=%d filename=%s email=%s", asset.id, original_filename, email)
+    return {
+        "id": asset.id,
+        "filename": asset.filename,
+        "content_type": asset.content_type,
+        "file_size": asset.file_size,
+        "tags": asset.tags,
+        "description": asset.description,
+        "url": f"/api/media/{asset.id}/download",
+        "created_at": asset.created_at.isoformat() if asset.created_at else None,
+    }
+
+
+@router.delete("/media/{media_id}")
+async def skill_delete_media(
+    media_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete a media asset (own assets or admin)."""
+    from pathlib import Path
+    from agent_publisher.api.media import UPLOAD_DIR
+
+    email = _get_skill_email(request)
+    is_admin = settings.is_admin(email)
+
+    asset = await db.get(MediaAsset, media_id)
+    if not asset:
+        raise HTTPException(status_code=404, detail="Media asset not found")
+
+    if not is_admin and asset.owner_email != email:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    file_path = UPLOAD_DIR / asset.stored_filename
+    if file_path.is_file():
+        file_path.unlink()
+
+    await db.delete(asset)
+    await db.commit()
+    logger.info("Skill media deleted: id=%d email=%s", media_id, email)
+    return {"ok": True, "deleted_id": media_id}
