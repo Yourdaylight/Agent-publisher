@@ -15,6 +15,7 @@ class Account(Base):
     name: Mapped[str] = mapped_column(String(100))
     appid: Mapped[str] = mapped_column(String(100), unique=True)
     appsecret: Mapped[str] = mapped_column(String(200))
+    owner_email: Mapped[str] = mapped_column(String(200), default="")
     ip_whitelist: Mapped[str] = mapped_column(String(500), default="")
     access_token: Mapped[str] = mapped_column(String(600), default="")
     token_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

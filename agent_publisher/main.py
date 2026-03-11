@@ -15,6 +15,7 @@ from agent_publisher.api.agents import router as agents_router
 from agent_publisher.api.articles import router as articles_router
 from agent_publisher.api.auth import router as auth_router, verify_token
 from agent_publisher.api.settings import router as settings_router
+from agent_publisher.api.skills import router as skills_router, verify_skill_token
 from agent_publisher.api.tasks import router as tasks_router
 from agent_publisher.api.deps import get_db
 from agent_publisher.config import settings
@@ -55,7 +56,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Agent Publisher", version="0.1.0", lifespan=lifespan)
 
 # Public routes (no auth required)
-PUBLIC_PREFIXES = ("/api/auth/", "/assets/", "/favicon.ico")
+PUBLIC_PREFIXES = ("/api/auth/", "/api/skills/auth", "/assets/", "/favicon.ico")
 
 
 @app.middleware("http")
@@ -73,6 +74,14 @@ async def auth_middleware(request: Request, call_next) -> Response:
         return JSONResponse(status_code=401, content={"detail": "Authentication required"})
 
     token = auth_header[7:]
+
+    # Skill endpoints accept skill tokens (email-based)
+    if path.startswith("/api/skills/"):
+        if not verify_skill_token(token):
+            return JSONResponse(status_code=401, content={"detail": "Invalid or expired skill token"})
+        return await call_next(request)
+
+    # All other API routes use the admin access_key token
     if not verify_token(token):
         return JSONResponse(status_code=401, content={"detail": "Invalid or expired token"})
 
@@ -85,6 +94,7 @@ app.include_router(accounts_router)
 app.include_router(agents_router)
 app.include_router(articles_router)
 app.include_router(tasks_router)
+app.include_router(skills_router)
 
 
 @app.get("/api/stats")

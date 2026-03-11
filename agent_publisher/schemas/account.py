@@ -23,6 +23,7 @@ class AccountOut(BaseModel):
     id: int
     name: str
     appid: str
+    owner_email: str
     ip_whitelist: str
     created_at: datetime
 

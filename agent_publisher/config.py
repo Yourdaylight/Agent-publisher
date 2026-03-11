@@ -25,6 +25,10 @@ class Settings(BaseSettings):
     # JWT secret (derived from access_key by default)
     jwt_secret: str = ""
 
+    # Skills auth: email whitelist (comma-separated) and admin emails (comma-separated)
+    email_whitelist: str = ""
+    admin_emails: str = ""
+
     # Server
     host: str = "0.0.0.0"
     port: int = 9099
@@ -32,6 +36,27 @@ class Settings(BaseSettings):
 
     def get_jwt_secret(self) -> str:
         return self.jwt_secret or f"jwt-{self.access_key}-secret"
+
+    def get_email_whitelist(self) -> set[str]:
+        """Return the set of whitelisted emails (lowered)."""
+        if not self.email_whitelist.strip():
+            return set()
+        return {e.strip().lower() for e in self.email_whitelist.split(",") if e.strip()}
+
+    def get_admin_emails(self) -> set[str]:
+        """Return the set of admin emails (lowered)."""
+        if not self.admin_emails.strip():
+            return set()
+        return {e.strip().lower() for e in self.admin_emails.split(",") if e.strip()}
+
+    def is_email_allowed(self, email: str) -> bool:
+        """Check if an email is in the whitelist (admins are always allowed)."""
+        email_lower = email.strip().lower()
+        return email_lower in self.get_email_whitelist() or email_lower in self.get_admin_emails()
+
+    def is_admin(self, email: str) -> bool:
+        """Check if an email is an admin."""
+        return email.strip().lower() in self.get_admin_emails()
 
 
 settings = Settings()
