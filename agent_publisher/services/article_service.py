@@ -119,10 +119,13 @@ class ArticleService:
         image_prompt = ""
         image_status = "skipped"
         try:
+            # Use agent topic/style instead of article title to avoid
+            # triggering Tencent Cloud content-safety filters on news headlines.
+            style_desc = agent.image_style or "现代简约风格"
+            topic_desc = agent.topic or "科技资讯"
             image_prompt = (
-                f"为公众号文章生成封面配图。主题：{parsed['title']}。"
-                f"风格：{agent.image_style or '现代简约风格'}。"
-                "要求：无文字，色彩鲜明，适合作为公众号封面。"
+                f"一张精美的{style_desc}插画，主题是{topic_desc}，"
+                "适合作为公众号文章封面，无任何文字，色彩鲜明，高质量数字艺术。"
             )
             cover_image_url = await self.image.generate_image(image_prompt, "1024:1024")
             image_status = "success"
