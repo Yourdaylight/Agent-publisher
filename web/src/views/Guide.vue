@@ -49,12 +49,12 @@
     <!-- Step 2: 获取开发者密钥 -->
     <t-card v-if="currentStep === 1" title="第 2 步：获取开发者密钥" :bordered="true">
       <div style="line-height: 2">
-        <p><strong>1.</strong> 登录 <t-link theme="primary" href="https://mp.weixin.qq.com" target="_blank">微信公众平台</t-link></p>
-        <p><strong>2.</strong> 左侧菜单进入「设置与开发」->「基本配置」</p>
-        <p><strong>3.</strong> 在「公众号开发信息」区域：</p>
+        <p><strong>1.</strong> 登录 <t-link theme="primary" href="https://developers.weixin.qq.com/console/product/mp" target="_blank">微信开发者平台</t-link></p>
+        <p><strong>2.</strong> 左侧菜单选择「我的业务与服务」→「公众号」</p>
+        <p><strong>3.</strong> 在「基础信息」页面找到开发密钥区域：</p>
         <ul>
-          <li>复制 <strong>AppID（应用ID）</strong></li>
-          <li>点击「重置」获取 <strong>AppSecret（应用密钥）</strong></li>
+          <li>复制 <strong>AppID</strong></li>
+          <li>点击 <strong>AppSecret</strong> 旁的「重置」获取密钥</li>
         </ul>
         <t-alert theme="warning" style="margin: 12px 0">
           <template #message>
@@ -88,11 +88,10 @@
       <div style="line-height: 2">
         <p>微信公众号 API 要求将服务器 IP 加入白名单才能调用。</p>
         <p><strong>1.</strong> 在「基本配置」页面找到「IP白名单」，点击「查看」或「修改」</p>
-        <p><strong>2.</strong> 查询你的服务器公网 IP：</p>
+        <p><strong>2.</strong> 将以下服务器公网 IP 添加到白名单中：</p>
         <t-card :bordered="true" style="background: var(--td-bg-color-container-hover); margin: 8px 0 16px">
-          <code style="font-size: 14px">curl ifconfig.me</code>
+          <code style="font-size: 14px; user-select: all">43.132.178.232</code>
         </t-card>
-        <p><strong>3.</strong> 将获取到的 IP 地址添加到白名单中</p>
         <div style="margin-top: 12px; border: 1px solid var(--td-border-level-2-color); border-radius: 8px; overflow: hidden">
           <img :src="'/guide-images/step3-appid-secret.png'" alt="IP白名单位置" style="width: 100%; display: block" />
         </div>
