@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     email_whitelist: str = ""
     admin_emails: str = ""
 
+    # Runtime-added admins (not persisted to .env, managed via API)
+    _runtime_admins: set[str] = set()
+
     # Server
     host: str = "0.0.0.0"
     port: int = 9099
@@ -44,10 +47,12 @@ class Settings(BaseSettings):
         return {e.strip().lower() for e in self.email_whitelist.split(",") if e.strip()}
 
     def get_admin_emails(self) -> set[str]:
-        """Return the set of admin emails (lowered)."""
-        if not self.admin_emails.strip():
-            return set()
-        return {e.strip().lower() for e in self.admin_emails.split(",") if e.strip()}
+        """Return the set of admin emails (lowered), including runtime-added ones."""
+        admins: set[str] = set()
+        if self.admin_emails.strip():
+            admins = {e.strip().lower() for e in self.admin_emails.split(",") if e.strip()}
+        admins |= self._runtime_admins
+        return admins
 
     def is_email_allowed(self, email: str) -> bool:
         """Check if an email is in the whitelist (admins are always allowed)."""
@@ -57,6 +62,30 @@ class Settings(BaseSettings):
     def is_admin(self, email: str) -> bool:
         """Check if an email is an admin."""
         return email.strip().lower() in self.get_admin_emails()
+
+    def add_admin(self, email: str) -> None:
+        """Add an admin at runtime (not persisted to .env)."""
+        email_lower = email.strip().lower()
+        self._runtime_admins.add(email_lower)
+
+    def remove_admin(self, email: str) -> bool:
+        """Remove a runtime-added admin. Returns True if removed, False if not found."""
+        email_lower = email.strip().lower()
+        if email_lower in self._runtime_admins:
+            self._runtime_admins.discard(email_lower)
+            return True
+        return False
+
+    def list_admins(self) -> dict:
+        """List all admins categorized by source."""
+        env_admins: set[str] = set()
+        if self.admin_emails.strip():
+            env_admins = {e.strip().lower() for e in self.admin_emails.split(",") if e.strip()}
+        return {
+            "env_admins": sorted(env_admins),
+            "runtime_admins": sorted(self._runtime_admins),
+            "all_admins": sorted(self.get_admin_emails()),
+        }
 
 
 settings = Settings()

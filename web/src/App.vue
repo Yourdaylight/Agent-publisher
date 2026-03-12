@@ -29,6 +29,10 @@
           <template #icon><t-icon name="file" /></template>
           文章管理
         </t-menu-item>
+        <t-menu-item value="/publishes">
+          <template #icon><t-icon name="send" /></template>
+          发布管理
+        </t-menu-item>
         <t-menu-item value="/tasks">
           <template #icon><t-icon name="task" /></template>
           任务管理

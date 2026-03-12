@@ -23,11 +23,27 @@ class Article(Base):
     status: Mapped[str] = mapped_column(String(20), default="draft")
     wechat_media_id: Mapped[str] = mapped_column(String(200), default="")
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Variant relationship fields
+    source_article_id: Mapped[int | None] = mapped_column(
+        ForeignKey("articles.id"), nullable=True, default=None
+    )
+    variant_style: Mapped[str | None] = mapped_column(String(50), nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
 
     agent: Mapped["Agent"] = relationship(back_populates="articles")  # noqa: F821
+    publish_records: Mapped[list["PublishRecord"]] = relationship(  # noqa: F821
+        back_populates="article", order_by="PublishRecord.id.desc()"
+    )
+    # Self-referencing relationships for variant tracking
+    source_article: Mapped["Article | None"] = relationship(
+        back_populates="variants",
+        remote_side="Article.id",
+    )
+    variants: Mapped[list["Article"]] = relationship(
+        back_populates="source_article",
+    )
 
     def __repr__(self) -> str:
         return f"<Article id={self.id} title={self.title!r} status={self.status}>"

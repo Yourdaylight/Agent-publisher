@@ -243,7 +243,7 @@ async def skill_batch_publish(
 
     for article_id in data.article_ids:
         try:
-            media_id = await article_svc.publish_article(article_id)
+            media_id = await article_svc.publish_article(article_id, operator=email)
             results.append(BatchPublishResult(article_id=article_id, success=True, media_id=media_id))
         except Exception as e:
             logger.error("Batch publish failed for article %d: %s", article_id, e)
@@ -279,6 +279,20 @@ async def skill_list_articles(
 
     result = await db.execute(stmt)
     articles = result.scalars().all()
+
+    # Batch fetch variant counts
+    article_ids = [a.id for a in articles]
+    variant_counts: dict[int, int] = {}
+    if article_ids:
+        from sqlalchemy import func as sqla_func
+        variant_stmt = (
+            select(Article.source_article_id, sqla_func.count(Article.id))
+            .where(Article.source_article_id.in_(article_ids))
+            .group_by(Article.source_article_id)
+        )
+        variant_result = await db.execute(variant_stmt)
+        variant_counts = dict(variant_result.all())
+
     return [
         {
             "id": a.id,
@@ -287,6 +301,9 @@ async def skill_list_articles(
             "digest": a.digest,
             "status": a.status,
             "created_at": a.created_at.isoformat() if a.created_at else None,
+            "source_article_id": a.source_article_id,
+            "variant_style": a.variant_style,
+            "variant_count": variant_counts.get(a.id, 0),
         }
         for a in articles
     ]
@@ -479,6 +496,8 @@ async def skill_get_article(
         "cover_image_url": article.cover_image_url,
         "wechat_media_id": article.wechat_media_id,
         "status": article.status,
+        "source_article_id": article.source_article_id,
+        "variant_style": article.variant_style,
         "created_at": article.created_at.isoformat() if article.created_at else None,
     }
 
@@ -579,7 +598,7 @@ async def skill_publish_article(
 
     article_svc = ArticleService(db)
     try:
-        media_id = await article_svc.publish_article(article_id)
+        media_id = await article_svc.publish_article(article_id, operator=email)
         return {"ok": True, "media_id": media_id}
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -680,7 +699,7 @@ async def skill_sync_article(
 
     article_svc = ArticleService(db)
     try:
-        status = await article_svc.sync_article_to_draft(article_id)
+        status = await article_svc.sync_article_to_draft(article_id, operator=email)
         return {"ok": True, "sync_status": status}
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -1013,3 +1032,284 @@ async def skill_get_article_stats(
     if warnings:
         result["warnings"] = warnings
     return result
+
+
+# ---------------------------------------------------------------------------
+# Style Preset Management (Skills)
+# ---------------------------------------------------------------------------
+
+@router.get("/style-presets")
+async def skill_list_style_presets(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """List all style presets (built-in + custom)."""
+    from agent_publisher.services.style_preset_service import StylePresetService
+
+    _get_skill_email(request)  # auth check
+    svc = StylePresetService(db)
+    presets = await svc.list_presets()
+    return [
+        {
+            "id": p.id,
+            "style_id": p.style_id,
+            "name": p.name,
+            "description": p.description,
+            "prompt": p.prompt,
+            "is_builtin": p.is_builtin,
+            "created_at": p.created_at.isoformat() if p.created_at else None,
+        }
+        for p in presets
+    ]
+
+
+@router.post("/style-presets")
+async def skill_create_style_preset(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Create a custom style preset."""
+    from agent_publisher.services.style_preset_service import StylePresetService
+
+    _get_skill_email(request)  # auth check
+    body = await request.json()
+    style_id = body.get("style_id")
+    name = body.get("name")
+    if not style_id or not name:
+        raise HTTPException(status_code=400, detail="style_id and name are required")
+
+    svc = StylePresetService(db)
+    try:
+        preset = await svc.create_preset(
+            style_id=style_id,
+            name=name,
+            description=body.get("description", ""),
+            prompt=body.get("prompt", ""),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+    return {
+        "id": preset.id,
+        "style_id": preset.style_id,
+        "name": preset.name,
+        "description": preset.description,
+        "prompt": preset.prompt,
+        "is_builtin": preset.is_builtin,
+        "created_at": preset.created_at.isoformat() if preset.created_at else None,
+    }
+
+
+@router.put("/style-presets/{style_id}")
+async def skill_update_style_preset(
+    style_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Edit a style preset (builtin and custom are both editable)."""
+    from agent_publisher.services.style_preset_service import StylePresetService
+
+    _get_skill_email(request)  # auth check
+    body = await request.json()
+    updates = {k: v for k, v in body.items() if k in ("name", "description", "prompt") and v is not None}
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields to update")
+
+    svc = StylePresetService(db)
+    try:
+        preset = await svc.update_preset(style_id, updates)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+    return {
+        "id": preset.id,
+        "style_id": preset.style_id,
+        "name": preset.name,
+        "description": preset.description,
+        "prompt": preset.prompt,
+        "is_builtin": preset.is_builtin,
+        "created_at": preset.created_at.isoformat() if preset.created_at else None,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Admin Management (Skills)
+# ---------------------------------------------------------------------------
+
+class AdminEmailRequest(BaseModel):
+    email: str
+
+
+@router.get("/admins")
+async def skill_list_admins(request: Request):
+    """List all admin emails (admin only)."""
+    email = _get_skill_email(request)
+    _require_admin(email)
+    return settings.list_admins()
+
+
+@router.post("/admins")
+async def skill_add_admin(data: AdminEmailRequest, request: Request):
+    """Add an admin at runtime (admin only).
+
+    The new admin is also added to the email whitelist so they can authenticate.
+    Runtime admins are not persisted to .env and will be lost on restart.
+    """
+    email = _get_skill_email(request)
+    _require_admin(email)
+
+    target_email = data.email.strip().lower()
+    if not target_email or "@" not in target_email:
+        raise HTTPException(status_code=400, detail="Invalid email address")
+
+    if settings.is_admin(target_email):
+        return {"ok": True, "message": f"{target_email} is already an admin", "admins": settings.list_admins()}
+
+    settings.add_admin(target_email)
+    logger.info("Admin %s added admin %s at runtime", email, target_email)
+    return {"ok": True, "message": f"{target_email} added as admin", "admins": settings.list_admins()}
+
+
+@router.delete("/admins")
+async def skill_remove_admin(data: AdminEmailRequest, request: Request):
+    """Remove a runtime-added admin (admin only).
+
+    Cannot remove admins configured via ADMIN_EMAILS environment variable.
+    """
+    email = _get_skill_email(request)
+    _require_admin(email)
+
+    target_email = data.email.strip().lower()
+
+    # Prevent removing env-configured admins
+    env_admins = set()
+    if settings.admin_emails.strip():
+        env_admins = {e.strip().lower() for e in settings.admin_emails.split(",") if e.strip()}
+    if target_email in env_admins:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{target_email} is configured in ADMIN_EMAILS env and cannot be removed at runtime"
+        )
+
+    removed = settings.remove_admin(target_email)
+    if not removed:
+        raise HTTPException(status_code=404, detail=f"{target_email} is not a runtime admin")
+
+    logger.info("Admin %s removed admin %s at runtime", email, target_email)
+    return {"ok": True, "message": f"{target_email} removed from admins", "admins": settings.list_admins()}
+
+
+# ---------------------------------------------------------------------------
+# Variant Generation (Skills)
+# ---------------------------------------------------------------------------
+
+class SkillVariantGenerateRequest(BaseModel):
+    agent_ids: list[int]
+    style_ids: list[str]
+
+
+@router.post("/articles/{article_id}/variants")
+async def skill_generate_variants(
+    article_id: int,
+    data: SkillVariantGenerateRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Initiate batch variant generation for an article (with ownership check)."""
+    from agent_publisher.services.task_service import TaskService
+
+    email = _get_skill_email(request)
+    is_admin = settings.is_admin(email)
+
+    article = await db.get(Article, article_id)
+    if not article:
+        raise HTTPException(status_code=404, detail="Article not found")
+
+    # Ownership check for source article
+    if not is_admin:
+        agent = await db.get(Agent, article.agent_id)
+        if agent:
+            account = await db.get(Account, agent.account_id)
+            if not account or account.owner_email != email:
+                raise HTTPException(status_code=403, detail="Access denied")
+
+    if not data.style_ids:
+        raise HTTPException(status_code=400, detail="At least one style_id is required")
+    if not data.agent_ids:
+        raise HTTPException(status_code=400, detail="At least one agent_id is required")
+
+    # Verify the caller owns target agents (or is admin)
+    if not is_admin:
+        for aid in data.agent_ids:
+            target_agent = await db.get(Agent, aid)
+            if not target_agent:
+                raise HTTPException(status_code=404, detail=f"Agent {aid} not found")
+            target_account = await db.get(Account, target_agent.account_id)
+            if not target_account or target_account.owner_email != email:
+                raise HTTPException(status_code=403, detail=f"No write access to agent {aid}")
+
+    task_svc = TaskService(db)
+    try:
+        task = await task_svc.run_batch_variants(
+            source_article_id=article_id,
+            agent_ids=data.agent_ids,
+            style_ids=data.style_ids,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return {"ok": True, "batch_task_id": task.id, "total": len(data.agent_ids)}
+
+
+@router.get("/articles/{article_id}/variants")
+async def skill_list_article_variants(
+    article_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """List all variant articles derived from the given source article."""
+    email = _get_skill_email(request)
+    is_admin = settings.is_admin(email)
+
+    article = await db.get(Article, article_id)
+    if not article:
+        raise HTTPException(status_code=404, detail="Article not found")
+
+    # Ownership check
+    if not is_admin:
+        agent = await db.get(Agent, article.agent_id)
+        if agent:
+            account = await db.get(Account, agent.account_id)
+            if not account or account.owner_email != email:
+                raise HTTPException(status_code=403, detail="Access denied")
+
+    stmt = (
+        select(Article)
+        .where(Article.source_article_id == article_id)
+        .order_by(Article.id.desc())
+    )
+    result = await db.execute(stmt)
+    variants = result.scalars().all()
+
+    # Batch-load agent names
+    agent_ids = list({v.agent_id for v in variants})
+    agent_names: dict[int, str] = {}
+    if agent_ids:
+        agent_result = await db.execute(
+            select(Agent.id, Agent.name).where(Agent.id.in_(agent_ids))
+        )
+        agent_names = dict(agent_result.all())
+
+    return [
+        {
+            "id": v.id,
+            "agent_id": v.agent_id,
+            "agent_name": agent_names.get(v.agent_id, ""),
+            "title": v.title,
+            "digest": v.digest,
+            "status": v.status,
+            "variant_style": v.variant_style,
+            "created_at": v.created_at.isoformat() if v.created_at else None,
+        }
+        for v in variants
+    ]

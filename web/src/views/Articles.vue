@@ -48,17 +48,215 @@
           {{ row.status === 'published' ? '已发布' : '草稿' }}
         </t-tag>
       </template>
+      <template #publish_count="{ row }">
+        <t-link v-if="row.publish_count > 0" theme="primary" @click="openPublishRecords(row)">
+          {{ row.publish_count }}
+        </t-link>
+        <span v-else style="color: var(--td-text-color-placeholder)">0</span>
+      </template>
+      <template #title="{ row }">
+        <div style="display: flex; align-items: center; gap: 6px">
+          <span>{{ row.title }}</span>
+          <t-tag v-if="row.variant_style" size="small" theme="primary" variant="light">
+            🏷 {{ getStyleName(row.variant_style) }}
+          </t-tag>
+        </div>
+      </template>
+      <template #variant_count="{ row }">
+        <t-link v-if="row.variant_count > 0" theme="primary" @click="openVariants(row)">
+          {{ row.variant_count }}
+        </t-link>
+        <span v-else style="color: var(--td-text-color-placeholder)">0</span>
+      </template>
       <template #op="{ row }">
         <t-space>
           <t-link theme="primary" @click="openPreview(row)">预览</t-link>
           <t-link theme="primary" @click="openEditor(row)">编辑</t-link>
+          <t-link theme="primary" @click="openVariantDialog(row)">生成变体</t-link>
           <t-link v-if="row.status !== 'published'" theme="primary" @click="onPublish(row)">发布</t-link>
           <t-link v-if="row.status === 'published'" theme="primary" @click="onSync(row)">
             同步草稿
           </t-link>
+          <t-link theme="primary" @click="openPublishRecords(row)">发布记录</t-link>
         </t-space>
       </template>
     </t-table>
+
+    <!-- Variant Generation Dialog -->
+    <t-dialog
+      v-model:visible="variantDialogVisible"
+      header="生成文章变体"
+      :width="720"
+      :footer="false"
+    >
+      <div v-if="variantSourceArticle">
+        <t-card :bordered="true" style="margin-bottom: 16px">
+          <div style="font-size: 13px; color: var(--td-text-color-secondary); margin-bottom: 4px">源文章</div>
+          <div style="font-weight: bold; font-size: 15px">{{ variantSourceArticle.title }}</div>
+          <div v-if="variantSourceArticle.digest" style="color: var(--td-text-color-secondary); margin-top: 4px; font-size: 13px">
+            {{ variantSourceArticle.digest }}
+          </div>
+        </t-card>
+
+        <div style="margin-bottom: 16px">
+          <div style="font-size: 13px; color: var(--td-text-color-secondary); margin-bottom: 8px; display: flex; align-items: center; gap: 8px">
+            <span>选择风格预设</span>
+            <t-link theme="primary" size="small" @click="styleManagerVisible = true">管理风格预设</t-link>
+          </div>
+          <div style="display: flex; flex-wrap: wrap; gap: 8px">
+            <div
+              v-for="style in stylePresets"
+              :key="style.style_id"
+              :class="['style-card', { 'style-card-selected': selectedStyles.includes(style.style_id) }]"
+              @click="toggleStyle(style.style_id)"
+            >
+              <div style="display: flex; justify-content: space-between; align-items: center">
+                <t-checkbox :checked="selectedStyles.includes(style.style_id)" @click.stop>
+                  <span style="font-weight: bold">{{ style.name }}</span>
+                </t-checkbox>
+                <t-link size="small" theme="primary" @click.stop="toggleStylePrompt(style.style_id)">
+                  {{ expandedStyles.includes(style.style_id) ? '收起' : '编辑Prompt' }}
+                </t-link>
+              </div>
+              <div style="font-size: 12px; color: var(--td-text-color-secondary); margin-top: 4px">
+                {{ style.description }}
+              </div>
+              <div v-if="expandedStyles.includes(style.style_id)" style="margin-top: 8px">
+                <t-textarea
+                  v-model="style.prompt"
+                  :autosize="{ minRows: 3, maxRows: 8 }"
+                  placeholder="改写提示词模板"
+                  style="font-size: 12px"
+                />
+                <t-button
+                  size="small"
+                  theme="primary"
+                  variant="outline"
+                  style="margin-top: 4px"
+                  :loading="style._saving"
+                  @click.stop="saveStylePrompt(style)"
+                >
+                  保存 Prompt
+                </t-button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div style="margin-bottom: 16px">
+          <div style="font-size: 13px; color: var(--td-text-color-secondary); margin-bottom: 8px">选择目标 Agent（公众号）</div>
+          <t-checkbox-group v-model="selectedAgents">
+            <t-checkbox v-for="a in agentOptions" :key="a.id" :value="a.id">
+              {{ a.name }}（ID: {{ a.id }}）
+            </t-checkbox>
+          </t-checkbox-group>
+        </div>
+
+        <t-alert
+          v-if="selectedAgents.length > selectedStyles.length && selectedStyles.length > 0"
+          theme="info"
+          style="margin-bottom: 16px"
+        >
+          将循环使用所选风格分配给目标公众号
+        </t-alert>
+
+        <!-- Variant task progress -->
+        <div v-if="variantTaskId" style="margin-bottom: 16px">
+          <t-card :bordered="true">
+            <div style="font-weight: bold; margin-bottom: 8px">生成进度</div>
+            <t-progress
+              :percentage="variantProgress"
+              :status="variantTaskStatus === 'completed' ? 'success' : variantTaskStatus === 'failed' ? 'error' : 'active'"
+            />
+            <div style="margin-top: 8px; font-size: 13px; color: var(--td-text-color-secondary)">
+              成功: {{ variantSucceeded }} / 失败: {{ variantFailed }} / 总计: {{ variantTotal }}
+            </div>
+            <div v-if="variantTaskStatus === 'completed' || variantTaskStatus === 'partial_completed'" style="margin-top: 8px">
+              <t-link theme="primary" @click="onVariantsDone">查看生成的变体文章 →</t-link>
+            </div>
+          </t-card>
+        </div>
+
+        <div style="display: flex; justify-content: flex-end; gap: 12px">
+          <t-button variant="outline" @click="variantDialogVisible = false">关闭</t-button>
+          <t-button
+            theme="primary"
+            :loading="variantGenerating"
+            :disabled="selectedStyles.length === 0 || selectedAgents.length === 0"
+            @click="onGenerateVariants"
+          >
+            开始生成（{{ selectedAgents.length }} 篇）
+          </t-button>
+        </div>
+      </div>
+    </t-dialog>
+
+    <!-- Style Manager Dialog -->
+    <t-dialog
+      v-model:visible="styleManagerVisible"
+      header="管理风格预设"
+      :width="600"
+      :footer="false"
+    >
+      <div style="margin-bottom: 12px">
+        <t-button size="small" theme="primary" @click="showCreateStyle = !showCreateStyle">
+          {{ showCreateStyle ? '取消' : '+ 新增自定义风格' }}
+        </t-button>
+      </div>
+      <div v-if="showCreateStyle" style="margin-bottom: 16px; padding: 12px; border: 1px solid var(--td-border-level-2-color); border-radius: 6px">
+        <t-input v-model="newStyle.style_id" placeholder="风格ID (英文)" style="margin-bottom: 8px" />
+        <t-input v-model="newStyle.name" placeholder="名称 (中文)" style="margin-bottom: 8px" />
+        <t-input v-model="newStyle.description" placeholder="描述" style="margin-bottom: 8px" />
+        <t-textarea v-model="newStyle.prompt" placeholder="提示词模板" :autosize="{ minRows: 3, maxRows: 6 }" style="margin-bottom: 8px" />
+        <t-button size="small" theme="primary" :loading="creatingStyle" @click="onCreateStyle">创建</t-button>
+      </div>
+      <div v-for="style in stylePresets" :key="style.style_id" style="margin-bottom: 12px; padding: 12px; border: 1px solid var(--td-border-level-2-color); border-radius: 6px">
+        <div style="display: flex; justify-content: space-between; align-items: center">
+          <div>
+            <span style="font-weight: bold">{{ style.name }}</span>
+            <t-tag v-if="style.is_builtin" size="small" variant="light" style="margin-left: 6px">内置</t-tag>
+            <span style="color: var(--td-text-color-secondary); font-size: 12px; margin-left: 8px">{{ style.style_id }}</span>
+          </div>
+          <t-popconfirm
+            v-if="!style.is_builtin"
+            content="确认删除此风格预设？"
+            @confirm="onDeleteStyle(style.style_id)"
+          >
+            <t-link theme="danger" size="small">删除</t-link>
+          </t-popconfirm>
+        </div>
+        <div style="font-size: 12px; color: var(--td-text-color-secondary); margin-top: 4px">
+          {{ style.description }}
+        </div>
+      </div>
+    </t-dialog>
+
+    <!-- Variants Drawer -->
+    <t-drawer
+      v-model:visible="variantsDrawerVisible"
+      :header="`变体文章 - ${variantsSourceTitle}`"
+      size="640px"
+    >
+      <t-table
+        :data="variantsData"
+        :columns="variantColumns"
+        row-key="id"
+        :loading="variantsLoading"
+        stripe
+        size="small"
+      >
+        <template #variantStyle="{ row }">
+          <t-tag v-if="row.variant_style" theme="primary" variant="light" size="small">
+            {{ getStyleName(row.variant_style) }}
+          </t-tag>
+        </template>
+        <template #variantStatus="{ row }">
+          <t-tag :theme="row.status === 'published' ? 'success' : 'default'" variant="light" size="small">
+            {{ row.status === 'published' ? '已发布' : '草稿' }}
+          </t-tag>
+        </template>
+      </t-table>
+    </t-drawer>
 
     <!-- Preview drawer -->
     <t-drawer v-model:visible="previewDrawerVisible" header="文章预览" size="640px">
@@ -227,6 +425,39 @@
         </div>
       </div>
     </t-drawer>
+
+    <!-- Publish Records drawer -->
+    <t-drawer
+      v-model:visible="publishRecordsDrawerVisible"
+      :header="`发布记录 - ${publishRecordsTitle}`"
+      size="640px"
+    >
+      <t-table
+        :data="publishRecordsData"
+        :columns="publishRecordColumns"
+        row-key="id"
+        :loading="publishRecordsLoading"
+        stripe
+        size="small"
+      >
+        <template #action="{ row }">
+          <t-tag
+            :theme="row.action === 'publish' ? 'primary' : 'warning'"
+            variant="light"
+          >
+            {{ row.action === 'publish' ? '发布' : '同步' }}
+          </t-tag>
+        </template>
+        <template #recordStatus="{ row }">
+          <t-tag
+            :theme="row.status === 'success' ? 'success' : 'danger'"
+            variant="light"
+          >
+            {{ row.status === 'success' ? '成功' : '失败' }}
+          </t-tag>
+        </template>
+      </t-table>
+    </t-drawer>
   </div>
 </template>
 
@@ -241,6 +472,14 @@ import {
   publishArticle,
   getRunningTasks,
   getPendingTasks,
+  getArticlePublishRecords,
+  getStylePresets,
+  updateStylePreset,
+  createStylePreset,
+  deleteStylePreset,
+  generateVariants,
+  getArticleVariants,
+  getTask,
 } from '@/api';
 import { MessagePlugin } from 'tdesign-vue-next';
 
@@ -262,6 +501,49 @@ const saving = ref(false);
 const syncing = ref(false);
 const renderLoading = ref(false);
 const markdownTextarea = ref<HTMLTextAreaElement | null>(null);
+
+// Publish records drawer state
+const publishRecordsDrawerVisible = ref(false);
+const publishRecordsLoading = ref(false);
+const publishRecordsData = ref<any[]>([]);
+const publishRecordsTitle = ref('');
+
+// Variant generation state
+const variantDialogVisible = ref(false);
+const variantSourceArticle = ref<any>(null);
+const stylePresets = ref<any[]>([]);
+const selectedStyles = ref<string[]>([]);
+const selectedAgents = ref<number[]>([]);
+const expandedStyles = ref<string[]>([]);
+const variantGenerating = ref(false);
+const variantTaskId = ref<number | null>(null);
+const variantTaskStatus = ref('');
+const variantProgress = ref(0);
+const variantSucceeded = ref(0);
+const variantFailed = ref(0);
+const variantTotal = ref(0);
+let variantPollTimer: ReturnType<typeof setInterval> | null = null;
+
+// Style manager state
+const styleManagerVisible = ref(false);
+const showCreateStyle = ref(false);
+const creatingStyle = ref(false);
+const newStyle = ref({ style_id: '', name: '', description: '', prompt: '' });
+
+// Variants drawer state
+const variantsDrawerVisible = ref(false);
+const variantsLoading = ref(false);
+const variantsData = ref<any[]>([]);
+const variantsSourceTitle = ref('');
+
+const publishRecordColumns = [
+  { colKey: 'id', title: 'ID', width: 60 },
+  { colKey: 'action', title: '类型', width: 80 },
+  { colKey: 'recordStatus', title: '状态', width: 80 },
+  { colKey: 'operator', title: '操作人', width: 160 },
+  { colKey: 'wechat_media_id', title: 'Media ID', ellipsis: true },
+  { colKey: 'created_at', title: '时间', width: 180, cell: (_h: any, { row }: any) => row.created_at ? new Date(row.created_at).toLocaleString() : '-' },
+];
 
 interface EditForm {
   id: number | null;
@@ -301,9 +583,25 @@ const columns = [
   { colKey: 'title', title: '标题', ellipsis: true },
   { colKey: 'agent_id', title: 'Agent ID', width: 90 },
   { colKey: 'status', title: '状态', width: 80 },
+  { colKey: 'variant_count', title: '变体', width: 70 },
+  { colKey: 'publish_count', title: '发布次数', width: 90 },
   { colKey: 'created_at', title: '创建时间', width: 180, cell: (_h: any, { row }: any) => new Date(row.created_at).toLocaleString() },
-  { colKey: 'op', title: '操作', width: 280 },
+  { colKey: 'op', title: '操作', width: 400 },
 ];
+
+const variantColumns = [
+  { colKey: 'id', title: 'ID', width: 60 },
+  { colKey: 'title', title: '标题', ellipsis: true },
+  { colKey: 'variantStyle', title: '风格', width: 100 },
+  { colKey: 'agent_name', title: 'Agent', width: 120 },
+  { colKey: 'variantStatus', title: '状态', width: 80 },
+  { colKey: 'created_at', title: '创建时间', width: 180, cell: (_h: any, { row }: any) => row.created_at ? new Date(row.created_at).toLocaleString() : '-' },
+];
+
+const getStyleName = (styleId: string): string => {
+  const preset = stylePresets.value.find(s => s.style_id === styleId);
+  return preset ? preset.name : styleId;
+};
 
 const fetchData = async () => {
   loading.value = true;
@@ -496,6 +794,179 @@ const onPublish = async (row: any) => {
   }
 };
 
+const openPublishRecords = async (row: any) => {
+  publishRecordsTitle.value = row.title || `文章 #${row.id}`;
+  publishRecordsDrawerVisible.value = true;
+  publishRecordsLoading.value = true;
+  try {
+    const res = await getArticlePublishRecords(row.id);
+    publishRecordsData.value = res.data;
+  } catch {
+    MessagePlugin.error('加载发布记录失败');
+    publishRecordsData.value = [];
+  } finally {
+    publishRecordsLoading.value = false;
+  }
+};
+
+// --- Variant generation functions ---
+
+const fetchStylePresets = async () => {
+  try {
+    const res = await getStylePresets();
+    stylePresets.value = (res.data || []).map((s: any) => ({ ...s, _saving: false }));
+  } catch {
+    // ignore
+  }
+};
+
+const openVariantDialog = async (row: any) => {
+  variantSourceArticle.value = row;
+  selectedStyles.value = [];
+  selectedAgents.value = [];
+  expandedStyles.value = [];
+  variantTaskId.value = null;
+  variantTaskStatus.value = '';
+  variantProgress.value = 0;
+  variantSucceeded.value = 0;
+  variantFailed.value = 0;
+  variantTotal.value = 0;
+  await fetchStylePresets();
+  variantDialogVisible.value = true;
+};
+
+const toggleStyle = (styleId: string) => {
+  const idx = selectedStyles.value.indexOf(styleId);
+  if (idx === -1) {
+    selectedStyles.value.push(styleId);
+  } else {
+    selectedStyles.value.splice(idx, 1);
+  }
+};
+
+const toggleStylePrompt = (styleId: string) => {
+  const idx = expandedStyles.value.indexOf(styleId);
+  if (idx === -1) {
+    expandedStyles.value.push(styleId);
+  } else {
+    expandedStyles.value.splice(idx, 1);
+  }
+};
+
+const saveStylePrompt = async (style: any) => {
+  style._saving = true;
+  try {
+    await updateStylePreset(style.style_id, { prompt: style.prompt });
+    MessagePlugin.success(`风格「${style.name}」的 Prompt 已保存`);
+  } catch (err: any) {
+    MessagePlugin.error(err?.response?.data?.detail || '保存失败');
+  } finally {
+    style._saving = false;
+  }
+};
+
+const onGenerateVariants = async () => {
+  if (!variantSourceArticle.value) return;
+  variantGenerating.value = true;
+  try {
+    const res = await generateVariants(variantSourceArticle.value.id, {
+      agent_ids: selectedAgents.value,
+      style_ids: selectedStyles.value,
+    });
+    variantTaskId.value = res.data.batch_task_id;
+    variantTotal.value = res.data.total;
+    MessagePlugin.success('变体生成任务已提交');
+    pollVariantTask();
+  } catch (err: any) {
+    MessagePlugin.error(err?.response?.data?.detail || '提交失败');
+  } finally {
+    variantGenerating.value = false;
+  }
+};
+
+const pollVariantTask = () => {
+  if (variantPollTimer) {
+    clearInterval(variantPollTimer);
+  }
+  variantPollTimer = setInterval(async () => {
+    if (!variantTaskId.value) return;
+    try {
+      const res = await getTask(variantTaskId.value);
+      const task = res.data;
+      variantTaskStatus.value = task.status;
+      const result = task.result || {};
+      variantSucceeded.value = result.succeeded || 0;
+      variantFailed.value = result.failed || 0;
+      const total = result.total || variantTotal.value;
+      const completed = result.completed || 0;
+      variantProgress.value = total > 0 ? Math.round((completed / total) * 100) : 0;
+
+      if (['completed', 'partial_completed', 'failed'].includes(task.status)) {
+        if (variantPollTimer) {
+          clearInterval(variantPollTimer);
+          variantPollTimer = null;
+        }
+        fetchData();
+      }
+    } catch {
+      // ignore
+    }
+  }, 3000);
+};
+
+const onVariantsDone = () => {
+  variantDialogVisible.value = false;
+  if (variantSourceArticle.value) {
+    openVariants(variantSourceArticle.value);
+  }
+};
+
+const openVariants = async (row: any) => {
+  variantsSourceTitle.value = row.title || `文章 #${row.id}`;
+  variantsDrawerVisible.value = true;
+  variantsLoading.value = true;
+  try {
+    const res = await getArticleVariants(row.id);
+    variantsData.value = res.data;
+  } catch {
+    MessagePlugin.error('加载变体列表失败');
+    variantsData.value = [];
+  } finally {
+    variantsLoading.value = false;
+  }
+};
+
+// --- Style manager functions ---
+
+const onCreateStyle = async () => {
+  if (!newStyle.value.style_id || !newStyle.value.name) {
+    MessagePlugin.warning('风格 ID 和名称不能为空');
+    return;
+  }
+  creatingStyle.value = true;
+  try {
+    await createStylePreset(newStyle.value);
+    MessagePlugin.success('自定义风格已创建');
+    newStyle.value = { style_id: '', name: '', description: '', prompt: '' };
+    showCreateStyle.value = false;
+    await fetchStylePresets();
+  } catch (err: any) {
+    MessagePlugin.error(err?.response?.data?.detail || '创建失败');
+  } finally {
+    creatingStyle.value = false;
+  }
+};
+
+const onDeleteStyle = async (styleId: string) => {
+  try {
+    await deleteStylePreset(styleId);
+    MessagePlugin.success('风格已删除');
+    await fetchStylePresets();
+  } catch (err: any) {
+    MessagePlugin.error(err?.response?.data?.detail || '删除失败');
+  }
+};
+
 const fetchRunningTasks = async () => {
   try {
     const [runningRes, pendingRes] = await Promise.all([
@@ -530,12 +1001,17 @@ onMounted(async () => {
   }
   fetchData();
   fetchRunningTasks();
+  fetchStylePresets();
 });
 
 onBeforeUnmount(() => {
   if (pollTimer) {
     clearInterval(pollTimer);
     pollTimer = null;
+  }
+  if (variantPollTimer) {
+    clearInterval(variantPollTimer);
+    variantPollTimer = null;
   }
 });
 </script>
@@ -595,5 +1071,25 @@ onBeforeUnmount(() => {
 .html-source-editor:focus {
   border-color: var(--td-brand-color);
   box-shadow: 0 0 0 2px rgba(0, 82, 217, 0.1);
+}
+
+.style-card {
+  width: calc(50% - 4px);
+  padding: 10px 12px;
+  border: 1px solid var(--td-border-level-2-color);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+  box-sizing: border-box;
+}
+
+.style-card:hover {
+  border-color: var(--td-brand-color-light);
+  background: var(--td-bg-color-container-hover);
+}
+
+.style-card-selected {
+  border-color: var(--td-brand-color);
+  background: var(--td-brand-color-light-hover);
 }
 </style>

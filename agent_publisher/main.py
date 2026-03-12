@@ -15,8 +15,10 @@ from agent_publisher.api.agents import router as agents_router
 from agent_publisher.api.articles import router as articles_router
 from agent_publisher.api.auth import router as auth_router, verify_token
 from agent_publisher.api.media import router as media_router
+from agent_publisher.api.publish_records import router as publish_records_router
 from agent_publisher.api.settings import router as settings_router
 from agent_publisher.api.skills import router as skills_router, verify_skill_token
+from agent_publisher.api.style_presets import router as style_presets_router
 from agent_publisher.api.tasks import router as tasks_router
 from agent_publisher.api.deps import get_db
 from agent_publisher.config import settings
@@ -24,6 +26,7 @@ from agent_publisher.models.account import Account
 from agent_publisher.models.agent import Agent
 from agent_publisher.models.article import Article
 from agent_publisher.models.media import MediaAsset
+from agent_publisher.models.style_preset import StylePreset
 from agent_publisher.models.task import Task
 from agent_publisher.database import engine
 from agent_publisher.models.base import Base
@@ -46,6 +49,14 @@ async def lifespan(app: FastAPI):
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
         logger.info("SQLite tables created/verified.")
+
+    # Initialize built-in style presets
+    from agent_publisher.database import async_session_factory
+    from agent_publisher.services.style_preset_service import StylePresetService
+    async with async_session_factory() as session:
+        sps = StylePresetService(session)
+        await sps.init_builtin_presets()
+
     logger.info("Starting Agent Publisher scheduler...")
     await sync_agent_schedules()
     scheduler.start()
@@ -101,6 +112,8 @@ app.include_router(agents_router)
 app.include_router(articles_router)
 app.include_router(tasks_router)
 app.include_router(media_router)
+app.include_router(publish_records_router)
+app.include_router(style_presets_router)
 app.include_router(skills_router)
 
 

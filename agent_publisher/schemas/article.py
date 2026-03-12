@@ -19,6 +19,9 @@ class ArticleOut(BaseModel):
     wechat_media_id: str
     published_at: datetime | None
     created_at: datetime
+    source_article_id: int | None = None
+    variant_style: str | None = None
+    variant_count: int = 0
 
     model_config = {"from_attributes": True}
 
@@ -30,5 +33,8 @@ class ArticleBrief(BaseModel):
     digest: str
     status: str
     created_at: datetime
+    source_article_id: int | None = None
+    variant_style: str | None = None
+    variant_count: int = 0
 
     model_config = {"from_attributes": True}

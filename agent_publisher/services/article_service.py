@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from agent_publisher.models.account import Account
 from agent_publisher.models.agent import Agent
 from agent_publisher.models.article import Article
+from agent_publisher.models.publish_record import PublishRecord
 from agent_publisher.services.image_service import HunyuanImageService
 from agent_publisher.services.llm_service import LLMService
 from agent_publisher.services.rss_service import RSSService
@@ -175,7 +176,7 @@ class ArticleService:
         logger.info("Article created: id=%d title=%s", article.id, article.title)
         return article
 
-    async def publish_article(self, article_id: int) -> str:
+    async def publish_article(self, article_id: int, operator: str = "admin") -> str:
         """Publish an article to WeChat draft box."""
         article = await self.session.get(Article, article_id)
         if not article:
@@ -272,6 +273,16 @@ class ArticleService:
         article.wechat_media_id = media_id
         article.status = "published"
         article.published_at = now
+
+        # Create publish record
+        record = PublishRecord(
+            article_id=article.id,
+            action="publish",
+            wechat_media_id=media_id,
+            status="success",
+            operator=operator,
+        )
+        self.session.add(record)
         await self.session.commit()
 
         logger.info("Article %d published, media_id=%s", article.id, media_id)
@@ -394,7 +405,7 @@ class ArticleService:
         )
         return article
 
-    async def sync_article_to_draft(self, article_id: int) -> str:
+    async def sync_article_to_draft(self, article_id: int, operator: str = "admin") -> str:
         """Sync local article edits to WeChat draft box.
 
         Returns sync status: 'synced', 'skipped', or raises on error.
@@ -498,7 +509,134 @@ class ArticleService:
             index=0,
         )
 
+        # Create sync record
+        record = PublishRecord(
+            article_id=article.id,
+            action="sync",
+            wechat_media_id=article.wechat_media_id,
+            status="success",
+            operator=operator,
+        )
+        self.session.add(record)
         await self.session.commit()
 
         logger.info("Article %d synced to draft, media_id=%s", article.id, article.wechat_media_id)
         return "synced"
+
+    async def generate_variant(
+        self,
+        source_article_id: int,
+        target_agent_id: int,
+        style_id: str,
+        step_callback: Callable[..., Awaitable[None]] | None = None,
+    ) -> Article:
+        """Generate a variant article from a source article using a style preset.
+
+        Args:
+            source_article_id: ID of the source article to rewrite.
+            target_agent_id: Agent (and its account) the variant belongs to.
+            style_id: Style preset identifier to use for rewriting.
+            step_callback: Optional async callback for progress reporting.
+        """
+        from agent_publisher.config import settings
+        from agent_publisher.models.style_preset import StylePreset
+        from agent_publisher.services.style_preset_service import StylePresetService
+
+        # 1. Load source article
+        source = await self.session.get(Article, source_article_id)
+        if not source:
+            raise ValueError(f"Source article {source_article_id} not found")
+
+        # 2. Load target agent
+        agent = await self.session.get(Agent, target_agent_id)
+        if not agent:
+            raise ValueError(f"Target agent {target_agent_id} not found")
+
+        # 3. Load style preset
+        sps = StylePresetService(self.session)
+        preset = await sps.get_preset(style_id)
+        if not preset:
+            raise ValueError(f"Style preset '{style_id}' not found")
+
+        if step_callback:
+            await step_callback("load_resources", "success", {
+                "source_article_id": source.id,
+                "source_title": source.title,
+                "target_agent_id": agent.id,
+                "style_id": style_id,
+                "style_name": preset.name,
+            })
+
+        # 4. Build prompt from template — truncate content to 3000 chars
+        source_content = source.content or ""
+        if len(source_content) > 3000:
+            source_content = source_content[:3000] + "\n\n[...内容已截断...]"
+
+        prompt_text = preset.prompt.format(
+            title=source.title or "",
+            digest=source.digest or "",
+            content=source_content,
+        )
+
+        messages = [
+            {"role": "system", "content": "你是一位专业的内容改写编辑，擅长用不同风格改写文章。"},
+            {"role": "user", "content": prompt_text},
+        ]
+
+        # 5. Call LLM with platform-level config
+        provider = settings.default_llm_provider
+        model = settings.default_llm_model
+        api_key = settings.default_llm_api_key
+        base_url = settings.default_llm_base_url
+
+        raw_response = await self.llm.generate(
+            provider=provider,
+            model=model,
+            api_key=api_key,
+            messages=messages,
+            base_url=base_url,
+        )
+
+        if step_callback:
+            await step_callback("llm_generate", "success", {
+                "response_length": len(raw_response),
+                "provider": provider,
+                "model": model,
+            })
+
+        # 6. Parse LLM response
+        parsed = self.llm.parse_article_response(raw_response)
+
+        # 7. Render Markdown to HTML
+        html_content = self._markdown_to_html(parsed["content"])
+
+        # 8. Create variant article
+        variant = Article(
+            agent_id=target_agent_id,
+            title=parsed["title"],
+            digest=parsed["digest"],
+            content=parsed["content"],
+            html_content=html_content,
+            cover_image_url=source.cover_image_url or "",
+            images=[],
+            source_news=source.source_news or [],
+            status="draft",
+            source_article_id=source_article_id,
+            variant_style=style_id,
+        )
+        self.session.add(variant)
+        await self.session.commit()
+        await self.session.refresh(variant)
+
+        if step_callback:
+            await step_callback("save_variant", "success", {
+                "article_id": variant.id,
+                "title": variant.title,
+                "style": style_id,
+            })
+
+        logger.info(
+            "Variant generated: id=%d source=%d style=%s agent=%d",
+            variant.id, source_article_id, style_id, target_agent_id,
+        )
+        return variant

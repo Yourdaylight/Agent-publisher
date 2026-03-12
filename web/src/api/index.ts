@@ -62,6 +62,24 @@ export const getArticle = (id: number) => http.get(`/articles/${id}`);
 export const updateArticle = (id: number, data: any) => http.put(`/articles/${id}`, data);
 export const publishArticle = (id: number) => http.post(`/articles/${id}/publish`);
 export const syncArticle = (id: number) => http.post(`/articles/${id}/sync`);
+export const getArticlePublishRecords = (id: number) => http.get(`/articles/${id}/publish-records`);
+export const generateVariants = (articleId: number, data: { agent_ids: number[]; style_ids: string[] }) =>
+  http.post(`/articles/${articleId}/variants`, data);
+export const getArticleVariants = (articleId: number) => http.get(`/articles/${articleId}/variants`);
+
+// Style Presets
+export const getStylePresets = () => http.get('/style-presets');
+export const createStylePreset = (data: { style_id: string; name: string; description?: string; prompt?: string }) =>
+  http.post('/style-presets', data);
+export const updateStylePreset = (styleId: string, data: { name?: string; description?: string; prompt?: string }) =>
+  http.put(`/style-presets/${styleId}`, data);
+export const deleteStylePreset = (styleId: string) => http.delete(`/style-presets/${styleId}`);
+
+// Publish Records
+export const getPublishRecords = (params?: { article_id?: number; action?: string; status?: string; limit?: number; offset?: number }) =>
+  http.get('/publish-records', { params });
+export const getPublishStats = () => http.get('/publish-records/stats');
+export const getPublishRecord = (id: number) => http.get(`/publish-records/${id}`);
 
 // Tasks
 export const getTasks = (params?: { status?: string }) => http.get('/tasks', { params });
