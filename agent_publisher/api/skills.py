@@ -154,6 +154,140 @@ class BatchPublishResult(BaseModel):
 # Endpoints
 # ---------------------------------------------------------------------------
 
+SETUP_GUIDE = {
+    "title": "微信公众号快速配置指南",
+    "description": "从零开始完成微信公众号注册、密钥获取和 Agent Publisher 配置的完整步骤",
+    "steps": [
+        {
+            "step": 1,
+            "title": "注册公众号",
+            "url": "https://mp.weixin.qq.com/cgi-bin/readtemplate?t=register/step1_tmpl&lang=zh_CN",
+            "instructions": [
+                "访问上方链接，点击注册",
+                "按照页面提示完成：基本信息 → 选择类型 → 信息登记 → 公众号信息",
+                "个人推荐选「订阅号」（每天可群发1次），企业推荐「服务号」",
+            ],
+            "note": "订阅号：每天1次群发、个人/企业可注册、基础接口；服务号：每月4次群发、仅企业/组织、高级接口（支付等）",
+        },
+        {
+            "step": 2,
+            "title": "获取开发者密钥（AppID 和 AppSecret）",
+            "url": "https://developers.weixin.qq.com/console/product/mp",
+            "instructions": [
+                "登录微信开发者平台（上方链接）",
+                "左侧菜单选择「我的业务与服务」→「公众号」",
+                "在「基础信息」页面复制 AppID",
+                "点击 AppSecret 旁的「重置」获取密钥（仅显示一次，立即保存！）",
+            ],
+            "note": "AppSecret 重置后旧的密钥立即失效，请妥善保管",
+        },
+        {
+            "step": 3,
+            "title": "配置 IP 白名单",
+            "instructions": [
+                "在「基础信息」页面找到「API IP白名单」，点击「编辑」",
+                "在服务器上运行 `curl ifconfig.me` 查看公网 IP",
+                "将服务器公网 IP 添加到白名单中",
+            ],
+            "note": "家用宽带 IP 会变化，建议使用固定 IP 的云服务器部署",
+        },
+        {
+            "step": 4,
+            "title": "通过 API 添加公众号到 Agent Publisher",
+            "instructions": [
+                "调用 POST /api/skills/auth 进行邮箱认证，获取 token",
+                "调用 POST /api/skills/accounts 创建公众号，传入 name、appid、appsecret",
+            ],
+            "api_examples": {
+                "auth": {
+                    "method": "POST",
+                    "path": "/api/skills/auth",
+                    "body": {"email": "your@email.com"},
+                },
+                "create_account": {
+                    "method": "POST",
+                    "path": "/api/skills/accounts",
+                    "headers": {"Authorization": "Bearer <token>"},
+                    "body": {"name": "公众号名称", "appid": "your_appid", "appsecret": "your_appsecret"},
+                },
+            },
+        },
+        {
+            "step": 5,
+            "title": "创建 Agent",
+            "instructions": [
+                "调用 POST /api/skills/agents 创建 Agent",
+                "指定 account_id（第4步创建的公众号ID）、name、topic 和 rss_sources",
+            ],
+            "api_examples": {
+                "create_agent": {
+                    "method": "POST",
+                    "path": "/api/skills/agents",
+                    "headers": {"Authorization": "Bearer <token>"},
+                    "body": {
+                        "account_id": 1,
+                        "name": "科技前沿观察员",
+                        "topic": "AI与科技",
+                        "rss_sources": [{"url": "https://feeds.example.com/tech", "name": "Tech Feed"}],
+                    },
+                },
+            },
+        },
+        {
+            "step": 6,
+            "title": "生成并发布文章",
+            "instructions": [
+                "调用 POST /api/skills/agents/{id}/generate 触发文章生成",
+                "调用 GET /api/skills/articles 查看生成的文章列表",
+                "调用 POST /api/skills/articles/{id}/publish 发布到微信草稿箱",
+            ],
+            "api_examples": {
+                "generate": {
+                    "method": "POST",
+                    "path": "/api/skills/agents/1/generate",
+                    "headers": {"Authorization": "Bearer <token>"},
+                },
+                "list_articles": {
+                    "method": "GET",
+                    "path": "/api/skills/articles",
+                    "headers": {"Authorization": "Bearer <token>"},
+                },
+                "publish": {
+                    "method": "POST",
+                    "path": "/api/skills/articles/1/publish",
+                    "headers": {"Authorization": "Bearer <token>"},
+                },
+            },
+        },
+    ],
+    "faq": [
+        {
+            "question": "调用微信 API 返回 IP 不在白名单怎么办？",
+            "answer": "确保已将服务器的公网 IP 添加到微信公众号的 API IP白名单中。运行 `curl ifconfig.me` 查看当前 IP。",
+        },
+        {
+            "question": "AppSecret 忘记了怎么办？",
+            "answer": "在微信开发者平台的基础信息页面，点击 AppSecret 旁的「重置」按钮重新生成。重置后旧的 AppSecret 会立即失效。",
+        },
+        {
+            "question": "个人订阅号也能用吗？",
+            "answer": "可以。个人订阅号拥有草稿箱和群发的基础权限，Agent Publisher 的核心功能（生成文章 + 推送到草稿箱）都可以正常使用。",
+        },
+    ],
+}
+
+
+@router.get("/setup-guide")
+async def skill_setup_guide():
+    """Return the complete WeChat account setup guide (no auth required).
+
+    AI agents can call this endpoint to learn how to configure a WeChat
+    official account from scratch, including registration URLs, developer
+    platform instructions, and step-by-step API usage examples.
+    """
+    return SETUP_GUIDE
+
+
 @router.post("/auth", response_model=SkillAuthResponse)
 async def skill_auth(req: SkillAuthRequest, request: Request):
     """Authenticate an OpenClaw agent by email (whitelist check)."""

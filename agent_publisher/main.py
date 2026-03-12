@@ -41,6 +41,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).parent / "static"
+GUIDE_IMAGES_DIR = Path(__file__).parent.parent / "docs" / "images"
 
 
 async def _auto_migrate_sqlite(conn):
@@ -102,7 +103,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Agent Publisher", version="0.1.0", lifespan=lifespan)
 
 # Public routes (no auth required)
-PUBLIC_PREFIXES = ("/api/auth/", "/api/skills/auth", "/assets/", "/favicon.ico")
+PUBLIC_PREFIXES = ("/api/auth/", "/api/skills/auth", "/api/skills/setup-guide", "/assets/", "/favicon.ico")
 
 
 @app.middleware("http")
@@ -217,6 +218,10 @@ async def intake_trend(days: int = 30, db: AsyncSession = Depends(get_db)):
     svc = GovernanceService(db)
     return await svc.get_daily_intake_trend(days)
 
+
+# Serve guide images (setup screenshots) from docs/images/
+if GUIDE_IMAGES_DIR.is_dir():
+    app.mount("/guide-images", StaticFiles(directory=GUIDE_IMAGES_DIR), name="guide-images")
 
 # Serve static files (Vue build output) if the directory exists
 if STATIC_DIR.is_dir():

@@ -411,6 +411,130 @@ def rss_fetch(agent_id: int = typer.Argument(..., help="Agent ID")):
     _run(_fetch())
 
 
+# ==================== Setup Guide ====================
+
+setup_app = typer.Typer(help="Setup guides and configuration helpers")
+app.add_typer(setup_app, name="setup")
+
+
+SETUP_GUIDE_TEXT = """
+[bold cyan]━━━ 微信公众号快速配置指南 ━━━[/bold cyan]
+
+[bold]第 1 步：注册公众号[/bold]
+  访问 [link=https://mp.weixin.qq.com/cgi-bin/readtemplate?t=register/step1_tmpl&lang=zh_CN]https://mp.weixin.qq.com → 注册[/link]
+  按照页面提示完成：基本信息 → 选择类型 → 信息登记 → 公众号信息
+  [dim]个人推荐选「订阅号」（每天可群发1次），企业推荐「服务号」[/dim]
+
+[bold]第 2 步：获取开发者密钥[/bold]
+  登录 [link=https://developers.weixin.qq.com/console/product/mp]微信开发者平台[/link]
+  左侧菜单选择「我的业务与服务」→「公众号」
+  在「基础信息」页面找到：
+    • [green]AppID[/green] — 直接复制
+    • [green]AppSecret[/green] — 点击「重置」获取（[bold red]仅显示一次，立即保存！[/bold red]）
+
+[bold]第 3 步：配置 IP 白名单[/bold]
+  在「基础信息」页面找到「API IP白名单」，点击「编辑」
+  将服务器的公网 IP 添加进去：
+    [cyan]curl ifconfig.me[/cyan]  ← 运行此命令查看 IP
+  [dim]家用宽带 IP 会变化，建议用固定 IP 的云服务器部署[/dim]
+
+[bold]第 4 步：添加公众号到 Agent Publisher[/bold]
+  [cyan]agent-pub account add --name "公众号名称" --appid "你的AppID" --appsecret "你的AppSecret"[/cyan]
+
+[bold]第 5 步：创建 Agent[/bold]
+  [cyan]agent-pub agent add --name "科技观察员" --topic "AI科技" --account-id 1 --rss "https://..."[/cyan]
+
+[bold]第 6 步：生成并发布文章[/bold]
+  [cyan]agent-pub article generate 1[/cyan]    ← 生成文章
+  [cyan]agent-pub article preview 1[/cyan]     ← 预览内容
+  [cyan]agent-pub article publish 1[/cyan]     ← 发布到草稿箱
+
+[bold cyan]━━━ Skills API（AI Agent 接入） ━━━[/bold cyan]
+
+如果你是通过 AI Agent（OpenClaw 等）接入，使用 Skills API：
+
+  1. 认证：POST /api/skills/auth  {"email": "your@email.com"}
+  2. 创建公众号：POST /api/skills/accounts
+  3. 创建 Agent：POST /api/skills/agents
+  4. 生成文章：POST /api/skills/agents/{id}/generate
+  5. 查看文章：GET /api/skills/articles
+  6. 发布文章：POST /api/skills/articles/{id}/publish
+
+完整 API 文档：启动服务后访问 http://your-server:9099/docs
+"""
+
+
+@setup_app.command("guide")
+def setup_guide():
+    """Show the complete WeChat account setup guide (works in AI agent context)."""
+    console.print(SETUP_GUIDE_TEXT)
+
+
+@setup_app.command("check")
+def setup_check():
+    """Check current configuration status."""
+
+    async def _check():
+        from agent_publisher.config import settings as cfg
+
+        table = Table(title="Configuration Status")
+        table.add_column("Item", style="cyan")
+        table.add_column("Status")
+        table.add_column("Detail")
+
+        # Database
+        db_type = "PostgreSQL" if "postgresql" in cfg.database_url else "SQLite"
+        table.add_row("Database", f"[green]{db_type}[/green]", cfg.database_url[:60] + "...")
+
+        # Tencent Cloud
+        tc_ok = bool(cfg.tencent_secret_id and cfg.tencent_secret_key)
+        table.add_row(
+            "Tencent Cloud",
+            "[green]Configured[/green]" if tc_ok else "[red]Not configured[/red]",
+            f"SecretID: {cfg.tencent_secret_id[:8]}..." if tc_ok else "Set TENCENT_SECRET_ID/KEY in .env",
+        )
+
+        # LLM
+        llm_ok = bool(cfg.default_llm_api_key)
+        table.add_row(
+            "Default LLM",
+            "[green]Configured[/green]" if llm_ok else "[yellow]Using default[/yellow]",
+            f"{cfg.default_llm_provider}/{cfg.default_llm_model}",
+        )
+
+        # Email whitelist
+        wl = cfg.get_email_whitelist()
+        table.add_row(
+            "Email Whitelist",
+            f"[green]{len(wl)} emails[/green]" if wl else "[yellow]Empty[/yellow]",
+            ", ".join(list(wl)[:3]) + ("..." if len(wl) > 3 else "") if wl else "Set EMAIL_WHITELIST in .env",
+        )
+
+        # Admins
+        admins = cfg.get_admin_emails()
+        table.add_row(
+            "Admin Emails",
+            f"[green]{len(admins)} admins[/green]" if admins else "[yellow]None[/yellow]",
+            ", ".join(sorted(admins)[:3]) + ("..." if len(admins) > 3 else "") if admins else "Set ADMIN_EMAILS in .env",
+        )
+
+        # Accounts
+        from sqlalchemy import select as sel, func
+        from agent_publisher.models.account import Account
+
+        async with await _get_session() as session:
+            count = (await session.execute(sel(func.count(Account.id)))).scalar() or 0
+            table.add_row(
+                "WeChat Accounts",
+                f"[green]{count} account(s)[/green]" if count else "[yellow]None[/yellow]",
+                "Run: agent-pub account add ..." if not count else "",
+            )
+
+        console.print(table)
+
+    _run(_check())
+
+
 # ==================== Image ====================
 
 image_app = typer.Typer(help="Image generation")

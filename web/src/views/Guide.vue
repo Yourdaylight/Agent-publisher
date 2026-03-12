@@ -32,6 +32,12 @@
         <t-table :data="accountTypes" :columns="accountTypeCols" row-key="type" size="small" style="margin-bottom: 16px" />
         <p><strong>推荐：</strong>个人开发者选择<strong>订阅号</strong>，企业选择<strong>服务号</strong></p>
         <p><strong>3.</strong> 按照指引完成邮箱验证、信息登记、公众号信息填写</p>
+        <div style="margin-top: 16px; border: 1px solid var(--td-border-level-2-color); border-radius: 8px; overflow: hidden">
+          <img src="/guide-images/step1-register.png" alt="公众号注册页面" style="width: 100%; display: block" />
+        </div>
+        <p style="color: var(--td-text-color-placeholder); font-size: 12px; margin-top: 4px">
+          ↑ 注册页面示例：依次填写邮箱、验证码和密码
+        </p>
       </div>
       <template #footer>
         <div style="text-align: right">
@@ -56,6 +62,18 @@
           </template>
         </t-alert>
         <p><strong>4.</strong> 妥善保存 AppID 和 AppSecret，后续步骤需要使用</p>
+        <div style="margin-top: 16px; border: 1px solid var(--td-border-level-2-color); border-radius: 8px; overflow: hidden">
+          <img src="/guide-images/step2-developer-platform.png" alt="微信开发者平台" style="width: 100%; display: block" />
+        </div>
+        <p style="color: var(--td-text-color-placeholder); font-size: 12px; margin-top: 4px">
+          ↑ 在微信开发者平台左侧菜单选择「公众号」，查看基础信息和开发密钥
+        </p>
+        <div style="margin-top: 12px; border: 1px solid var(--td-border-level-2-color); border-radius: 8px; overflow: hidden">
+          <img src="/guide-images/step3-appid-secret.png" alt="获取AppID和AppSecret" style="width: 100%; display: block" />
+        </div>
+        <p style="color: var(--td-text-color-placeholder); font-size: 12px; margin-top: 4px">
+          ↑ 红框标注的是你需要复制的 AppID、AppSecret 和 IP 白名单位置
+        </p>
       </div>
       <template #footer>
         <div style="display: flex; justify-content: space-between">
@@ -75,6 +93,12 @@
           <code style="font-size: 14px">curl ifconfig.me</code>
         </t-card>
         <p><strong>3.</strong> 将获取到的 IP 地址添加到白名单中</p>
+        <div style="margin-top: 12px; border: 1px solid var(--td-border-level-2-color); border-radius: 8px; overflow: hidden">
+          <img src="/guide-images/step3-appid-secret.png" alt="IP白名单位置" style="width: 100%; display: block" />
+        </div>
+        <p style="color: var(--td-text-color-placeholder); font-size: 12px; margin-top: 4px">
+          ↑ 「API IP白名单」在开发密钥区域下方，点击「编辑」添加服务器 IP
+        </p>
         <t-alert theme="info" style="margin-top: 12px">
           <template #message>
             家用宽带的公网 IP 可能会变化，建议使用固定 IP 的云服务器部署。
