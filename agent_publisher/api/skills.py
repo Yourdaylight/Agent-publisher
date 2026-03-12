@@ -4,7 +4,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 
 import re
 
@@ -20,6 +20,7 @@ from agent_publisher.models.article import Article
 from agent_publisher.models.agent import Agent
 from agent_publisher.models.media import MediaAsset
 from agent_publisher.services.article_service import ArticleService
+from agent_publisher.services.wechat_service import WeChatService
 
 logger = logging.getLogger(__name__)
 
@@ -125,6 +126,15 @@ class SkillArticleCreate(BaseModel):
     html_content: str = ""  # Pre-rendered HTML (used if content is empty)
     cover_image_url: str = ""  # URL or media library path e.g. media:<id>
     status: str = "draft"
+
+
+class SkillArticleUpdate(BaseModel):
+    """Request body for updating an article."""
+    title: str | None = None
+    digest: str | None = None
+    content: str | None = None
+    html_content: str | None = None
+    cover_image_url: str | None = None
 
 
 class BatchPublishRequest(BaseModel):
@@ -302,10 +312,6 @@ class SkillAgentCreate(BaseModel):
     description: str = ""
     account_id: int
     rss_sources: list[dict] = []
-    llm_provider: str = "openai"
-    llm_model: str = "gpt-4o"
-    llm_api_key: str = ""
-    llm_base_url: str = ""
     prompt_template: str = ""
     image_style: str = "现代简约风格，色彩鲜明"
     schedule_cron: str = "0 8 * * *"
@@ -340,8 +346,9 @@ async def skill_list_agents(
             "topic": a.topic,
             "description": a.description,
             "account_id": a.account_id,
-            "llm_provider": a.llm_provider,
-            "llm_model": a.llm_model,
+            "rss_sources": a.rss_sources,
+            "prompt_template": a.prompt_template,
+            "image_style": a.image_style,
             "schedule_cron": a.schedule_cron,
             "is_active": a.is_active,
             "created_at": a.created_at.isoformat() if a.created_at else None,
@@ -579,6 +586,109 @@ async def skill_publish_article(
 
 
 # ---------------------------------------------------------------------------
+# Article edit & sync
+# ---------------------------------------------------------------------------
+
+@router.put("/articles/{article_id}")
+async def skill_update_article(
+    article_id: int,
+    data: SkillArticleUpdate,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Update article fields (title, digest, content, html_content, cover_image_url).
+
+    When Markdown content is modified, html_content is automatically re-rendered
+    via wenyan.
+    """
+    email = _get_skill_email(request)
+    is_admin = settings.is_admin(email)
+
+    article = await db.get(Article, article_id)
+    if not article:
+        raise HTTPException(status_code=404, detail="Article not found")
+
+    # Ownership check
+    if not is_admin:
+        agent = await db.get(Agent, article.agent_id)
+        if agent:
+            account = await db.get(Account, agent.account_id)
+            if not account or account.owner_email != email:
+                raise HTTPException(status_code=403, detail="Access denied")
+
+    updates = data.model_dump(exclude_none=True)
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields to update")
+
+    # Resolve cover image from media library if needed
+    cover = updates.get("cover_image_url")
+    if cover and cover.startswith("media:"):
+        try:
+            media_id = int(cover.split(":", 1)[1])
+            asset = await db.get(MediaAsset, media_id)
+            if not asset:
+                raise HTTPException(status_code=404, detail=f"Media asset {media_id} not found")
+            updates["cover_image_url"] = f"/api/media/{media_id}/download"
+        except (ValueError, IndexError):
+            raise HTTPException(status_code=400, detail="Invalid media reference. Use media:<id>")
+
+    article_svc = ArticleService(db)
+    try:
+        updated = await article_svc.update_article(article_id, updates)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+    return {
+        "id": updated.id,
+        "agent_id": updated.agent_id,
+        "title": updated.title,
+        "digest": updated.digest,
+        "content": updated.content,
+        "html_content": updated.html_content,
+        "cover_image_url": updated.cover_image_url,
+        "wechat_media_id": updated.wechat_media_id,
+        "status": updated.status,
+        "created_at": updated.created_at.isoformat() if updated.created_at else None,
+    }
+
+
+@router.post("/articles/{article_id}/sync")
+async def skill_sync_article(
+    article_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Sync local article edits to WeChat draft box.
+
+    Only published articles with a valid wechat_media_id will be synced.
+    Draft articles are skipped.
+    """
+    email = _get_skill_email(request)
+    is_admin = settings.is_admin(email)
+
+    article = await db.get(Article, article_id)
+    if not article:
+        raise HTTPException(status_code=404, detail="Article not found")
+
+    # Ownership check
+    if not is_admin:
+        agent = await db.get(Agent, article.agent_id)
+        if agent:
+            account = await db.get(Account, agent.account_id)
+            if not account or account.owner_email != email:
+                raise HTTPException(status_code=403, detail="Access denied")
+
+    article_svc = ArticleService(db)
+    try:
+        status = await article_svc.sync_article_to_draft(article_id)
+        return {"ok": True, "sync_status": status}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=502, detail=f"WeChat sync failed: {e}")
+
+
+# ---------------------------------------------------------------------------
 # Media Asset Library (Skills)
 # ---------------------------------------------------------------------------
 
@@ -743,3 +853,131 @@ async def skill_delete_media(
     await db.commit()
     logger.info("Skill media deleted: id=%d email=%s", media_id, email)
     return {"ok": True, "deleted_id": media_id}
+
+
+# ---------------------------------------------------------------------------
+# Data Statistics (Followers & Article Stats)
+# ---------------------------------------------------------------------------
+
+async def _get_account_with_token(
+    account_id: int,
+    email: str,
+    db: AsyncSession,
+) -> Account:
+    """Helper: get account, check ownership, refresh token if needed."""
+    is_admin = settings.is_admin(email)
+    account = await db.get(Account, account_id)
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+    if not is_admin and account.owner_email != email:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    # Refresh token if needed
+    now = datetime.now(tz=timezone.utc)
+    token_expired = (
+        not account.access_token
+        or not account.token_expires_at
+        or account.token_expires_at.replace(
+            tzinfo=timezone.utc
+        ) < now
+    )
+    if token_expired:
+        token, expires_at = await WeChatService.get_access_token(
+            account.appid, account.appsecret
+        )
+        account.access_token = token
+        account.token_expires_at = expires_at
+        await db.commit()
+
+    return account
+
+
+@router.get("/accounts/{account_id}/followers")
+async def skill_get_followers(
+    account_id: int,
+    request: Request,
+    begin_date: str | None = None,
+    end_date: str | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """Get follower overview: subscribe/unsubscribe trends and cumulative count.
+
+    Query params:
+    - begin_date: YYYY-MM-DD (default: 7 days ago)
+    - end_date: YYYY-MM-DD (default: yesterday)
+    """
+    from datetime import date, timedelta, timezone
+
+    email = _get_skill_email(request)
+    account = await _get_account_with_token(account_id, email, db)
+
+    # Default to last 7 days (WeChat stats are available up to yesterday)
+    if not end_date:
+        end_date = (date.today() - timedelta(days=1)).isoformat()
+    if not begin_date:
+        begin_date = (date.fromisoformat(end_date) - timedelta(days=6)).isoformat()
+
+    try:
+        user_summary = await WeChatService.get_user_summary(
+            account.access_token, begin_date, end_date
+        )
+        user_cumulate = await WeChatService.get_user_cumulate(
+            account.access_token, begin_date, end_date
+        )
+        followers_info = await WeChatService.get_followers(account.access_token)
+    except RuntimeError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+    return {
+        "account_id": account_id,
+        "account_name": account.name,
+        "begin_date": begin_date,
+        "end_date": end_date,
+        "total_followers": followers_info.get("total", 0),
+        "user_summary": user_summary,
+        "user_cumulate": user_cumulate,
+    }
+
+
+@router.get("/accounts/{account_id}/article-stats")
+async def skill_get_article_stats(
+    account_id: int,
+    request: Request,
+    begin_date: str | None = None,
+    end_date: str | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """Get article statistics: daily summary and per-article detail.
+
+    Query params:
+    - begin_date: YYYY-MM-DD (default: 7 days ago)
+    - end_date: YYYY-MM-DD (default: yesterday)
+    """
+    from datetime import date, timedelta, timezone
+
+    email = _get_skill_email(request)
+    account = await _get_account_with_token(account_id, email, db)
+
+    if not end_date:
+        end_date = (date.today() - timedelta(days=1)).isoformat()
+    if not begin_date:
+        begin_date = (date.fromisoformat(end_date) - timedelta(days=6)).isoformat()
+
+    try:
+        article_summary = await WeChatService.get_article_summary(
+            account.access_token, begin_date, end_date
+        )
+        article_total = await WeChatService.get_article_total(
+            account.access_token, begin_date, end_date
+        )
+    except RuntimeError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+    return {
+        "account_id": account_id,
+        "account_name": account.name,
+        "begin_date": begin_date,
+        "end_date": end_date,
+        "article_summary": article_summary,
+        "article_total": article_total,
+    }

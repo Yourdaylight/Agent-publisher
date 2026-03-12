@@ -64,13 +64,13 @@ class ArticleService:
             )
 
         # 2. Generate article via LLM (streaming when chunk_callback is provided)
-        # Fallback to global defaults when agent-level config is empty
+        # Always use platform-level LLM config from settings
         from agent_publisher.config import settings
 
-        provider = agent.llm_provider or settings.default_llm_provider
-        model = agent.llm_model or settings.default_llm_model
-        api_key = agent.llm_api_key or settings.default_llm_api_key
-        base_url = agent.llm_base_url or settings.default_llm_base_url
+        provider = settings.default_llm_provider
+        model = settings.default_llm_model
+        api_key = settings.default_llm_api_key
+        base_url = settings.default_llm_base_url
 
         messages = self.llm.build_article_messages(
             topic=agent.topic,
@@ -357,3 +357,148 @@ class ArticleService:
         html = f"<p>{html}</p>"
 
         return html
+
+    async def update_article(self, article_id: int, updates: dict) -> Article:
+        """Update local article fields.
+
+        Supported keys: title, digest, content, html_content, cover_image_url.
+        When 'content' (Markdown) is modified, html_content is automatically
+        re-rendered via wenyan.
+        """
+        article = await self.session.get(Article, article_id)
+        if not article:
+            raise ValueError(f"Article {article_id} not found")
+
+        allowed_fields = {"title", "digest", "content", "html_content", "cover_image_url"}
+        updated_fields: list[str] = []
+
+        for key, value in updates.items():
+            if key not in allowed_fields:
+                continue
+            if value is None:
+                continue
+            setattr(article, key, value)
+            updated_fields.append(key)
+
+        # Auto re-render html when markdown content changes
+        if "content" in updated_fields:
+            article.html_content = self._markdown_to_html(article.content)
+            if "html_content" not in updated_fields:
+                updated_fields.append("html_content")
+
+        await self.session.commit()
+        await self.session.refresh(article)
+
+        logger.info(
+            "Article %d updated, fields=%s", article.id, updated_fields
+        )
+        return article
+
+    async def sync_article_to_draft(self, article_id: int) -> str:
+        """Sync local article edits to WeChat draft box.
+
+        Returns sync status: 'synced', 'skipped', or raises on error.
+        Only articles with status='published' and a valid wechat_media_id
+        will be synced.
+        """
+        article = await self.session.get(Article, article_id)
+        if not article:
+            raise ValueError(f"Article {article_id} not found")
+
+        if article.status != "published" or not article.wechat_media_id:
+            logger.info(
+                "Article %d not published or no media_id, skipping sync",
+                article.id,
+            )
+            return "skipped"
+
+        agent = await self.session.get(Agent, article.agent_id)
+        if not agent:
+            raise ValueError(f"Agent {article.agent_id} not found")
+
+        account = await self.session.get(Account, agent.account_id)
+        if not account:
+            raise ValueError(f"Account {agent.account_id} not found")
+
+        # Refresh token if needed
+        now = datetime.now(timezone.utc)
+        token_expired = (
+            not account.access_token
+            or not account.token_expires_at
+            or account.token_expires_at.replace(tzinfo=timezone.utc) < now
+        )
+        if token_expired:
+            token, expires_at = await WeChatService.get_access_token(
+                account.appid, account.appsecret
+            )
+            account.access_token = token
+            account.token_expires_at = expires_at
+            await self.session.commit()
+
+        # Re-upload cover image if available
+        thumb_media_id = ""
+        if article.cover_image_url:
+            try:
+                cover_url = article.cover_image_url
+                if cover_url.startswith("/api/media/") and cover_url.endswith("/download"):
+                    from pathlib import Path
+                    from agent_publisher.api.media import UPLOAD_DIR
+                    from agent_publisher.models.media import MediaAsset
+
+                    media_id_str = cover_url.split("/api/media/")[1].split("/download")[0]
+                    media_asset = await self.session.get(MediaAsset, int(media_id_str))
+                    if media_asset:
+                        local_path = UPLOAD_DIR / media_asset.stored_filename
+                        if local_path.is_file():
+                            image_bytes = local_path.read_bytes()
+                        else:
+                            raise FileNotFoundError(f"Media file not found: {local_path}")
+                    else:
+                        raise ValueError(f"Media asset {media_id_str} not found")
+                elif cover_url.startswith("http"):
+                    async with httpx.AsyncClient(timeout=30) as client:
+                        img_resp = await client.get(cover_url)
+                        img_resp.raise_for_status()
+                        image_bytes = img_resp.content
+                else:
+                    image_bytes = HunyuanImageService.base64_to_bytes(cover_url)
+
+                thumb_media_id = await WeChatService.upload_thumb(
+                    account.access_token, image_bytes
+                )
+            except Exception as e:
+                logger.error("Failed to upload cover image for sync: %s", e)
+
+        # Ensure html is wenyan-rendered
+        publish_html = article.html_content
+        if article.content and 'data-provider="WenYan"' not in (publish_html or ""):
+            rendered = self._markdown_to_html(article.content)
+            if 'data-provider="WenYan"' in rendered:
+                publish_html = rendered
+                article.html_content = rendered
+
+        author_name = agent.name
+        if len(author_name) > 8:
+            author_name = author_name[:8]
+
+        draft_article: dict = {
+            "title": article.title,
+            "author": author_name,
+            "digest": article.digest,
+            "content": publish_html,
+            "content_source_url": "",
+        }
+        if thumb_media_id:
+            draft_article["thumb_media_id"] = thumb_media_id
+
+        await WeChatService.update_draft(
+            access_token=account.access_token,
+            media_id=article.wechat_media_id,
+            articles=draft_article,
+            index=0,
+        )
+
+        await self.session.commit()
+
+        logger.info("Article %d synced to draft, media_id=%s", article.id, article.wechat_media_id)
+        return "synced"
