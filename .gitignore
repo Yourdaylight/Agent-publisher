@@ -10,3 +10,4 @@ build/
 web/node_modules/
 web/dist/
 .venv/
+deploy.sh
