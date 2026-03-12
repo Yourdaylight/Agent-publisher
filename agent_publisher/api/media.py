@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from agent_publisher.api.deps import get_db
+from agent_publisher.api.deps import get_db, get_current_user, UserContext
 from agent_publisher.config import settings
 from agent_publisher.models.media import MediaAsset
 
@@ -35,12 +35,25 @@ def _ensure_upload_dir():
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 
+async def _get_media_with_ownership(
+    media_id: int, user: UserContext, db: AsyncSession
+) -> MediaAsset:
+    """Fetch a media asset and verify ownership."""
+    asset = await db.get(MediaAsset, media_id)
+    if not asset:
+        raise HTTPException(status_code=404, detail="Media asset not found")
+    if not user.is_admin and asset.owner_email != user.email:
+        raise HTTPException(status_code=403, detail="Access denied")
+    return asset
+
+
 @router.post("")
 async def upload_media(
     file: UploadFile = File(...),
     tags: str = Query("", description="Comma-separated tags"),
     description: str = Query("", description="Asset description"),
     db: AsyncSession = Depends(get_db),
+    user: UserContext = Depends(get_current_user),
 ):
     """Upload an image/media file to the asset library."""
     _ensure_upload_dir()
@@ -81,7 +94,7 @@ async def upload_media(
         file_size=file_size,
         tags=tag_list,
         description=description,
-        owner_email="admin",  # Admin panel uploads default to "admin"
+        owner_email=user.email,  # Set owner to current user
     )
     db.add(asset)
     await db.commit()
@@ -107,9 +120,12 @@ async def list_media(
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
+    user: UserContext = Depends(get_current_user),
 ):
     """List media assets, optionally filtered by tag."""
     stmt = select(MediaAsset).order_by(MediaAsset.id.desc())
+    if not user.is_admin:
+        stmt = stmt.where(MediaAsset.owner_email == user.email)
 
     if tag:
         # JSON contains for SQLite/Postgres
@@ -139,11 +155,10 @@ async def list_media(
 async def get_media_detail(
     media_id: int,
     db: AsyncSession = Depends(get_db),
+    user: UserContext = Depends(get_current_user),
 ):
     """Get media asset detail by ID."""
-    asset = await db.get(MediaAsset, media_id)
-    if not asset:
-        raise HTTPException(status_code=404, detail="Media asset not found")
+    asset = await _get_media_with_ownership(media_id, user, db)
     return {
         "id": asset.id,
         "filename": asset.filename,
@@ -185,11 +200,10 @@ async def download_media(
 async def delete_media(
     media_id: int,
     db: AsyncSession = Depends(get_db),
+    user: UserContext = Depends(get_current_user),
 ):
     """Delete a media asset."""
-    asset = await db.get(MediaAsset, media_id)
-    if not asset:
-        raise HTTPException(status_code=404, detail="Media asset not found")
+    asset = await _get_media_with_ownership(media_id, user, db)
 
     # Remove file from disk
     file_path = UPLOAD_DIR / asset.stored_filename
@@ -208,11 +222,10 @@ async def update_media(
     tags: str = Query("", description="Comma-separated tags (replaces existing)"),
     description: str = Query("", description="New description"),
     db: AsyncSession = Depends(get_db),
+    user: UserContext = Depends(get_current_user),
 ):
     """Update media asset metadata (tags, description)."""
-    asset = await db.get(MediaAsset, media_id)
-    if not asset:
-        raise HTTPException(status_code=404, detail="Media asset not found")
+    asset = await _get_media_with_ownership(media_id, user, db)
 
     if tags:
         asset.tags = [t.strip() for t in tags.split(",") if t.strip()]

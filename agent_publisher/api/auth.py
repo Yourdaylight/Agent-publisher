@@ -3,12 +3,15 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import re
 import time
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Request, HTTPException
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, Request, HTTPException
+from pydantic import BaseModel, field_validator
 
+from agent_publisher.api.deps import get_current_user, UserContext
+from agent_publisher.api.skills import _create_skill_token, verify_skill_token
 from agent_publisher.config import settings
 
 logger = logging.getLogger(__name__)
@@ -87,36 +90,106 @@ def verify_token(token: str) -> bool:
         return False
 
 
+# ---------------------------------------------------------------------------
+# Request / Response schemas
+# ---------------------------------------------------------------------------
+
 class LoginRequest(BaseModel):
-    access_key: str
+    """Login request: provide either access_key (admin) or email (normal user)."""
+    access_key: str | None = None
+    email: str | None = None
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        v = v.strip().lower()
+        if not re.match(r"^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$", v):
+            raise ValueError("Invalid email address")
+        return v
 
 
 class LoginResponse(BaseModel):
     token: str
     message: str
+    email: str | None = None
+    is_admin: bool = False
 
+
+class UserInfoResponse(BaseModel):
+    email: str
+    is_admin: bool
+
+
+# ---------------------------------------------------------------------------
+# Endpoints
+# ---------------------------------------------------------------------------
 
 @router.post("/login", response_model=LoginResponse)
 async def login(req: LoginRequest, request: Request):
+    """Login with either access_key (admin) or email (normal user).
+
+    - access_key login: returns an admin token (ts.sig format)
+    - email login: checks whitelist, returns a skill token (ts|email|sig format)
+    """
     ip = _get_client_ip(request)
     _check_ip_ban(ip)
 
-    if req.access_key != settings.access_key:
-        _record_failed_attempt(ip)
-        raise HTTPException(status_code=401, detail="Invalid access key")
+    if req.email:
+        # Email-based login
+        email = req.email.strip().lower()
+        if not settings.is_email_allowed(email):
+            _record_failed_attempt(ip)
+            raise HTTPException(status_code=401, detail="Email not in whitelist")
+        _reset_attempts(ip)
+        token = _create_skill_token(email)
+        return LoginResponse(
+            token=token,
+            message="Login successful",
+            email=email,
+            is_admin=settings.is_admin(email),
+        )
 
-    _reset_attempts(ip)
-    token = _create_token(req.access_key)
-    return LoginResponse(token=token, message="Login successful")
+    if req.access_key:
+        # Admin access_key login
+        if req.access_key != settings.access_key:
+            _record_failed_attempt(ip)
+            raise HTTPException(status_code=401, detail="Invalid access key")
+        _reset_attempts(ip)
+        token = _create_token(req.access_key)
+        return LoginResponse(
+            token=token,
+            message="Login successful",
+            email="__admin__",
+            is_admin=True,
+        )
+
+    raise HTTPException(status_code=400, detail="Either access_key or email is required")
 
 
 @router.get("/verify")
 async def verify(request: Request):
-    """Verify the current token from Authorization header."""
+    """Verify the current token from Authorization header (supports both token types)."""
     auth_header = request.headers.get("authorization", "")
     if not auth_header.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing token")
     token = auth_header[7:]
+
+    # Try skill/email token first (contains "|")
+    if "|" in token:
+        email = verify_skill_token(token)
+        if not email:
+            raise HTTPException(status_code=401, detail="Invalid or expired token")
+        return {"valid": True, "email": email, "is_admin": settings.is_admin(email)}
+
+    # Admin token
     if not verify_token(token):
         raise HTTPException(status_code=401, detail="Invalid or expired token")
-    return {"valid": True}
+    return {"valid": True, "email": "__admin__", "is_admin": True}
+
+
+@router.get("/me", response_model=UserInfoResponse)
+async def get_me(user: UserContext = Depends(get_current_user)):
+    """Return the current authenticated user's identity."""
+    return UserInfoResponse(email=user.email, is_admin=user.is_admin)

@@ -2,7 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from agent_publisher.api.deps import get_db
+from agent_publisher.api.deps import get_db, get_current_user, UserContext
+from agent_publisher.models.account import Account
 from agent_publisher.models.agent import Agent, AGENT_ROLES, AGENT_SOURCE_MODES
 from agent_publisher.schemas.agent import AgentCreate, AgentOut, AgentUpdate
 from agent_publisher.services.task_service import TaskService
@@ -25,9 +26,41 @@ def _validate_agent_config(data: AgentCreate | AgentUpdate, is_create: bool = Tr
             raise HTTPException(422, "Skills feed mode requires 'allowed_skill_sources'")
 
 
+async def _check_account_ownership(
+    account_id: int, user: UserContext, db: AsyncSession
+) -> Account:
+    """Verify user has access to the specified account."""
+    account = await db.get(Account, account_id)
+    if not account:
+        raise HTTPException(404, "Account not found")
+    if not user.is_admin and account.owner_email != user.email:
+        raise HTTPException(403, "Access denied")
+    return account
+
+
+async def _get_agent_with_ownership(
+    agent_id: int, user: UserContext, db: AsyncSession
+) -> Agent:
+    """Fetch an agent and verify ownership through its Account."""
+    agent = await db.get(Agent, agent_id)
+    if not agent:
+        raise HTTPException(404, "Agent not found")
+    if not user.is_admin:
+        account = await db.get(Account, agent.account_id)
+        if not account or account.owner_email != user.email:
+            raise HTTPException(403, "Access denied")
+    return agent
+
+
 @router.post("", response_model=AgentOut)
-async def create_agent(data: AgentCreate, db: AsyncSession = Depends(get_db)):
+async def create_agent(
+    data: AgentCreate,
+    db: AsyncSession = Depends(get_db),
+    user: UserContext = Depends(get_current_user),
+):
     _validate_agent_config(data, is_create=True)
+    # Verify user owns the target account
+    await _check_account_ownership(data.account_id, user, db)
     agent = Agent(**data.model_dump())
     db.add(agent)
     await db.commit()
@@ -36,26 +69,34 @@ async def create_agent(data: AgentCreate, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("", response_model=list[AgentOut])
-async def list_agents(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Agent).order_by(Agent.id))
+async def list_agents(
+    db: AsyncSession = Depends(get_db),
+    user: UserContext = Depends(get_current_user),
+):
+    stmt = select(Agent).order_by(Agent.id)
+    if not user.is_admin:
+        stmt = stmt.join(Account).where(Account.owner_email == user.email)
+    result = await db.execute(stmt)
     return result.scalars().all()
 
 
 @router.get("/{agent_id}", response_model=AgentOut)
-async def get_agent(agent_id: int, db: AsyncSession = Depends(get_db)):
-    agent = await db.get(Agent, agent_id)
-    if not agent:
-        raise HTTPException(404, "Agent not found")
-    return agent
+async def get_agent(
+    agent_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: UserContext = Depends(get_current_user),
+):
+    return await _get_agent_with_ownership(agent_id, user, db)
 
 
 @router.put("/{agent_id}", response_model=AgentOut)
 async def update_agent(
-    agent_id: int, data: AgentUpdate, db: AsyncSession = Depends(get_db)
+    agent_id: int,
+    data: AgentUpdate,
+    db: AsyncSession = Depends(get_db),
+    user: UserContext = Depends(get_current_user),
 ):
-    agent = await db.get(Agent, agent_id)
-    if not agent:
-        raise HTTPException(404, "Agent not found")
+    agent = await _get_agent_with_ownership(agent_id, user, db)
     _validate_agent_config(data, is_create=False)
     for key, value in data.model_dump(exclude_unset=True).items():
         setattr(agent, key, value)
@@ -65,10 +106,12 @@ async def update_agent(
 
 
 @router.post("/{agent_id}/generate")
-async def generate_for_agent(agent_id: int, db: AsyncSession = Depends(get_db)):
-    agent = await db.get(Agent, agent_id)
-    if not agent:
-        raise HTTPException(404, "Agent not found")
+async def generate_for_agent(
+    agent_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: UserContext = Depends(get_current_user),
+):
+    agent = await _get_agent_with_ownership(agent_id, user, db)
     task_svc = TaskService(db)
     task = await task_svc.run_generate(agent_id)
     return {"task_id": task.id, "status": task.status}

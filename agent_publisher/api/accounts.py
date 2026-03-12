@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from agent_publisher.api.deps import get_db
+from agent_publisher.api.deps import get_db, get_current_user, UserContext
 from agent_publisher.models.account import Account
 from agent_publisher.schemas.account import AccountCreate, AccountOut, AccountUpdate
 from agent_publisher.services.wechat_service import WeChatService
@@ -12,9 +12,36 @@ from agent_publisher.services.wechat_service import WeChatService
 router = APIRouter(prefix="/api/accounts", tags=["accounts"])
 
 
+def _account_query_for_user(user: UserContext):
+    """Build a base query filtered by user ownership."""
+    stmt = select(Account).order_by(Account.id)
+    if not user.is_admin:
+        stmt = stmt.where(Account.owner_email == user.email)
+    return stmt
+
+
+async def _get_account_with_ownership(
+    account_id: int, user: UserContext, db: AsyncSession
+) -> Account:
+    """Fetch an account and verify ownership."""
+    account = await db.get(Account, account_id)
+    if not account:
+        raise HTTPException(404, "Account not found")
+    if not user.is_admin and account.owner_email != user.email:
+        raise HTTPException(403, "Access denied")
+    return account
+
+
 @router.post("", response_model=AccountOut)
-async def create_account(data: AccountCreate, db: AsyncSession = Depends(get_db)):
+async def create_account(
+    data: AccountCreate,
+    db: AsyncSession = Depends(get_db),
+    user: UserContext = Depends(get_current_user),
+):
     account = Account(**data.model_dump())
+    # Auto-set owner_email to current user (admin can override via data if needed)
+    if not user.is_admin or not account.owner_email:
+        account.owner_email = user.email
     db.add(account)
     await db.commit()
     await db.refresh(account)
@@ -22,26 +49,32 @@ async def create_account(data: AccountCreate, db: AsyncSession = Depends(get_db)
 
 
 @router.get("", response_model=list[AccountOut])
-async def list_accounts(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Account).order_by(Account.id))
+async def list_accounts(
+    db: AsyncSession = Depends(get_db),
+    user: UserContext = Depends(get_current_user),
+):
+    stmt = _account_query_for_user(user)
+    result = await db.execute(stmt)
     return result.scalars().all()
 
 
 @router.get("/{account_id}", response_model=AccountOut)
-async def get_account(account_id: int, db: AsyncSession = Depends(get_db)):
-    account = await db.get(Account, account_id)
-    if not account:
-        raise HTTPException(404, "Account not found")
-    return account
+async def get_account(
+    account_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: UserContext = Depends(get_current_user),
+):
+    return await _get_account_with_ownership(account_id, user, db)
 
 
 @router.put("/{account_id}", response_model=AccountOut)
 async def update_account(
-    account_id: int, data: AccountUpdate, db: AsyncSession = Depends(get_db)
+    account_id: int,
+    data: AccountUpdate,
+    db: AsyncSession = Depends(get_db),
+    user: UserContext = Depends(get_current_user),
 ):
-    account = await db.get(Account, account_id)
-    if not account:
-        raise HTTPException(404, "Account not found")
+    account = await _get_account_with_ownership(account_id, user, db)
     for key, value in data.model_dump(exclude_unset=True).items():
         setattr(account, key, value)
     await db.commit()
@@ -50,10 +83,12 @@ async def update_account(
 
 
 @router.delete("/{account_id}")
-async def delete_account(account_id: int, db: AsyncSession = Depends(get_db)):
-    account = await db.get(Account, account_id)
-    if not account:
-        raise HTTPException(404, "Account not found")
+async def delete_account(
+    account_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: UserContext = Depends(get_current_user),
+):
+    account = await _get_account_with_ownership(account_id, user, db)
     await db.delete(account)
     await db.commit()
     return {"ok": True}
@@ -82,11 +117,10 @@ async def get_account_followers(
     begin_date: str | None = None,
     end_date: str | None = None,
     db: AsyncSession = Depends(get_db),
+    user: UserContext = Depends(get_current_user),
 ):
     """Get follower overview for an account."""
-    account = await db.get(Account, account_id)
-    if not account:
-        raise HTTPException(404, "Account not found")
+    account = await _get_account_with_ownership(account_id, user, db)
 
     await _ensure_token(account, db)
 
@@ -145,11 +179,10 @@ async def get_account_article_stats(
     begin_date: str | None = None,
     end_date: str | None = None,
     db: AsyncSession = Depends(get_db),
+    user: UserContext = Depends(get_current_user),
 ):
     """Get article statistics for an account."""
-    account = await db.get(Account, account_id)
-    if not account:
-        raise HTTPException(404, "Account not found")
+    account = await _get_account_with_ownership(account_id, user, db)
 
     await _ensure_token(account, db)
 

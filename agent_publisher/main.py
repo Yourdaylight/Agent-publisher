@@ -21,7 +21,7 @@ from agent_publisher.api.settings import router as settings_router
 from agent_publisher.api.skills import router as skills_router, verify_skill_token
 from agent_publisher.api.style_presets import router as style_presets_router
 from agent_publisher.api.tasks import router as tasks_router
-from agent_publisher.api.deps import get_db
+from agent_publisher.api.deps import get_db, get_current_user, UserContext
 from agent_publisher.config import settings
 from agent_publisher.models.account import Account
 from agent_publisher.models.agent import Agent
@@ -107,7 +107,16 @@ PUBLIC_PREFIXES = ("/api/auth/", "/api/skills/auth", "/assets/", "/favicon.ico")
 
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next) -> Response:
-    """Protect all /api/* routes except /api/auth/* with token verification."""
+    """Protect all /api/* routes except public paths with token verification.
+
+    Token types:
+      - Admin token: "{ts}.{sig}" (dot-separated, from access_key login)
+      - Skill/email token: "{ts}|{email}|{sig}" (pipe-separated, from email login)
+
+    After verification, the middleware injects user identity into request.state:
+      - request.state.user_email: email string or "__admin__"
+      - request.state.is_admin: bool
+    """
     path = request.url.path
 
     # Allow public paths, non-API paths (SPA), and SSE streams
@@ -125,15 +134,20 @@ async def auth_middleware(request: Request, call_next) -> Response:
 
     token = auth_header[7:]
 
-    # Skill endpoints accept skill tokens (email-based)
-    if path.startswith("/api/skills/"):
-        if not verify_skill_token(token):
-            return JSONResponse(status_code=401, content={"detail": "Invalid or expired skill token"})
-        return await call_next(request)
-
-    # All other API routes use the admin access_key token
-    if not verify_token(token):
-        return JSONResponse(status_code=401, content={"detail": "Invalid or expired token"})
+    # Determine token type by separator: "|" => skill/email token, "." => admin token
+    if "|" in token:
+        # Skill / email token
+        email = verify_skill_token(token)
+        if not email:
+            return JSONResponse(status_code=401, content={"detail": "Invalid or expired token"})
+        request.state.user_email = email
+        request.state.is_admin = settings.is_admin(email)
+    else:
+        # Admin access_key token
+        if not verify_token(token):
+            return JSONResponse(status_code=401, content={"detail": "Invalid or expired token"})
+        request.state.user_email = "__admin__"
+        request.state.is_admin = True
 
     return await call_next(request)
 
@@ -152,12 +166,34 @@ app.include_router(candidate_materials_router)
 
 
 @app.get("/api/stats")
-async def stats(db: AsyncSession = Depends(get_db)):
-    accounts = (await db.execute(select(func.count(Account.id)))).scalar() or 0
-    agents = (await db.execute(select(func.count(Agent.id)))).scalar() or 0
-    articles = (await db.execute(select(func.count(Article.id)))).scalar() or 0
-    tasks = (await db.execute(select(func.count(Task.id)))).scalar() or 0
-    media = (await db.execute(select(func.count(MediaAsset.id)))).scalar() or 0
+async def stats(
+    db: AsyncSession = Depends(get_db),
+    user: UserContext = Depends(get_current_user),
+):
+    if user.is_admin:
+        # Admin sees all data
+        accounts = (await db.execute(select(func.count(Account.id)))).scalar() or 0
+        agents = (await db.execute(select(func.count(Agent.id)))).scalar() or 0
+        articles = (await db.execute(select(func.count(Article.id)))).scalar() or 0
+        tasks = (await db.execute(select(func.count(Task.id)))).scalar() or 0
+        media = (await db.execute(select(func.count(MediaAsset.id)))).scalar() or 0
+    else:
+        # Normal user: filter by owner_email chain
+        accounts = (await db.execute(
+            select(func.count(Account.id)).where(Account.owner_email == user.email)
+        )).scalar() or 0
+        agents = (await db.execute(
+            select(func.count(Agent.id)).join(Account).where(Account.owner_email == user.email)
+        )).scalar() or 0
+        articles = (await db.execute(
+            select(func.count(Article.id)).join(Agent).join(Account).where(Account.owner_email == user.email)
+        )).scalar() or 0
+        tasks = (await db.execute(
+            select(func.count(Task.id)).join(Agent).join(Account).where(Account.owner_email == user.email)
+        )).scalar() or 0
+        media = (await db.execute(
+            select(func.count(MediaAsset.id)).where(MediaAsset.owner_email == user.email)
+        )).scalar() or 0
     return {"accounts": accounts, "agents": agents, "articles": articles, "tasks": tasks, "media": media}
 
 

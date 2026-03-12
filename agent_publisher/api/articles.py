@@ -3,7 +3,9 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from agent_publisher.api.deps import get_db
+from agent_publisher.api.deps import get_db, get_current_user, UserContext
+from agent_publisher.models.account import Account
+from agent_publisher.models.agent import Agent
 from agent_publisher.models.article import Article
 from agent_publisher.models.publish_record import PublishRecord
 from agent_publisher.schemas.article import ArticleOut
@@ -28,14 +30,34 @@ class VariantGenerateRequest(BaseModel):
     style_ids: list[str]
 
 
+async def _get_article_with_ownership(
+    article_id: int, user: UserContext, db: AsyncSession
+) -> Article:
+    """Fetch an article and verify ownership through Agent -> Account chain."""
+    article = await db.get(Article, article_id)
+    if not article:
+        raise HTTPException(404, "Article not found")
+    if not user.is_admin:
+        agent = await db.get(Agent, article.agent_id)
+        if not agent:
+            raise HTTPException(404, "Agent not found")
+        account = await db.get(Account, agent.account_id)
+        if not account or account.owner_email != user.email:
+            raise HTTPException(403, "Access denied")
+    return article
+
+
 @router.get("")
 async def list_articles(
     agent_id: int | None = None,
     status: str | None = None,
     db: AsyncSession = Depends(get_db),
+    user: UserContext = Depends(get_current_user),
 ):
-    """List articles with publish_count."""
+    """List articles with publish_count, filtered by user ownership."""
     stmt = select(Article).order_by(Article.id.desc())
+    if not user.is_admin:
+        stmt = stmt.join(Agent).join(Account).where(Account.owner_email == user.email)
     if agent_id:
         stmt = stmt.where(Article.agent_id == agent_id)
     if status:
@@ -84,18 +106,25 @@ async def list_articles(
 
 
 @router.get("/{article_id}", response_model=ArticleOut)
-async def get_article(article_id: int, db: AsyncSession = Depends(get_db)):
-    article = await db.get(Article, article_id)
-    if not article:
-        raise HTTPException(404, "Article not found")
-    return article
+async def get_article(
+    article_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: UserContext = Depends(get_current_user),
+):
+    return await _get_article_with_ownership(article_id, user, db)
 
 
 @router.post("/{article_id}/publish")
-async def publish_article(article_id: int, db: AsyncSession = Depends(get_db)):
+async def publish_article(
+    article_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: UserContext = Depends(get_current_user),
+):
+    await _get_article_with_ownership(article_id, user, db)
     article_svc = ArticleService(db)
     try:
-        media_id = await article_svc.publish_article(article_id, operator="admin")
+        operator = user.email if not user.is_admin else "admin"
+        media_id = await article_svc.publish_article(article_id, operator=operator)
         return {"ok": True, "media_id": media_id}
     except ValueError as e:
         raise HTTPException(404, str(e))
@@ -106,12 +135,14 @@ async def update_article(
     article_id: int,
     data: ArticleUpdate,
     db: AsyncSession = Depends(get_db),
+    user: UserContext = Depends(get_current_user),
 ):
     """Update article fields (title, digest, content, html_content, cover_image_url).
 
     When Markdown content is modified, html_content is automatically re-rendered
     via wenyan.
     """
+    await _get_article_with_ownership(article_id, user, db)
     updates = data.model_dump(exclude_none=True)
     if not updates:
         raise HTTPException(400, "No fields to update")
@@ -125,11 +156,17 @@ async def update_article(
 
 
 @router.post("/{article_id}/sync")
-async def sync_article(article_id: int, db: AsyncSession = Depends(get_db)):
+async def sync_article(
+    article_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: UserContext = Depends(get_current_user),
+):
     """Sync local article edits to WeChat draft box."""
+    await _get_article_with_ownership(article_id, user, db)
     article_svc = ArticleService(db)
     try:
-        sync_status = await article_svc.sync_article_to_draft(article_id, operator="admin")
+        operator = user.email if not user.is_admin else "admin"
+        sync_status = await article_svc.sync_article_to_draft(article_id, operator=operator)
         return {"ok": True, "sync_status": sync_status}
     except ValueError as e:
         raise HTTPException(404, str(e))
@@ -141,11 +178,10 @@ async def sync_article(article_id: int, db: AsyncSession = Depends(get_db)):
 async def get_article_publish_records(
     article_id: int,
     db: AsyncSession = Depends(get_db),
+    user: UserContext = Depends(get_current_user),
 ):
     """Get publish records for a specific article."""
-    article = await db.get(Article, article_id)
-    if not article:
-        raise HTTPException(404, "Article not found")
+    await _get_article_with_ownership(article_id, user, db)
     stmt = (
         select(PublishRecord)
         .where(PublishRecord.article_id == article_id)
@@ -173,11 +209,10 @@ async def generate_variants(
     article_id: int,
     data: VariantGenerateRequest,
     db: AsyncSession = Depends(get_db),
+    user: UserContext = Depends(get_current_user),
 ):
     """Initiate batch variant generation for an article."""
-    article = await db.get(Article, article_id)
-    if not article:
-        raise HTTPException(404, "Article not found")
+    await _get_article_with_ownership(article_id, user, db)
 
     if not data.style_ids:
         raise HTTPException(400, "At least one style_id is required")
@@ -201,11 +236,10 @@ async def generate_variants(
 async def list_article_variants(
     article_id: int,
     db: AsyncSession = Depends(get_db),
+    user: UserContext = Depends(get_current_user),
 ):
     """List all variant articles derived from the given source article."""
-    article = await db.get(Article, article_id)
-    if not article:
-        raise HTTPException(404, "Article not found")
+    await _get_article_with_ownership(article_id, user, db)
 
     from agent_publisher.models.agent import Agent
 

@@ -6,8 +6,9 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from agent_publisher.api.deps import get_db
+from agent_publisher.api.deps import get_db, get_current_user, UserContext
 from agent_publisher.database import async_session_factory
+from agent_publisher.models.account import Account
 from agent_publisher.models.agent import Agent
 from agent_publisher.models.task import Task
 from agent_publisher.schemas.task import BatchRequest, TaskOut
@@ -16,11 +17,31 @@ from agent_publisher.services.task_service import TaskService
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
 
+async def _get_task_with_ownership(
+    task_id: int, user: UserContext, db: AsyncSession
+) -> Task:
+    """Fetch a task and verify ownership through Agent -> Account chain."""
+    task = await db.get(Task, task_id)
+    if not task:
+        raise HTTPException(404, "Task not found")
+    if not user.is_admin and task.agent_id:
+        agent = await db.get(Agent, task.agent_id)
+        if agent:
+            account = await db.get(Account, agent.account_id)
+            if not account or account.owner_email != user.email:
+                raise HTTPException(403, "Access denied")
+    return task
+
+
 @router.get("", response_model=list[TaskOut])
 async def list_tasks(
-    status: str | None = None, db: AsyncSession = Depends(get_db)
+    status: str | None = None,
+    db: AsyncSession = Depends(get_db),
+    user: UserContext = Depends(get_current_user),
 ):
     stmt = select(Task).order_by(Task.id.desc())
+    if not user.is_admin:
+        stmt = stmt.join(Agent).join(Account).where(Account.owner_email == user.email)
     if status:
         stmt = stmt.where(Task.status == status)
     result = await db.execute(stmt)
@@ -28,11 +49,12 @@ async def list_tasks(
 
 
 @router.get("/{task_id}", response_model=TaskOut)
-async def get_task(task_id: int, db: AsyncSession = Depends(get_db)):
-    task = await db.get(Task, task_id)
-    if not task:
-        raise HTTPException(404, "Task not found")
-    return task
+async def get_task(
+    task_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: UserContext = Depends(get_current_user),
+):
+    return await _get_task_with_ownership(task_id, user, db)
 
 
 @router.get("/{task_id}/stream")
@@ -93,7 +115,11 @@ async def stream_task(task_id: int):
 
 
 @router.post("/batch")
-async def batch_run(req: BatchRequest, db: AsyncSession = Depends(get_db)):
+async def batch_run(
+    req: BatchRequest,
+    db: AsyncSession = Depends(get_db),
+    user: UserContext = Depends(get_current_user),
+):
     task_svc = TaskService(db)
 
     if req.agent_ids:
@@ -103,10 +129,26 @@ async def batch_run(req: BatchRequest, db: AsyncSession = Depends(get_db)):
             if not agent:
                 results.append({"agent_id": agent_id, "error": "not found"})
                 continue
+            # Verify ownership
+            if not user.is_admin:
+                account = await db.get(Account, agent.account_id)
+                if not account or account.owner_email != user.email:
+                    results.append({"agent_id": agent_id, "error": "access denied"})
+                    continue
             task = await task_svc.run_generate(agent_id)
             results.append({"agent_id": agent_id, "task_id": task.id, "status": task.status})
         return {"results": results}
     else:
+        if not user.is_admin:
+            # Normal users can only batch-run their own agents
+            stmt = select(Agent.id).join(Account).where(Account.owner_email == user.email)
+            result = await db.execute(stmt)
+            user_agent_ids = [row[0] for row in result.all()]
+            results = []
+            for agent_id in user_agent_ids:
+                task = await task_svc.run_generate(agent_id)
+                results.append({"agent_id": agent_id, "task_id": task.id, "status": task.status})
+            return {"results": results}
         tasks = await task_svc.run_batch_all()
         return {
             "results": [

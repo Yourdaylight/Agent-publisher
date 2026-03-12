@@ -6,7 +6,14 @@
         <h1>Agent Publisher</h1>
         <p style="color: var(--td-text-color-secondary); margin-top: 4px">AI 驱动的多账号微信公众号文章发布系统</p>
       </div>
-      <t-form ref="formRef" :data="formData" @submit="onSubmit" label-align="top">
+
+      <t-tabs v-model="loginMode" style="margin-bottom: 24px">
+        <t-tab-panel value="accessKey" label="管理员密钥" />
+        <t-tab-panel value="email" label="Email 登录" />
+      </t-tabs>
+
+      <!-- Access Key Login -->
+      <t-form v-if="loginMode === 'accessKey'" ref="formRef" :data="formData" @submit="onSubmitAccessKey" label-align="top">
         <t-form-item label="访问密钥" name="accessKey">
           <t-input
             v-model="formData.accessKey"
@@ -14,9 +21,44 @@
             placeholder="请输入访问密钥"
             size="large"
             :disabled="banned"
-            @keyup.enter="onSubmit"
+            @keyup.enter="onSubmitAccessKey"
           >
             <template #prefix-icon><t-icon name="lock-on" /></template>
+          </t-input>
+        </t-form-item>
+        <t-alert
+          v-if="errorMsg"
+          theme="error"
+          :message="errorMsg"
+          style="margin-bottom: 16px"
+          close
+          @close="errorMsg = ''"
+        />
+        <t-alert
+          v-if="banned"
+          theme="warning"
+          message="由于多次登录失败，您的 IP 已被临时封禁，请稍后再试。"
+          style="margin-bottom: 16px"
+        />
+        <t-form-item>
+          <t-button theme="primary" type="submit" block size="large" :loading="loading" :disabled="banned">
+            登录
+          </t-button>
+        </t-form-item>
+      </t-form>
+
+      <!-- Email Login -->
+      <t-form v-else ref="emailFormRef" :data="emailFormData" @submit="onSubmitEmail" label-align="top">
+        <t-form-item label="邮箱地址" name="email">
+          <t-input
+            v-model="emailFormData.email"
+            type="text"
+            placeholder="请输入白名单中的邮箱地址"
+            size="large"
+            :disabled="banned"
+            @keyup.enter="onSubmitEmail"
+          >
+            <template #prefix-icon><t-icon name="mail" /></template>
           </t-input>
         </t-form-item>
         <t-alert
@@ -46,16 +88,39 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import { useRouter } from 'vue-router';
-import { login } from '@/api';
+import { loginByAccessKey, loginByEmail, saveUserInfo } from '@/api';
 import { MessagePlugin } from 'tdesign-vue-next';
 
 const router = useRouter();
 const loading = ref(false);
 const banned = ref(false);
 const errorMsg = ref('');
+const loginMode = ref<'accessKey' | 'email'>('accessKey');
 const formData = ref({ accessKey: '' });
+const emailFormData = ref({ email: '' });
 
-const onSubmit = async () => {
+const handleLoginSuccess = (data: { token: string; email?: string; is_admin?: boolean }) => {
+  localStorage.setItem('ap_token', data.token);
+  saveUserInfo({
+    email: data.email || '__admin__',
+    is_admin: data.is_admin ?? true,
+  });
+  MessagePlugin.success('登录成功');
+  router.replace('/dashboard');
+};
+
+const handleLoginError = (err: any) => {
+  const status = err?.response?.status;
+  const detail = err?.response?.data?.detail || '登录失败';
+  if (status === 403) {
+    banned.value = true;
+    errorMsg.value = detail;
+  } else {
+    errorMsg.value = detail;
+  }
+};
+
+const onSubmitAccessKey = async () => {
   if (!formData.value.accessKey) {
     errorMsg.value = '请输入访问密钥';
     return;
@@ -63,20 +128,27 @@ const onSubmit = async () => {
   loading.value = true;
   errorMsg.value = '';
   try {
-    const res = await login(formData.value.accessKey);
-    const { token } = res.data;
-    localStorage.setItem('ap_token', token);
-    MessagePlugin.success('登录成功');
-    router.replace('/dashboard');
+    const res = await loginByAccessKey(formData.value.accessKey);
+    handleLoginSuccess(res.data);
   } catch (err: any) {
-    const status = err?.response?.status;
-    const detail = err?.response?.data?.detail || '登录失败';
-    if (status === 403) {
-      banned.value = true;
-      errorMsg.value = detail;
-    } else {
-      errorMsg.value = detail;
-    }
+    handleLoginError(err);
+  } finally {
+    loading.value = false;
+  }
+};
+
+const onSubmitEmail = async () => {
+  if (!emailFormData.value.email) {
+    errorMsg.value = '请输入邮箱地址';
+    return;
+  }
+  loading.value = true;
+  errorMsg.value = '';
+  try {
+    const res = await loginByEmail(emailFormData.value.email);
+    handleLoginSuccess(res.data);
+  } catch (err: any) {
+    handleLoginError(err);
   } finally {
     loading.value = false;
   }

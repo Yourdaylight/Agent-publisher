@@ -20,6 +20,7 @@ http.interceptors.response.use(
       const isLoginRequest = error?.config?.url?.includes('/auth/login');
       if (!isLoginRequest && window.location.pathname !== '/login') {
         localStorage.removeItem('ap_token');
+        localStorage.removeItem('ap_user');
         window.location.href = '/login';
       }
     }
@@ -28,8 +29,32 @@ http.interceptors.response.use(
 );
 
 // Auth
-export const login = (accessKey: string) => http.post('/auth/login', { access_key: accessKey });
+export const loginByAccessKey = (accessKey: string) => http.post('/auth/login', { access_key: accessKey });
+export const loginByEmail = (email: string) => http.post('/auth/login', { email });
+// Keep legacy `login` alias for backward compatibility
+export const login = loginByAccessKey;
 export const verifyToken = () => http.get('/auth/verify');
+export const getCurrentUser = () => http.get('/auth/me');
+
+// Helper: save user info after login
+export const saveUserInfo = (data: { email: string; is_admin: boolean }) => {
+  localStorage.setItem('ap_user', JSON.stringify(data));
+};
+
+export const getUserInfo = (): { email: string; is_admin: boolean } | null => {
+  const raw = localStorage.getItem('ap_user');
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+};
+
+export const clearAuth = () => {
+  localStorage.removeItem('ap_token');
+  localStorage.removeItem('ap_user');
+};
 
 // Settings
 export const getSettings = () => http.get('/settings');
@@ -112,5 +137,9 @@ export const deleteAgent = (id: number) => http.delete(`/agents/${id}`);
 // Source mode stats
 export const getSourceModeStats = () => http.get('/stats/source-modes');
 export const getTagStats = () => http.get('/stats/tags');
+
+// Media
+export const getMedia = (params?: { tag?: string; page?: number; page_size?: number }) =>
+  http.get('/media', { params });
 
 export default http;

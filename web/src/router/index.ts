@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router';
+import { getUserInfo } from '@/api';
 
 const routes = [
   { path: '/login', name: 'Login', component: () => import('@/views/Login.vue'), meta: { title: '登录', public: true } },
@@ -11,7 +12,7 @@ const routes = [
   { path: '/articles', name: 'Articles', component: () => import('@/views/Articles.vue'), meta: { title: '文章管理' } },
   { path: '/publishes', name: 'Publishes', component: () => import('@/views/Publishes.vue'), meta: { title: '发布管理' } },
   { path: '/tasks', name: 'Tasks', component: () => import('@/views/Tasks.vue'), meta: { title: '任务管理' } },
-  { path: '/settings', name: 'Settings', component: () => import('@/views/Settings.vue'), meta: { title: '全局配置' } },
+  { path: '/settings', name: 'Settings', component: () => import('@/views/Settings.vue'), meta: { title: '全局配置', requiresAdmin: true } },
 ];
 
 const router = createRouter({
@@ -19,7 +20,7 @@ const router = createRouter({
   routes,
 });
 
-// Navigation guard: redirect to login if no token
+// Navigation guard: redirect to login if no token; restrict admin pages
 router.beforeEach((to, _from, next) => {
   const token = localStorage.getItem('ap_token');
   if (to.meta?.public) {
@@ -32,6 +33,14 @@ router.beforeEach((to, _from, next) => {
   } else if (!token) {
     next('/login');
   } else {
+    // Check admin-only routes
+    if (to.meta?.requiresAdmin) {
+      const userInfo = getUserInfo();
+      if (!userInfo?.is_admin) {
+        next('/dashboard');
+        return;
+      }
+    }
     next();
   }
 });

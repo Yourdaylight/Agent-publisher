@@ -6,7 +6,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
-from agent_publisher.api.auth import verify_token
+from agent_publisher.api.deps import get_current_user, require_admin, UserContext
 from agent_publisher.config import settings
 
 logger = logging.getLogger(__name__)
@@ -14,14 +14,10 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
 
-def _require_auth(request: Request) -> None:
-    """Dependency to require valid auth token."""
-    auth_header = request.headers.get("authorization", "")
-    if not auth_header.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Authentication required")
-    token = auth_header[7:]
-    if not verify_token(token):
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
+async def _require_admin_user(user: UserContext = Depends(get_current_user)) -> UserContext:
+    """Dependency: require admin privileges for all settings endpoints."""
+    require_admin(user)
+    return user
 
 
 class LLMSettingsUpdate(BaseModel):
@@ -59,8 +55,8 @@ def _mask(value: str) -> str:
 
 
 @router.get("", response_model=AllSettings)
-async def get_settings(_: None = Depends(_require_auth)):
-    """Get all current global settings (sensitive values masked)."""
+async def get_settings(_: UserContext = Depends(_require_admin_user)):
+    """Get all current global settings (sensitive values masked). Admin only."""
     return AllSettings(
         default_llm_provider=settings.default_llm_provider,
         default_llm_model=settings.default_llm_model,
@@ -73,8 +69,8 @@ async def get_settings(_: None = Depends(_require_auth)):
 
 
 @router.put("/llm")
-async def update_llm_settings(req: LLMSettingsUpdate, _: None = Depends(_require_auth)):
-    """Update default LLM settings at runtime."""
+async def update_llm_settings(req: LLMSettingsUpdate, _: UserContext = Depends(_require_admin_user)):
+    """Update default LLM settings at runtime. Admin only."""
     if req.default_llm_provider is not None:
         settings.default_llm_provider = req.default_llm_provider
     if req.default_llm_model is not None:
@@ -88,8 +84,8 @@ async def update_llm_settings(req: LLMSettingsUpdate, _: None = Depends(_require
 
 
 @router.put("/image")
-async def update_image_settings(req: ImageSettingsUpdate, _: None = Depends(_require_auth)):
-    """Update Tencent Cloud image generation settings at runtime."""
+async def update_image_settings(req: ImageSettingsUpdate, _: UserContext = Depends(_require_admin_user)):
+    """Update Tencent Cloud image generation settings at runtime. Admin only."""
     if req.tencent_secret_id is not None:
         settings.tencent_secret_id = req.tencent_secret_id
     if req.tencent_secret_key is not None:
@@ -99,8 +95,8 @@ async def update_image_settings(req: ImageSettingsUpdate, _: None = Depends(_req
 
 
 @router.put("/access-key")
-async def update_access_key(req: AccessKeyUpdate, _: None = Depends(_require_auth)):
-    """Update the access key. Requires the current key for verification."""
+async def update_access_key(req: AccessKeyUpdate, _: UserContext = Depends(_require_admin_user)):
+    """Update the access key. Requires the current key for verification. Admin only."""
     if req.current_key != settings.access_key:
         raise HTTPException(status_code=403, detail="Current access key is incorrect")
     if len(req.new_key) < 6:
