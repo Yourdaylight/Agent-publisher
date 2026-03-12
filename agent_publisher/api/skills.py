@@ -917,6 +917,17 @@ async def skill_get_followers(
     if not begin_date:
         begin_date = (date.fromisoformat(end_date) - timedelta(days=6)).isoformat()
 
+    warnings: list[str] = []
+
+    # Follower list (available for all account types)
+    try:
+        followers_info = await WeChatService.get_followers(account.access_token)
+    except RuntimeError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+    # Datacube stats (require certified service account)
+    user_summary: list[dict] = []
+    user_cumulate: list[dict] = []
     try:
         user_summary = await WeChatService.get_user_summary(
             account.access_token, begin_date, end_date
@@ -924,11 +935,14 @@ async def skill_get_followers(
         user_cumulate = await WeChatService.get_user_cumulate(
             account.access_token, begin_date, end_date
         )
-        followers_info = await WeChatService.get_followers(account.access_token)
     except RuntimeError as e:
-        raise HTTPException(status_code=502, detail=str(e))
+        msg = str(e)
+        if "48001" in msg:
+            warnings.append("该公众号没有数据统计接口权限（需要认证服务号），仅返回粉丝总数")
+        else:
+            raise HTTPException(status_code=502, detail=msg)
 
-    return {
+    result: dict = {
         "account_id": account_id,
         "account_name": account.name,
         "begin_date": begin_date,
@@ -937,6 +951,9 @@ async def skill_get_followers(
         "user_summary": user_summary,
         "user_cumulate": user_cumulate,
     }
+    if warnings:
+        result["warnings"] = warnings
+    return result
 
 
 @router.get("/accounts/{account_id}/article-stats")
@@ -963,6 +980,9 @@ async def skill_get_article_stats(
     if not begin_date:
         begin_date = (date.fromisoformat(end_date) - timedelta(days=6)).isoformat()
 
+    warnings: list[str] = []
+    article_summary: list[dict] = []
+    article_total: list[dict] = []
     try:
         article_summary = await WeChatService.get_article_summary(
             account.access_token, begin_date, end_date
@@ -971,9 +991,13 @@ async def skill_get_article_stats(
             account.access_token, begin_date, end_date
         )
     except RuntimeError as e:
-        raise HTTPException(status_code=502, detail=str(e))
+        msg = str(e)
+        if "48001" in msg:
+            warnings.append("该公众号没有文章统计接口权限（需要认证服务号），无法获取阅读/分享数据")
+        else:
+            raise HTTPException(status_code=502, detail=msg)
 
-    return {
+    result: dict = {
         "account_id": account_id,
         "account_name": account.name,
         "begin_date": begin_date,
@@ -981,3 +1005,6 @@ async def skill_get_article_stats(
         "article_summary": article_summary,
         "article_total": article_total,
     }
+    if warnings:
+        result["warnings"] = warnings
+    return result
