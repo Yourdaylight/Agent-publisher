@@ -331,8 +331,21 @@ class SkillAgentCreate(BaseModel):
     rss_sources: list[dict] = []
     prompt_template: str = ""
     image_style: str = "现代简约风格，色彩鲜明"
+    default_style_id: str | None = None
     schedule_cron: str = "0 8 * * *"
     is_active: bool = True
+
+
+class SkillAgentUpdate(BaseModel):
+    name: str | None = None
+    topic: str | None = None
+    description: str | None = None
+    rss_sources: list[dict] | None = None
+    prompt_template: str | None = None
+    image_style: str | None = None
+    default_style_id: str | None = None
+    schedule_cron: str | None = None
+    is_active: bool | None = None
 
 
 @router.get("/agents")
@@ -366,12 +379,56 @@ async def skill_list_agents(
             "rss_sources": a.rss_sources,
             "prompt_template": a.prompt_template,
             "image_style": a.image_style,
+            "default_style_id": a.default_style_id,
             "schedule_cron": a.schedule_cron,
             "is_active": a.is_active,
             "created_at": a.created_at.isoformat() if a.created_at else None,
         }
         for a in agents
     ]
+
+
+@router.put("/agents/{agent_id}")
+async def skill_update_agent(
+    agent_id: int,
+    data: SkillAgentUpdate,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Update an agent's configuration (ownership check)."""
+    email = _get_skill_email(request)
+    is_admin = settings.is_admin(email)
+
+    agent = await db.get(Agent, agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    if not is_admin:
+        account = await db.get(Account, agent.account_id)
+        if not account or account.owner_email != email:
+            raise HTTPException(status_code=403, detail="You do not own this agent's account")
+
+    updates = data.model_dump(exclude_none=True)
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields to update")
+
+    for key, value in updates.items():
+        setattr(agent, key, value)
+
+    await db.commit()
+    await db.refresh(agent)
+    logger.info("Skill updated agent id=%d for email=%s fields=%s", agent.id, email, list(updates.keys()))
+    return {
+        "id": agent.id,
+        "name": agent.name,
+        "topic": agent.topic,
+        "description": agent.description,
+        "account_id": agent.account_id,
+        "default_style_id": agent.default_style_id,
+        "image_style": agent.image_style,
+        "schedule_cron": agent.schedule_cron,
+        "is_active": agent.is_active,
+    }
 
 
 @router.post("/agents")
@@ -1130,6 +1187,27 @@ async def skill_update_style_preset(
         "is_builtin": preset.is_builtin,
         "created_at": preset.created_at.isoformat() if preset.created_at else None,
     }
+
+
+@router.delete("/style-presets/{style_id}")
+async def skill_delete_style_preset(
+    style_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete a custom style preset. Built-in presets cannot be deleted."""
+    from agent_publisher.services.style_preset_service import StylePresetService
+
+    email = _get_skill_email(request)
+    _require_admin(email)
+
+    svc = StylePresetService(db)
+    try:
+        await svc.delete_preset(style_id)
+    except ValueError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+
+    return {"ok": True, "deleted_style_id": style_id}
 
 
 # ---------------------------------------------------------------------------
