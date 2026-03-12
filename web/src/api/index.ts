@@ -59,7 +59,9 @@ export const generateForAgent = (id: number) => http.post(`/agents/${id}/generat
 // Articles
 export const getArticles = (params?: { agent_id?: number; status?: string }) => http.get('/articles', { params });
 export const getArticle = (id: number) => http.get(`/articles/${id}`);
+export const updateArticle = (id: number, data: any) => http.put(`/articles/${id}`, data);
 export const publishArticle = (id: number) => http.post(`/articles/${id}/publish`);
+export const syncArticle = (id: number) => http.post(`/articles/${id}/sync`);
 
 // Tasks
 export const getTasks = (params?: { status?: string }) => http.get('/tasks', { params });
