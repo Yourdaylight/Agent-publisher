@@ -919,11 +919,16 @@ async def skill_get_followers(
 
     warnings: list[str] = []
 
-    # Follower list (available for all account types)
+    # Follower list (may not be available for uncertified accounts)
+    followers_info: dict = {}
     try:
         followers_info = await WeChatService.get_followers(account.access_token)
     except RuntimeError as e:
-        raise HTTPException(status_code=502, detail=str(e))
+        msg = str(e)
+        if "48001" in msg:
+            warnings.append("该公众号没有粉丝管理接口权限（需要认证服务号），无法获取粉丝总数")
+        else:
+            raise HTTPException(status_code=502, detail=msg)
 
     # Datacube stats (require certified service account)
     user_summary: list[dict] = []
