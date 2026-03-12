@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel
 
@@ -11,6 +12,10 @@ class AgentCreate(BaseModel):
     description: str = ""
     account_id: int
     rss_sources: list[dict] = []
+    role: Literal["collector", "processor", "publisher", "full_pipeline"] = "full_pipeline"
+    source_mode: Literal["independent_search", "rss", "skills_feed"] = "rss"
+    search_config: dict | None = None
+    allowed_skill_sources: list[str] | None = None
     llm_provider: str = "openai"
     llm_model: str = "gpt-4o"
     llm_api_key: str = ""
@@ -27,6 +32,10 @@ class AgentUpdate(BaseModel):
     topic: str | None = None
     description: str | None = None
     rss_sources: list[dict] | None = None
+    role: Literal["collector", "processor", "publisher", "full_pipeline"] | None = None
+    source_mode: Literal["independent_search", "rss", "skills_feed"] | None = None
+    search_config: dict | None = None
+    allowed_skill_sources: list[str] | None = None
     llm_provider: str | None = None
     llm_model: str | None = None
     llm_api_key: str | None = None
@@ -45,6 +54,10 @@ class AgentOut(BaseModel):
     description: str
     account_id: int
     rss_sources: list[dict] | None
+    role: str
+    source_mode: str
+    search_config: dict | None = None
+    allowed_skill_sources: list[str] | None = None
     llm_provider: str
     llm_model: str
     llm_base_url: str

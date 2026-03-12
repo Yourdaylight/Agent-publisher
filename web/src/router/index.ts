@@ -7,6 +7,7 @@ const routes = [
   { path: '/guide', name: 'Guide', component: () => import('@/views/Guide.vue'), meta: { title: '快速配置' } },
   { path: '/accounts', name: 'Accounts', component: () => import('@/views/Accounts.vue'), meta: { title: '公众号管理' } },
   { path: '/agents', name: 'Agents', component: () => import('@/views/Agents.vue'), meta: { title: 'Agent 管理' } },
+  { path: '/materials', name: 'Materials', component: () => import('@/views/Materials.vue'), meta: { title: '素材库' } },
   { path: '/articles', name: 'Articles', component: () => import('@/views/Articles.vue'), meta: { title: '文章管理' } },
   { path: '/publishes', name: 'Publishes', component: () => import('@/views/Publishes.vue'), meta: { title: '发布管理' } },
   { path: '/tasks', name: 'Tasks', component: () => import('@/views/Tasks.vue'), meta: { title: '任务管理' } },

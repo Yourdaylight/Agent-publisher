@@ -14,6 +14,7 @@ from agent_publisher.api.accounts import router as accounts_router
 from agent_publisher.api.agents import router as agents_router
 from agent_publisher.api.articles import router as articles_router
 from agent_publisher.api.auth import router as auth_router, verify_token
+from agent_publisher.api.candidate_materials import router as candidate_materials_router
 from agent_publisher.api.media import router as media_router
 from agent_publisher.api.publish_records import router as publish_records_router
 from agent_publisher.api.settings import router as settings_router
@@ -147,6 +148,7 @@ app.include_router(media_router)
 app.include_router(publish_records_router)
 app.include_router(style_presets_router)
 app.include_router(skills_router)
+app.include_router(candidate_materials_router)
 
 
 @app.get("/api/stats")
@@ -157,6 +159,27 @@ async def stats(db: AsyncSession = Depends(get_db)):
     tasks = (await db.execute(select(func.count(Task.id)))).scalar() or 0
     media = (await db.execute(select(func.count(MediaAsset.id)))).scalar() or 0
     return {"accounts": accounts, "agents": agents, "articles": articles, "tasks": tasks, "media": media}
+
+
+@app.get("/api/stats/source-modes")
+async def source_mode_stats(db: AsyncSession = Depends(get_db)):
+    from agent_publisher.services.governance_service import GovernanceService
+    svc = GovernanceService(db)
+    return await svc.get_source_mode_stats()
+
+
+@app.get("/api/stats/tags")
+async def tag_stats(db: AsyncSession = Depends(get_db)):
+    from agent_publisher.services.governance_service import GovernanceService
+    svc = GovernanceService(db)
+    return await svc.get_tag_stats()
+
+
+@app.get("/api/stats/intake-trend")
+async def intake_trend(days: int = 30, db: AsyncSession = Depends(get_db)):
+    from agent_publisher.services.governance_service import GovernanceService
+    svc = GovernanceService(db)
+    return await svc.get_daily_intake_trend(days)
 
 
 # Serve static files (Vue build output) if the directory exists

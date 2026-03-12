@@ -20,7 +20,9 @@ from agent_publisher.models.article import Article
 from agent_publisher.models.agent import Agent
 from agent_publisher.models.media import MediaAsset
 from agent_publisher.services.article_service import ArticleService
+from agent_publisher.services.candidate_material_service import CandidateMaterialService
 from agent_publisher.services.wechat_service import WeChatService
+from agent_publisher.schemas.candidate_material import CandidateMaterialCreate
 
 logger = logging.getLogger(__name__)
 
@@ -1391,3 +1393,84 @@ async def skill_list_article_variants(
         }
         for v in variants
     ]
+
+
+# ---------------------------------------------------------------------------
+# Skills feed: accept candidate materials from external skills
+# ---------------------------------------------------------------------------
+
+class SkillsFeedItem(BaseModel):
+    """Schema for a candidate material submitted by a skill."""
+    title: str
+    summary: str = ""
+    original_url: str = ""
+    raw_content: str = ""
+    tags: list[str] = []
+    metadata: dict | None = None
+
+
+@router.post("/agents/{agent_id}/feed")
+async def submit_skill_feed(
+    agent_id: int,
+    items: list[SkillsFeedItem],
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Accept candidate materials from an external skill for a given agent.
+
+    Requires a valid skill token in the Authorization header.
+    Validates the skill identity against the agent's allowed_skill_sources whitelist.
+    """
+    # Authenticate skill token
+    auth_header = request.headers.get("Authorization", "")
+    token = auth_header.replace("Bearer ", "") if auth_header.startswith("Bearer ") else auth_header
+    email = verify_skill_token(token)
+    if not email:
+        raise HTTPException(401, "Invalid or expired skill token")
+
+    # Fetch agent
+    agent = await db.get(Agent, agent_id)
+    if not agent:
+        raise HTTPException(404, "Agent not found")
+
+    # Check allowed_skill_sources whitelist
+    if agent.allowed_skill_sources:
+        if email not in agent.allowed_skill_sources:
+            raise HTTPException(
+                403,
+                f"Skill '{email}' is not in the allowed sources for this agent",
+            )
+
+    # Validate and ingest each item
+    material_svc = CandidateMaterialService(db)
+    created_ids: list[int] = []
+    errors: list[dict] = []
+
+    for idx, item in enumerate(items):
+        # Reject items missing required metadata
+        if not item.title:
+            errors.append({"index": idx, "error": "title is required"})
+            continue
+        if not item.original_url and not item.summary:
+            errors.append({"index": idx, "error": "original_url or summary is required"})
+            continue
+
+        data = CandidateMaterialCreate(
+            source_type="skills_feed",
+            source_identity=email,
+            original_url=item.original_url,
+            title=item.title,
+            summary=item.summary,
+            raw_content=item.raw_content,
+            metadata=item.metadata,
+            tags=item.tags,
+            agent_id=agent_id,
+        )
+        material = await material_svc.ingest(data, agent_name=agent.name)
+        created_ids.append(material.id)
+
+    return {
+        "ingested": len(created_ids),
+        "material_ids": created_ids,
+        "errors": errors,
+    }

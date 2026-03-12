@@ -268,6 +268,27 @@
           :src="previewArticle.cover_image_url"
           style="max-width: 100%; border-radius: 8px; margin: 12px 0"
         />
+
+        <!-- Source material tracing -->
+        <t-card v-if="previewArticle.source_news && previewArticle.source_news.length" :bordered="true" style="margin: 16px 0">
+          <template #header>
+            <div style="display: flex; align-items: center; gap: 6px">
+              <t-icon name="link" />
+              <span style="font-weight: 600">素材来源（{{ previewArticle.source_news.length }}）</span>
+            </div>
+          </template>
+          <div v-for="(src, idx) in previewArticle.source_news" :key="idx" style="margin-bottom: 8px; padding: 8px; background: var(--td-bg-color-page); border-radius: 4px">
+            <div style="display: flex; justify-content: space-between; align-items: center">
+              <a v-if="src.link" :href="src.link" target="_blank" style="font-weight: 500">{{ src.title }}</a>
+              <span v-else style="font-weight: 500">{{ src.title }}</span>
+              <t-space size="4px">
+                <t-tag v-if="src.source" size="small" variant="light">{{ src.source }}</t-tag>
+                <t-tag v-if="src.material_id" size="small" theme="primary" variant="outline">素材 #{{ src.material_id }}</t-tag>
+              </t-space>
+            </div>
+          </div>
+        </t-card>
+
         <t-divider />
         <div v-html="previewArticle.html_content" style="line-height: 1.8" />
       </div>

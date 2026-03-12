@@ -11,7 +11,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from agent_publisher.models.account import Account
 from agent_publisher.models.agent import Agent
 from agent_publisher.models.article import Article
+from agent_publisher.models.candidate_material import CandidateMaterial
 from agent_publisher.models.publish_record import PublishRecord
+from agent_publisher.services.candidate_material_service import CandidateMaterialService
 from agent_publisher.services.image_service import HunyuanImageService
 from agent_publisher.services.llm_service import LLMService
 from agent_publisher.services.rss_service import RSSService
@@ -33,7 +35,10 @@ class ArticleService:
         step_callback: Callable[..., Awaitable[None]] | None = None,
         chunk_callback: Callable[[str], Awaitable[None]] | None = None,
     ) -> Article:
-        """Full pipeline: RSS -> LLM -> Image -> Article.
+        """Full pipeline: CandidateMaterial pool (or RSS fallback) -> LLM -> Image -> Article.
+
+        When the agent has pending candidate materials in the pool, those are
+        consumed first. Otherwise falls back to the legacy direct RSS fetch.
 
         Args:
             agent: The agent to generate an article for.
@@ -44,25 +49,63 @@ class ArticleService:
         """
         logger.info("Generating article for agent=%s topic=%s", agent.name, agent.topic)
 
-        # 1. Fetch RSS news
-        news_items = await self.rss.fetch_agent_feeds(agent.rss_sources or [])
-        if not news_items:
-            logger.warning("No news items found for agent %s", agent.name)
+        # 1. Try to consume from CandidateMaterial pool first
+        material_svc = CandidateMaterialService(self.session)
+        materials = await material_svc.list_pending_for_agent(agent.id, limit=15)
+        consumed_material_ids: list[int] = []
 
-        news_text = "\n".join(
-            f"- [{item.title}]({item.link})\n  {item.summary[:200]}"
-            for item in news_items[:15]
-        )
-
-        if step_callback:
-            await step_callback(
-                "rss_fetch",
-                "success",
-                {
-                    "count": len(news_items),
-                    "titles": [item.title for item in news_items[:15]],
-                },
+        if materials:
+            # Use candidate materials as news source
+            news_text = "\n".join(
+                f"- [{m.title}]({m.original_url})\n  {m.summary[:200]}"
+                for m in materials
             )
+            source_news = [
+                {
+                    "title": m.title,
+                    "link": m.original_url,
+                    "source": m.source_identity,
+                    "material_id": m.id,
+                }
+                for m in materials
+            ]
+            consumed_material_ids = [m.id for m in materials]
+
+            if step_callback:
+                await step_callback(
+                    "material_fetch",
+                    "success",
+                    {
+                        "count": len(materials),
+                        "source": "candidate_materials",
+                        "titles": [m.title for m in materials],
+                    },
+                )
+        else:
+            # Fallback: fetch RSS directly (legacy path)
+            news_items = await self.rss.fetch_agent_feeds(agent.rss_sources or [])
+            if not news_items:
+                logger.warning("No news items found for agent %s", agent.name)
+
+            news_text = "\n".join(
+                f"- [{item.title}]({item.link})\n  {item.summary[:200]}"
+                for item in news_items[:15]
+            )
+            source_news = [
+                {"title": item.title, "link": item.link, "source": item.source_name}
+                for item in news_items[:15]
+            ]
+
+            if step_callback:
+                await step_callback(
+                    "rss_fetch",
+                    "success",
+                    {
+                        "count": len(news_items),
+                        "source": "rss_direct",
+                        "titles": [item.title for item in news_items[:15]],
+                    },
+                )
 
         # 2. Generate article via LLM (streaming when chunk_callback is provided)
         # Always use platform-level LLM config from settings
@@ -146,11 +189,6 @@ class ArticleService:
         html_content = self._markdown_to_html(parsed["content"])
 
         # 5. Save article
-        source_news = [
-            {"title": item.title, "link": item.link, "source": item.source_name}
-            for item in news_items[:15]
-        ]
-
         article = Article(
             agent_id=agent.id,
             title=parsed["title"],
@@ -165,6 +203,10 @@ class ArticleService:
         self.session.add(article)
         await self.session.commit()
         await self.session.refresh(article)
+
+        # Mark consumed materials as accepted
+        for mid in consumed_material_ids:
+            await material_svc.mark_accepted(mid)
 
         if step_callback:
             await step_callback(

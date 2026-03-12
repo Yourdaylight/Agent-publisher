@@ -7,6 +7,12 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from agent_publisher.models.base import Base
 
+# Valid values for the 'role' field
+AGENT_ROLES = ("collector", "processor", "publisher", "full_pipeline")
+
+# Valid values for the 'source_mode' field
+AGENT_SOURCE_MODES = ("independent_search", "rss", "skills_feed")
+
 
 class Agent(Base):
     __tablename__ = "agents"
@@ -17,6 +23,16 @@ class Agent(Base):
     description: Mapped[str] = mapped_column(Text, default="")
     account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id"))
     rss_sources: Mapped[list | None] = mapped_column(JSON, default=list)
+
+    # Agent role: collector / processor / publisher / full_pipeline
+    role: Mapped[str] = mapped_column(String(50), default="full_pipeline")
+    # Content source mode: independent_search / rss / skills_feed
+    source_mode: Mapped[str] = mapped_column(String(50), default="rss")
+    # Config for independent_search mode (domain, keywords, site constraints, etc.)
+    search_config: Mapped[dict | None] = mapped_column(JSON, default=None, nullable=True)
+    # Allowed skill source identities for skills_feed mode
+    allowed_skill_sources: Mapped[list | None] = mapped_column(JSON, default=None, nullable=True)
+
     # Deprecated: LLM config now comes from platform settings (DEFAULT_LLM_*)
     llm_provider: Mapped[str] = mapped_column(String(50), default="", nullable=True)
     llm_model: Mapped[str] = mapped_column(String(100), default="", nullable=True)
@@ -36,4 +52,4 @@ class Agent(Base):
     tasks: Mapped[list["Task"]] = relationship(back_populates="agent")  # noqa: F821
 
     def __repr__(self) -> str:
-        return f"<Agent id={self.id} name={self.name!r} topic={self.topic!r}>"
+        return f"<Agent id={self.id} name={self.name!r} topic={self.topic!r} role={self.role!r}>"

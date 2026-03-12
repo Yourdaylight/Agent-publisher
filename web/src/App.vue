@@ -25,6 +25,10 @@
           <template #icon><t-icon name="robot" /></template>
           Agent 管理
         </t-menu-item>
+        <t-menu-item value="/materials">
+          <template #icon><t-icon name="folder-open" /></template>
+          素材库
+        </t-menu-item>
         <t-menu-item value="/articles">
           <template #icon><t-icon name="file" /></template>
           文章管理

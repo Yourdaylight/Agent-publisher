@@ -12,6 +12,16 @@
         </t-tag>
         <span v-else style="color: var(--td-text-color-placeholder)">-</span>
       </template>
+      <template #role="{ row }">
+        <t-tag :theme="row.role === 'full_pipeline' ? 'primary' : row.role === 'collector' ? 'success' : row.role === 'processor' ? 'warning' : 'default'" variant="light" size="small">
+          {{ { collector: '采集', processor: '加工', publisher: '发布', full_pipeline: '全流程' }[row.role] || row.role }}
+        </t-tag>
+      </template>
+      <template #source_mode="{ row }">
+        <t-tag :theme="row.source_mode === 'rss' ? 'primary' : row.source_mode === 'skills_feed' ? 'success' : 'warning'" variant="light" size="small">
+          {{ { rss: 'RSS', skills_feed: 'Skills', independent_search: '独立采集' }[row.source_mode] || row.source_mode }}
+        </t-tag>
+      </template>
       <template #is_active="{ row }">
         <t-tag :theme="row.is_active ? 'success' : 'default'" variant="light">
           {{ row.is_active ? '启用' : '停用' }}
@@ -68,6 +78,8 @@ const columns = [
   { colKey: 'id', title: 'ID', width: 60 },
   { colKey: 'name', title: '名称' },
   { colKey: 'topic', title: '主题', width: 120 },
+  { colKey: 'role', title: '角色', width: 90 },
+  { colKey: 'source_mode', title: '来源', width: 100 },
   { colKey: 'default_style', title: '默认风格', width: 100 },
   { colKey: 'schedule_cron', title: '定时', width: 120 },
   { colKey: 'is_active', title: '状态', width: 80 },

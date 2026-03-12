@@ -6,6 +6,10 @@ from dataclasses import dataclass
 
 import feedparser
 import httpx
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from agent_publisher.schemas.candidate_material import CandidateMaterialCreate
+from agent_publisher.services.candidate_material_service import CandidateMaterialService
 
 logger = logging.getLogger(__name__)
 
@@ -87,3 +91,54 @@ class RSSService:
             }
         except Exception as e:
             return {"success": False, "error": str(e)}
+
+
+class RssCollectorAdapter:
+    """Adapter that collects RSS feeds and converts them to CandidateMaterial.
+
+    Fetches RSS sources for an agent, converts each entry to
+    the unified CandidateMaterial format, and ingests them into the pool.
+    """
+
+    def __init__(self, session: AsyncSession):
+        self.session = session
+        self.material_service = CandidateMaterialService(session)
+
+    async def collect(
+        self,
+        agent_id: int,
+        agent_name: str,
+        rss_sources: list[dict],
+    ) -> list[int]:
+        """Fetch all RSS sources and ingest as CandidateMaterial.
+
+        Returns list of created material IDs.
+        """
+        news_items = await RSSService.fetch_agent_feeds(rss_sources)
+        created_ids: list[int] = []
+
+        for item in news_items:
+            data = CandidateMaterialCreate(
+                source_type="rss",
+                source_identity=item.source_name,
+                original_url=item.link,
+                title=item.title,
+                summary=item.summary,
+                raw_content=item.summary,
+                metadata={
+                    "rss_source_name": item.source_name,
+                    "published_date": item.published_date,
+                    "url_hash": item.url_hash,
+                },
+                tags=[],
+                agent_id=agent_id,
+            )
+            material = await self.material_service.ingest(data, agent_name=agent_name)
+            created_ids.append(material.id)
+
+        logger.info(
+            "RssCollectorAdapter collected %d materials for agent %s",
+            len(created_ids),
+            agent_name,
+        )
+        return created_ids

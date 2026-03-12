@@ -91,4 +91,26 @@ export const batchRun = (agent_ids?: number[]) => http.post('/tasks/batch', { ag
 // Stats
 export const getStats = () => http.get('/stats');
 
+// Candidate Materials
+export const getMaterials = (params?: {
+  agent_id?: number;
+  source_type?: string;
+  status?: string;
+  tags?: string;
+  start_date?: string;
+  end_date?: string;
+  page?: number;
+  page_size?: number;
+}) => http.get('/candidate-materials', { params });
+export const getMaterial = (id: number) => http.get(`/candidate-materials/${id}`);
+export const uploadMaterial = (data: { title: string; content?: string; original_url?: string; tags?: string[] }) =>
+  http.post('/candidate-materials/upload', data);
+export const updateMaterialTags = (id: number, data: { add_tags?: string[]; remove_tags?: string[] }) =>
+  http.patch(`/candidate-materials/${id}/tags`, data);
+export const deleteAgent = (id: number) => http.delete(`/agents/${id}`);
+
+// Source mode stats
+export const getSourceModeStats = () => http.get('/stats/source-modes');
+export const getTagStats = () => http.get('/stats/tags');
+
 export default http;
