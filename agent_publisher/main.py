@@ -42,13 +42,45 @@ logger = logging.getLogger(__name__)
 STATIC_DIR = Path(__file__).parent / "static"
 
 
+async def _auto_migrate_sqlite(conn):
+    """Auto-migrate SQLite: add missing columns to existing tables."""
+    import sqlalchemy as sa
+
+    def _do_migrate(sync_conn):
+        inspector = sa.inspect(sync_conn)
+        for table in Base.metadata.sorted_tables:
+            if not inspector.has_table(table.name):
+                continue
+            existing_cols = {c["name"] for c in inspector.get_columns(table.name)}
+            for col in table.columns:
+                if col.name not in existing_cols:
+                    col_type = col.type.compile(sync_conn.dialect)
+                    nullable = "NULL" if col.nullable else "NOT NULL"
+                    default = ""
+                    if col.default is not None and col.default.arg is not None:
+                        dv = col.default.arg
+                        if isinstance(dv, str):
+                            default = f" DEFAULT '{dv}'"
+                        elif isinstance(dv, bool):
+                            default = f" DEFAULT {1 if dv else 0}"
+                        elif isinstance(dv, (int, float)):
+                            default = f" DEFAULT {dv}"
+                    ddl = f"ALTER TABLE {table.name} ADD COLUMN {col.name} {col_type} {nullable}{default}"
+                    logger.info(f"Auto-migrate: {ddl}")
+                    sync_conn.execute(sa.text(ddl))
+
+    await conn.run_sync(_do_migrate)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup: auto-create tables (for SQLite dev mode)
     if "sqlite" in settings.database_url:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
-        logger.info("SQLite tables created/verified.")
+            # Auto-migrate: add any missing columns to existing tables
+            await _auto_migrate_sqlite(conn)
+        logger.info("SQLite tables created/verified (with auto-migration).")
 
     # Initialize built-in style presets
     from agent_publisher.database import async_session_factory

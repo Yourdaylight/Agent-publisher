@@ -24,6 +24,7 @@ class Agent(Base):
     llm_base_url: Mapped[str] = mapped_column(String(500), default="", nullable=True)
     prompt_template: Mapped[str] = mapped_column(Text, default="")
     image_style: Mapped[str] = mapped_column(String(500), default="现代简约风格，色彩鲜明")
+    default_style_id: Mapped[str | None] = mapped_column(String(50), default=None, nullable=True)
     schedule_cron: Mapped[str] = mapped_column(String(50), default="0 8 * * *")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(

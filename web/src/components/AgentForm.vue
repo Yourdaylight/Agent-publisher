@@ -46,6 +46,21 @@
     <t-form-item label="API Key">
       <t-input v-model="formData.llm_api_key" type="password" placeholder="LLM API Key（留空使用全局默认）" />
     </t-form-item>
+    <t-form-item label="默认变体风格">
+      <t-select
+        v-model="formData.default_style_id"
+        placeholder="选择默认预设风格（可选）"
+        clearable
+        filterable
+      >
+        <t-option v-for="s in stylePresets" :key="s.style_id" :label="s.name" :value="s.style_id">
+          <div style="display: flex; justify-content: space-between; align-items: center; width: 100%">
+            <span>{{ s.name }}</span>
+            <span style="font-size: 12px; color: var(--td-text-color-placeholder)">{{ s.style_id }}</span>
+          </div>
+        </t-option>
+      </t-select>
+    </t-form-item>
     <t-form-item label="配图风格">
       <t-input v-model="formData.image_style" placeholder="如：现代简约风格，色彩鲜明" />
     </t-form-item>
@@ -68,7 +83,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, watch, onMounted } from 'vue'
-import { createAgent, updateAgent, getAccounts } from '@/api'
+import { createAgent, updateAgent, getAccounts, getStylePresets } from '@/api'
 
 const topicPresets = ['AI与科技', '金融投资', '健康养生', '教育成长', '娱乐文化', '体育竞技', '汽车出行', '美食烹饪']
 
@@ -86,6 +101,7 @@ const emit = defineEmits<{
 const formRef = ref()
 const loading = ref(false)
 const accounts = ref<any[]>([])
+const stylePresets = ref<any[]>([])
 
 const formData = reactive({
   name: '',
@@ -99,6 +115,7 @@ const formData = reactive({
   llm_base_url: '',
   prompt_template: '',
   image_style: '现代简约风格，色彩鲜明',
+  default_style_id: null as string | null,
   schedule_cron: '0 8 * * *',
   is_active: true,
 })
@@ -119,8 +136,9 @@ watch(() => props.presetAccountId, (val) => {
 
 onMounted(async () => {
   try {
-    const res = await getAccounts()
-    accounts.value = res.data
+    const [accRes, styleRes] = await Promise.all([getAccounts(), getStylePresets()]);
+    accounts.value = accRes.data;
+    stylePresets.value = styleRes.data;
   } catch {}
 })
 

@@ -6,6 +6,12 @@
     </div>
 
     <t-table :data="agents" :columns="columns" row-key="id" :loading="loading" stripe>
+      <template #default_style="{ row }">
+        <t-tag v-if="row.default_style_id" theme="primary" variant="light" size="small">
+          {{ getStyleName(row.default_style_id) }}
+        </t-tag>
+        <span v-else style="color: var(--td-text-color-placeholder)">-</span>
+      </template>
       <template #is_active="{ row }">
         <t-tag :theme="row.is_active ? 'success' : 'default'" variant="light">
           {{ row.is_active ? '启用' : '停用' }}
@@ -40,7 +46,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
-import { getAgents, generateForAgent } from '@/api';
+import { getAgents, generateForAgent, getStylePresets } from '@/api';
 import AgentForm from '@/components/AgentForm.vue';
 import { MessagePlugin } from 'tdesign-vue-next';
 
@@ -50,12 +56,19 @@ const agents = ref<any[]>([]);
 const dialogVisible = ref(false);
 const editingAgent = ref<any>(null);
 const generatingIds = ref<Set<number>>(new Set());
+const stylePresets = ref<any[]>([]);
+
+const getStyleName = (styleId: string | null): string => {
+  if (!styleId) return '-';
+  const preset = stylePresets.value.find(s => s.style_id === styleId);
+  return preset ? preset.name : styleId;
+};
 
 const columns = [
   { colKey: 'id', title: 'ID', width: 60 },
   { colKey: 'name', title: '名称' },
   { colKey: 'topic', title: '主题', width: 120 },
-  { colKey: 'llm_model', title: '模型', width: 200 },
+  { colKey: 'default_style', title: '默认风格', width: 100 },
   { colKey: 'schedule_cron', title: '定时', width: 120 },
   { colKey: 'is_active', title: '状态', width: 80 },
   { colKey: 'op', title: '操作', width: 140 },
@@ -110,5 +123,11 @@ const onGenerate = async (agent: any) => {
   }
 };
 
-onMounted(fetchData)
+onMounted(async () => {
+  try {
+    const styleRes = await getStylePresets();
+    stylePresets.value = styleRes.data;
+  } catch {}
+  fetchData();
+})
 </script>
