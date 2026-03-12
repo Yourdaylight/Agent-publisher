@@ -44,6 +44,10 @@ export const getAccount = (id: number) => http.get(`/accounts/${id}`);
 export const createAccount = (data: any) => http.post('/accounts', data);
 export const updateAccount = (id: number, data: any) => http.put(`/accounts/${id}`, data);
 export const deleteAccount = (id: number) => http.delete(`/accounts/${id}`);
+export const getAccountFollowers = (id: number, params?: { begin_date?: string; end_date?: string }) =>
+  http.get(`/accounts/${id}/followers`, { params });
+export const getAccountArticleStats = (id: number, params?: { begin_date?: string; end_date?: string }) =>
+  http.get(`/accounts/${id}/article-stats`, { params });
 
 // Agents
 export const getAgents = () => http.get('/agents');
