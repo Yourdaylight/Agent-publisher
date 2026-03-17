@@ -447,6 +447,39 @@
       </div>
     </t-drawer>
 
+    <t-dialog
+      v-model:visible="publishDialogVisible"
+      :header="getPublishDialogTitle()"
+      :confirm-btn="publishAction === 'publish' ? '开始发布' : '开始同步'"
+      :confirm-loading="publishSubmitting"
+      @confirm="executePublishAction"
+    >
+      <div style="margin-bottom: 12px; color: var(--td-text-color-secondary)">
+        请选择要{{ publishAction === 'publish' ? '发布到' : '同步到' }}的公众号，可多选。
+      </div>
+      <t-checkbox-group v-model="publishTargetIds">
+        <div style="display: flex; flex-direction: column; gap: 8px">
+          <t-checkbox v-for="account in accountOptions" :key="account.id" :value="account.id">
+            {{ account.name }}（ID: {{ account.id }}）
+          </t-checkbox>
+        </div>
+      </t-checkbox-group>
+      <t-alert
+        v-if="accountOptions.length === 0"
+        theme="warning"
+        style="margin-top: 12px"
+      >
+        当前没有可用公众号，请先创建或检查账号权限。
+      </t-alert>
+      <t-alert
+        v-else
+        theme="info"
+        style="margin-top: 12px"
+      >
+        未选择时将沿用默认绑定或已建立的发布关系。
+      </t-alert>
+    </t-dialog>
+
     <!-- Publish Records drawer -->
     <t-drawer
       v-model:visible="publishRecordsDrawerVisible"
@@ -490,6 +523,7 @@ import {
   updateArticle,
   syncArticle,
   getAgents,
+  getAccounts,
   publishArticle,
   getRunningTasks,
   getPendingTasks,
@@ -507,11 +541,18 @@ import { MessagePlugin } from 'tdesign-vue-next';
 const loading = ref(false);
 const articles = ref<any[]>([]);
 const agentOptions = ref<any[]>([]);
+const accountOptions = ref<any[]>([]);
 const filterAgentId = ref<number | undefined>();
 const filterStatus = ref<string | undefined>();
 const previewDrawerVisible = ref(false);
 const previewArticle = ref<any>(null);
 const runningTasks = ref<any[]>([]);
+const publishDialogVisible = ref(false);
+const publishSubmitting = ref(false);
+const publishAction = ref<'publish' | 'sync'>('publish');
+const publishTargetArticle = ref<any>(null);
+const publishTargetIds = ref<number[]>([]);
+const publishFromEditor = ref(false);
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 
 // Edit drawer state
@@ -559,6 +600,7 @@ const variantsSourceTitle = ref('');
 
 const publishRecordColumns = [
   { colKey: 'id', title: 'ID', width: 60 },
+  { colKey: 'account_name', title: '公众号', width: 180, cell: (_h: any, { row }: any) => row.account_name || (row.account_id ? `#${row.account_id}` : '-') },
   { colKey: 'action', title: '类型', width: 80 },
   { colKey: 'recordStatus', title: '状态', width: 80 },
   { colKey: 'operator', title: '操作人', width: 160 },
@@ -620,8 +662,55 @@ const variantColumns = [
 ];
 
 const getStyleName = (styleId: string): string => {
-  const preset = stylePresets.value.find(s => s.style_id === styleId);
+  const preset = stylePresets.value.find((s) => s.style_id === styleId);
   return preset ? preset.name : styleId;
+};
+
+interface AccountScopedResult {
+  account_id: number;
+  account_name: string;
+  status: string;
+  wechat_media_id?: string;
+  error?: string;
+}
+
+interface PublishResponsePayload {
+  ok: boolean;
+  overall_status: string;
+  results: AccountScopedResult[];
+}
+
+const getDefaultAccountIdsForArticle = (row: any): number[] => {
+  const relationIds = Array.isArray(row.publish_relations)
+    ? row.publish_relations
+      .map((item: any) => item.account_id)
+      .filter((accountId: number | null | undefined) => Number.isInteger(accountId))
+    : [];
+  if (relationIds.length > 0) {
+    return relationIds;
+  }
+  const agent = agentOptions.value.find((item) => item.id === row.agent_id);
+  return agent?.account_id ? [agent.account_id] : [];
+};
+
+const getPublishDialogTitle = (): string => {
+  if (!publishTargetArticle.value) {
+    return '选择目标公众号';
+  }
+  const actionText = publishAction.value === 'publish' ? '发布' : '同步';
+  return `${actionText}文章 - ${publishTargetArticle.value.title || `#${publishTargetArticle.value.id}`}`;
+};
+
+const buildPublishResultMessage = (payload: PublishResponsePayload): string => {
+  const successCount = payload.results.filter((item) => item.status === 'success').length;
+  const failedItems = payload.results.filter((item) => item.status !== 'success');
+  if (failedItems.length === 0) {
+    return `成功处理 ${successCount} 个公众号`;
+  }
+  const failureSummary = failedItems
+    .map((item) => `${item.account_name || `#${item.account_id}`}: ${item.error || item.status}`)
+    .join('；');
+  return `成功 ${successCount} 个，失败 ${failedItems.length} 个：${failureSummary}`;
 };
 
 const fetchData = async () => {
@@ -640,6 +729,15 @@ const fetchData = async () => {
     // ignore
   } finally {
     loading.value = false;
+  }
+};
+
+const fetchAccounts = async () => {
+  try {
+    const res = await getAccounts();
+    accountOptions.value = res.data || [];
+  } catch {
+    accountOptions.value = [];
   }
 };
 
@@ -686,9 +784,9 @@ const onEditDrawerClose = () => {
   };
 };
 
-const onSave = async () => {
+const onSave = async (): Promise<boolean> => {
   if (!editForm.value.id) {
-    return;
+    return false;
   }
   saving.value = true;
   try {
@@ -716,10 +814,65 @@ const onSave = async () => {
     editForm.value.status = updated.status || editForm.value.status;
     MessagePlugin.success('保存成功');
     fetchData();
+    return true;
   } catch (err: any) {
     MessagePlugin.error(err?.response?.data?.detail || '保存失败');
+    return false;
   } finally {
     saving.value = false;
+  }
+};
+
+const openPublishDialog = (row: any, action: 'publish' | 'sync', fromEditor = false) => {
+  publishAction.value = action;
+  publishTargetArticle.value = row;
+  publishFromEditor.value = fromEditor;
+  publishTargetIds.value = getDefaultAccountIdsForArticle(row);
+  publishDialogVisible.value = true;
+};
+
+const executePublishAction = async () => {
+  if (!publishTargetArticle.value?.id) {
+    return;
+  }
+  publishSubmitting.value = true;
+  if (publishFromEditor.value) {
+    syncing.value = true;
+  }
+  try {
+    if (publishFromEditor.value) {
+      const saveSucceeded = await onSave();
+      if (!saveSucceeded) {
+        return;
+      }
+    }
+    const requestData = {
+      target_account_ids: publishTargetIds.value.length > 0 ? publishTargetIds.value : undefined,
+    };
+    const request = publishAction.value === 'publish'
+      ? publishArticle(publishTargetArticle.value.id, requestData)
+      : syncArticle(publishTargetArticle.value.id, requestData);
+    const res = await request;
+    const payload = res.data as PublishResponsePayload;
+    const actionText = publishAction.value === 'publish' ? '发布' : '同步';
+    const message = buildPublishResultMessage(payload);
+    if (payload.ok) {
+      MessagePlugin.success(`${actionText}完成：${message}`);
+    } else {
+      MessagePlugin.warning(`${actionText}完成：${message}`);
+    }
+    publishDialogVisible.value = false;
+    await Promise.all([fetchData(), fetchAccounts()]);
+    if (publishTargetArticle.value) {
+      await openPublishRecords(publishTargetArticle.value);
+    }
+  } catch (err: any) {
+    MessagePlugin.error(err?.response?.data?.detail || `${publishAction.value === 'publish' ? '发布' : '同步'}失败`);
+  } finally {
+    publishSubmitting.value = false;
+    if (publishFromEditor.value) {
+      syncing.value = false;
+    }
   }
 };
 
@@ -727,40 +880,16 @@ const onSyncFromEditor = async () => {
   if (!editForm.value.id) {
     return;
   }
-  syncing.value = true;
-  try {
-    // Save first, then sync
-    await onSave();
-    const res = await syncArticle(editForm.value.id);
-    const syncStatus = res.data?.sync_status;
-    if (syncStatus === 'synced') {
-      MessagePlugin.success('已同步到微信草稿箱');
-    } else if (syncStatus === 'skipped') {
-      MessagePlugin.warning('跳过同步（文章未发布或无 media_id）');
-    } else {
-      MessagePlugin.info(`同步状态: ${syncStatus}`);
-    }
-  } catch (err: any) {
-    MessagePlugin.error(err?.response?.data?.detail || '同步失败');
-  } finally {
-    syncing.value = false;
-  }
+  openPublishDialog({
+    id: editForm.value.id,
+    title: editForm.value.title,
+    agent_id: articles.value.find((item) => item.id === editForm.value.id)?.agent_id,
+    publish_relations: articles.value.find((item) => item.id === editForm.value.id)?.publish_relations || [],
+  }, 'sync', true);
 };
 
 const onSync = async (row: any) => {
-  try {
-    const res = await syncArticle(row.id);
-    const syncStatus = res.data?.sync_status;
-    if (syncStatus === 'synced') {
-      MessagePlugin.success('已同步到微信草稿箱');
-    } else if (syncStatus === 'skipped') {
-      MessagePlugin.warning('跳过同步（文章未发布或无 media_id）');
-    } else {
-      MessagePlugin.info(`同步状态: ${syncStatus}`);
-    }
-  } catch (err: any) {
-    MessagePlugin.error(err?.response?.data?.detail || '同步失败');
-  }
+  openPublishDialog(row, 'sync');
 };
 
 const onRenderPreview = async () => {
@@ -806,13 +935,7 @@ const insertMarkdown = (before: string, after: string) => {
 };
 
 const onPublish = async (row: any) => {
-  try {
-    await publishArticle(row.id);
-    MessagePlugin.success('发布成功');
-    fetchData();
-  } catch {
-    MessagePlugin.error('发布失败');
-  }
+  openPublishDialog(row, 'publish');
 };
 
 const openPublishRecords = async (row: any) => {
@@ -1015,8 +1138,12 @@ const fetchRunningTasks = async () => {
 
 onMounted(async () => {
   try {
-    const res = await getAgents();
-    agentOptions.value = res.data;
+    const [agentsRes, accountsRes] = await Promise.all([
+      getAgents(),
+      getAccounts(),
+    ]);
+    agentOptions.value = agentsRes.data;
+    accountOptions.value = accountsRes.data || [];
   } catch {
     // ignore
   }

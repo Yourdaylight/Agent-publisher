@@ -8,6 +8,8 @@ from pydantic import BaseModel
 class PublishRecordOut(BaseModel):
     id: int
     article_id: int
+    account_id: int | None = None
+    account_name: str = ""
     action: str
     wechat_media_id: str
     status: str
@@ -21,6 +23,8 @@ class PublishRecordOut(BaseModel):
 class PublishRecordBrief(BaseModel):
     id: int
     article_id: int
+    account_id: int | None = None
+    account_name: str = ""
     action: str
     status: str
     operator: str

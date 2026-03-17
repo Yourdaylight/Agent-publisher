@@ -85,8 +85,10 @@ export const generateForAgent = (id: number) => http.post(`/agents/${id}/generat
 export const getArticles = (params?: { agent_id?: number; status?: string }) => http.get('/articles', { params });
 export const getArticle = (id: number) => http.get(`/articles/${id}`);
 export const updateArticle = (id: number, data: any) => http.put(`/articles/${id}`, data);
-export const publishArticle = (id: number) => http.post(`/articles/${id}/publish`);
-export const syncArticle = (id: number) => http.post(`/articles/${id}/sync`);
+export const publishArticle = (id: number, data?: { target_account_ids?: number[] }) =>
+  http.post(`/articles/${id}/publish`, data ?? {});
+export const syncArticle = (id: number, data?: { target_account_ids?: number[] }) =>
+  http.post(`/articles/${id}/sync`, data ?? {});
 export const getArticlePublishRecords = (id: number) => http.get(`/articles/${id}/publish-records`);
 export const generateVariants = (articleId: number, data: { agent_ids: number[]; style_ids: string[] }) =>
   http.post(`/articles/${articleId}/variants`, data);
@@ -139,7 +141,28 @@ export const getSourceModeStats = () => http.get('/stats/source-modes');
 export const getTagStats = () => http.get('/stats/tags');
 
 // Media
-export const getMedia = (params?: { tag?: string; page?: number; page_size?: number }) =>
-  http.get('/media', { params });
+export const getMedia = (params?: {
+  tag?: string;
+  source_kind?: string;
+  article_id?: number;
+  account_id?: number;
+  upload_status?: string;
+  page?: number;
+  page_size?: number;
+}) => http.get('/media', { params });
+export const getMediaDetail = (id: number) => http.get(`/media/${id}`);
+export const uploadMedia = (file: File, tags?: string, description?: string) => {
+  const formData = new FormData();
+  formData.append('file', file);
+  const params: Record<string, string> = {};
+  if (tags) params.tags = tags;
+  if (description) params.description = description;
+  return http.post('/media', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    params,
+    timeout: 60000,
+  });
+};
+export const deleteMedia = (id: number) => http.delete(`/media/${id}`);
 
 export default http;

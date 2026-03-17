@@ -1,8 +1,14 @@
 from __future__ import annotations
 
+import hashlib
 import logging
+import mimetypes
+import re
+import uuid
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
+from pathlib import Path
+from urllib.parse import urlparse
 
 import httpx
 from sqlalchemy import select
@@ -11,8 +17,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from agent_publisher.models.account import Account
 from agent_publisher.models.agent import Agent
 from agent_publisher.models.article import Article
+from agent_publisher.models.article_publish_relation import ArticlePublishRelation
 from agent_publisher.models.candidate_material import CandidateMaterial
+from agent_publisher.models.media import MediaAsset, MediaAssetWechatMapping
 from agent_publisher.models.publish_record import PublishRecord
+from agent_publisher.schemas.article import (
+    AccountScopedPublishResult,
+    ArticlePublishResponse,
+    ArticleSyncResponse,
+)
 from agent_publisher.services.candidate_material_service import CandidateMaterialService
 from agent_publisher.services.image_service import HunyuanImageService
 from agent_publisher.services.llm_service import LLMService
@@ -204,6 +217,10 @@ class ArticleService:
         await self.session.commit()
         await self.session.refresh(article)
 
+        await self._sync_article_body_media_assets(article)
+        await self.session.commit()
+        await self.session.refresh(article)
+
         # Mark consumed materials as accepted
         for mid in consumed_material_ids:
             await material_svc.mark_accepted(mid)
@@ -218,122 +235,257 @@ class ArticleService:
         logger.info("Article created: id=%d title=%s", article.id, article.title)
         return article
 
-    async def publish_article(self, article_id: int, operator: str = "admin") -> str:
-        """Publish an article to WeChat draft box."""
+    async def publish_article(
+        self,
+        article_id: int,
+        operator: str = 'admin',
+        target_account_ids: list[int] | None = None,
+    ) -> ArticlePublishResponse:
+        """Publish an article to one or more WeChat draft boxes."""
+        article, agent = await self._get_article_and_agent(article_id)
+        accounts = await self._resolve_target_accounts(agent, target_account_ids)
+        now = datetime.now(timezone.utc)
+        publish_html = await self._get_publish_html(article)
+
+        results: list[AccountScopedPublishResult] = []
+        primary_media_id = ''
+        published_any = False
+
+        for account in accounts:
+            relation = await self._get_or_create_relation(article.id, account.id)
+            relation.publish_status = 'processing'
+            relation.last_error = ''
+            await self.session.flush()
+
+            try:
+                access_token = await self._ensure_account_access_token(account)
+                thumb_media_id = await self._upload_cover_thumb(article, access_token)
+                if not thumb_media_id:
+                    raise RuntimeError(
+                        'No thumb_media_id available. '
+                        'Please set a cover image or ensure the article has body images.'
+                    )
+                scoped_html = await self._rewrite_wechat_body_images(
+                    account=account,
+                    access_token=access_token,
+                    html_content=publish_html,
+                    article_id=article.id,
+                )
+                draft_article = self._build_wechat_draft_article(
+                    article=article,
+                    agent=agent,
+                    html_content=scoped_html,
+                    thumb_media_id=thumb_media_id,
+                )
+                media_id = await WeChatService.add_draft(access_token, [draft_article])
+
+                relation.wechat_media_id = media_id
+                relation.publish_status = 'success'
+                relation.sync_status = 'synced'
+                relation.last_error = ''
+                relation.last_published_at = now
+                relation.last_synced_at = now
+
+                record = self._build_publish_record(
+                    article_id=article.id,
+                    account_id=account.id,
+                    action='publish',
+                    wechat_media_id=media_id,
+                    status='success',
+                    operator=operator,
+                )
+                self.session.add(record)
+
+                results.append(
+                    AccountScopedPublishResult(
+                        account_id=account.id,
+                        account_name=account.name,
+                        status='success',
+                        wechat_media_id=media_id,
+                        stage='publish',
+                        error='',
+                    )
+                )
+                if not primary_media_id:
+                    primary_media_id = media_id
+                published_any = True
+            except Exception as exc:
+                logger.error(
+                    'Article %d publish failed for account %d: %s',
+                    article.id,
+                    account.id,
+                    exc,
+                )
+                relation.publish_status = 'failed'
+                relation.last_error = str(exc)
+
+                record = self._build_publish_record(
+                    article_id=article.id,
+                    account_id=account.id,
+                    action='publish',
+                    wechat_media_id=relation.wechat_media_id or '',
+                    status='failed',
+                    operator=operator,
+                    error_message=str(exc),
+                )
+                self.session.add(record)
+
+                results.append(
+                    AccountScopedPublishResult(
+                        account_id=account.id,
+                        account_name=account.name,
+                        status='failed',
+                        wechat_media_id=relation.wechat_media_id or '',
+                        stage='publish',
+                        error=str(exc),
+                    )
+                )
+
+        if published_any:
+            article.wechat_media_id = primary_media_id
+            article.status = 'published'
+            article.published_at = now
+
+        await self.session.commit()
+        await self.session.refresh(article)
+
+        overall_status = self._aggregate_result_status(results)
+        logger.info(
+            'Article %d publish finished: overall_status=%s targets=%s',
+            article.id,
+            overall_status,
+            [account.id for account in accounts],
+        )
+        return ArticlePublishResponse(
+            ok=published_any,
+            article_id=article.id,
+            overall_status=overall_status,
+            media_id=primary_media_id,
+            target_account_ids=[account.id for account in accounts],
+            results=results,
+        )
+
+    async def _load_image_resource(self, image_source: str) -> tuple[bytes, str, str]:
+        """Load image bytes from local media, remote URL, or data URL."""
+        normalized_source = (image_source or '').strip()
+        if not normalized_source:
+            raise ValueError('Image source is empty')
+
+        media_id = self._extract_media_id_from_download_url(normalized_source)
+        if media_id is not None:
+            from agent_publisher.api.media import UPLOAD_DIR
+
+            media_asset = await self.session.get(MediaAsset, media_id)
+            if not media_asset:
+                raise ValueError(f'Media asset {media_id} not found')
+
+            local_path = UPLOAD_DIR / media_asset.stored_filename
+            if not local_path.is_file():
+                raise FileNotFoundError(f'Media file not found on disk: {local_path}')
+
+            content_type = media_asset.content_type or mimetypes.guess_type(local_path.name)[0] or 'image/jpeg'
+            return local_path.read_bytes(), media_asset.filename, content_type
+
+        if normalized_source.startswith("http://") or normalized_source.startswith("https://"):
+            async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+                img_resp = await client.get(normalized_source)
+                img_resp.raise_for_status()
+                parsed = urlparse(normalized_source)
+                filename = parsed.path.rsplit("/", 1)[-1] or "image"
+                content_type = img_resp.headers.get("content-type", "").split(";", 1)[0]
+                guessed_content_type = content_type or mimetypes.guess_type(filename)[0] or "image/jpeg"
+                # If filename has no extension (e.g. "download"), add one based on content type
+                if not Path(filename).suffix:
+                    ext = mimetypes.guess_extension(guessed_content_type) or '.png'
+                    filename = f'{filename}{ext}'
+                return img_resp.content, filename, guessed_content_type
+
+        if normalized_source.startswith("data:"):
+            header, _, encoded = normalized_source.partition(",")
+            if not encoded:
+                raise ValueError("Invalid data URL image source")
+            mime_type = header.split(";", 1)[0].removeprefix("data:") or "image/png"
+            extension = mimetypes.guess_extension(mime_type) or ".png"
+            image_bytes = HunyuanImageService.base64_to_bytes(encoded)
+            return image_bytes, f"inline{extension}", mime_type
+
+        image_bytes = HunyuanImageService.base64_to_bytes(normalized_source)
+        return image_bytes, "image.jpg", "image/jpeg"
+
+    async def _rewrite_wechat_body_images(
+        self,
+        account: Account,
+        access_token: str,
+        html_content: str,
+        article_id: int,
+    ) -> str:
+        """Upload localized HTML images to WeChat and replace their src URLs."""
+        if not html_content:
+            return html_content
+
         article = await self.session.get(Article, article_id)
         if not article:
-            raise ValueError(f"Article {article_id} not found")
+            raise ValueError(f'Article {article_id} not found')
 
-        agent = await self.session.get(Agent, article.agent_id)
-        if not agent:
-            raise ValueError(f"Agent {article.agent_id} not found")
-
-        account = await self.session.get(Account, agent.account_id)
-        if not account:
-            raise ValueError(f"Account {agent.account_id} not found")
-
-        # Refresh token if needed
-        now = datetime.now(timezone.utc)
-        token_expired = (
-            not account.access_token
-            or not account.token_expires_at
-            or account.token_expires_at.replace(tzinfo=timezone.utc) < now
+        img_pattern = re.compile(
+            r'(<img\b[^>]*\bsrc=["\'])([^"\']+)(["\'][^>]*>)',
+            flags=re.IGNORECASE,
         )
-        if token_expired:
-            token, expires_at = await WeChatService.get_access_token(
-                account.appid, account.appsecret
-            )
-            account.access_token = token
-            account.token_expires_at = expires_at
-            await self.session.commit()
+        image_cache: dict[str, str] = {}
 
-        # Upload cover image if available
-        thumb_media_id = ""
-        if article.cover_image_url:
+        async def replace_match(match: re.Match[str]) -> str:
+            prefix = match.group(1)
+            original_src = match.group(2).strip()
+            suffix = match.group(3)
+
+            if not original_src or self._is_wechat_image_url(original_src):
+                return match.group(0)
+
+            if original_src in image_cache:
+                return f'{prefix}{image_cache[original_src]}{suffix}'
+
             try:
-                cover_url = article.cover_image_url
-                if cover_url.startswith("/api/media/") and cover_url.endswith("/download"):
-                    # Local media library image — read from disk
-                    from pathlib import Path
-                    from agent_publisher.api.media import UPLOAD_DIR
-
-                    media_id_str = cover_url.split("/api/media/")[1].split("/download")[0]
-                    from agent_publisher.models.media import MediaAsset
-                    media_asset = await self.session.get(MediaAsset, int(media_id_str))
-                    if media_asset:
-                        local_path = UPLOAD_DIR / media_asset.stored_filename
-                        if local_path.is_file():
-                            image_bytes = local_path.read_bytes()
-                        else:
-                            raise FileNotFoundError(f"Media file not found on disk: {local_path}")
-                    else:
-                        raise ValueError(f"Media asset {media_id_str} not found")
-                elif cover_url.startswith("http"):
-                    # Download image from URL (e.g. Tencent COS)
-                    async with httpx.AsyncClient(timeout=30) as client:
-                        img_resp = await client.get(cover_url)
-                        img_resp.raise_for_status()
-                        image_bytes = img_resp.content
-                else:
-                    # Legacy: base64-encoded image
-                    image_bytes = HunyuanImageService.base64_to_bytes(cover_url)
-                thumb_media_id = await WeChatService.upload_thumb(
-                    account.access_token, image_bytes
+                media_asset = await self._get_or_create_body_media_asset(article, original_src)
+                wechat_url = await self._upload_article_body_image_for_account(
+                    account=account,
+                    access_token=access_token,
+                    media_asset=media_asset,
                 )
-            except Exception as e:
-                logger.error("Failed to upload cover image: %s", e)
+                image_cache[original_src] = wechat_url
+                logger.info(
+                    'Article %d body image uploaded to WeChat for account %d: %s -> %s',
+                    article_id,
+                    account.id,
+                    original_src,
+                    wechat_url,
+                )
+                return f'{prefix}{wechat_url}{suffix}'
+            except Exception as exc:
+                logger.warning(
+                    'Article %d body image upload failed for account %d source %s: %s',
+                    article_id,
+                    account.id,
+                    original_src,
+                    exc,
+                )
+                raise RuntimeError(
+                    f'Body image upload failed for account {account.id}: {original_src}'
+                ) from exc
 
-        # Push to draft
-        # If html_content is not already wenyan-rendered and we have raw markdown,
-        # re-render it through wenyan for beautiful formatting
-        publish_html = article.html_content
-        if article.content and 'data-provider="WenYan"' not in (publish_html or ""):
-            logger.info(
-                "Article %d html not wenyan-rendered, re-rendering markdown",
-                article.id,
-            )
-            rendered = self._markdown_to_html(article.content)
-            if 'data-provider="WenYan"' in rendered:
-                publish_html = rendered
-                # Persist the improved html_content
-                article.html_content = rendered
+        rewritten_parts: list[str] = []
+        last_end = 0
+        for match in img_pattern.finditer(html_content):
+            rewritten_parts.append(html_content[last_end:match.start()])
+            rewritten_parts.append(await replace_match(match))
+            last_end = match.end()
+        rewritten_parts.append(html_content[last_end:])
 
-        # WeChat limits author to 8 Chinese characters (approx 24 bytes)
-        author_name = agent.name
-        if len(author_name) > 8:
-            author_name = author_name[:8]
-        draft_article = {
-            "title": article.title,
-            "author": author_name,
-            "digest": article.digest,
-            "content": publish_html,
-            "thumb_media_id": thumb_media_id,
-            "content_source_url": "",
-        }
-        media_id = await WeChatService.add_draft(account.access_token, [draft_article])
-
-        article.wechat_media_id = media_id
-        article.status = "published"
-        article.published_at = now
-
-        # Create publish record
-        record = PublishRecord(
-            article_id=article.id,
-            action="publish",
-            wechat_media_id=media_id,
-            status="success",
-            operator=operator,
-        )
-        self.session.add(record)
-        await self.session.commit()
-
-        logger.info("Article %d published, media_id=%s", article.id, media_id)
-        return media_id
+        return ''.join(rewritten_parts)
 
     @staticmethod
     def _markdown_to_html(
         markdown_text: str,
-        theme: str = "default",
+        theme: str = 'default',
     ) -> str:
         """Convert Markdown to styled HTML using wenyan-md CLI.
 
@@ -349,18 +501,18 @@ class ArticleService:
         import subprocess
         import tempfile
 
-        wenyan_bin = shutil.which("wenyan")
+        wenyan_bin = shutil.which('wenyan')
         if wenyan_bin:
             try:
                 # Write markdown to a temp file so wenyan can read it
                 with tempfile.NamedTemporaryFile(
-                    mode="w", suffix=".md", delete=False, encoding="utf-8"
+                    mode='w', suffix='.md', delete=False, encoding='utf-8'
                 ) as tmp:
                     tmp.write(markdown_text)
                     tmp_path = tmp.name
 
                 result = subprocess.run(
-                    [wenyan_bin, "render", "-f", tmp_path, "-t", theme],
+                    [wenyan_bin, 'render', '-f', tmp_path, '-t', theme],
                     capture_output=True,
                     text=True,
                     timeout=30,
@@ -370,18 +522,17 @@ class ArticleService:
                 os.unlink(tmp_path)
 
                 if result.returncode == 0 and result.stdout.strip():
-                    logger.info("Markdown rendered with wenyan (theme=%s)", theme)
+                    logger.info('Markdown rendered with wenyan (theme=%s)', theme)
                     return result.stdout.strip()
-                else:
-                    logger.warning(
-                        "wenyan render failed (rc=%d): %s",
-                        result.returncode,
-                        result.stderr[:200],
-                    )
+                logger.warning(
+                    'wenyan render failed (rc=%d): %s',
+                    result.returncode,
+                    result.stderr[:200],
+                )
             except Exception as e:
-                logger.warning("wenyan render error: %s, falling back to basic converter", e)
+                logger.warning('wenyan render error: %s, falling back to basic converter', e)
         else:
-            logger.info("wenyan not found, using basic Markdown converter")
+            logger.info('wenyan not found, using basic Markdown converter')
 
         # Fallback: basic regex-based Markdown to HTML
         return ArticleService._basic_markdown_to_html(markdown_text)
@@ -395,19 +546,19 @@ class ArticleService:
 
         # Headers
         for i in range(6, 0, -1):
-            pattern = r"^" + "#" * i + r"\s+(.+)$"
-            replacement = f"<h{i}>\\1</h{i}>"
+            pattern = r'^' + '#' * i + r'\s+(.+)$'
+            replacement = f'<h{i}>\\1</h{i}>'
             html = re.sub(pattern, replacement, html, flags=re.MULTILINE)
 
         # Bold
-        html = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", html)
+        html = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', html)
         # Italic
-        html = re.sub(r"\*(.+?)\*", r"<em>\1</em>", html)
+        html = re.sub(r'\*(.+?)\*', r'<em>\1</em>', html)
         # Links
-        html = re.sub(r"\[(.+?)\]\((.+?)\)", r'<a href="\2">\1</a>', html)
+        html = re.sub(r'\[(.+?)\]\((.+?)\)', r'<a href="\2">\1</a>', html)
         # Line breaks
-        html = html.replace("\n\n", "</p><p>")
-        html = f"<p>{html}</p>"
+        html = html.replace('\n\n', '</p><p>')
+        html = f'<p>{html}</p>'
 
         return html
 
@@ -420,9 +571,9 @@ class ArticleService:
         """
         article = await self.session.get(Article, article_id)
         if not article:
-            raise ValueError(f"Article {article_id} not found")
+            raise ValueError(f'Article {article_id} not found')
 
-        allowed_fields = {"title", "digest", "content", "html_content", "cover_image_url"}
+        allowed_fields = {'title', 'digest', 'content', 'html_content', 'cover_image_url'}
         updated_fields: list[str] = []
 
         for key, value in updates.items():
@@ -434,136 +585,159 @@ class ArticleService:
             updated_fields.append(key)
 
         # Auto re-render html when markdown content changes
-        if "content" in updated_fields:
+        if 'content' in updated_fields:
             article.html_content = self._markdown_to_html(article.content)
-            if "html_content" not in updated_fields:
-                updated_fields.append("html_content")
+            if 'html_content' not in updated_fields:
+                updated_fields.append('html_content')
+
+        await self._sync_article_body_media_assets(article)
 
         await self.session.commit()
         await self.session.refresh(article)
 
         logger.info(
-            "Article %d updated, fields=%s", article.id, updated_fields
+            'Article %d updated, fields=%s', article.id, updated_fields
         )
         return article
 
-    async def sync_article_to_draft(self, article_id: int, operator: str = "admin") -> str:
-        """Sync local article edits to WeChat draft box.
+    async def sync_article_to_draft(
+        self,
+        article_id: int,
+        operator: str = 'admin',
+        target_account_ids: list[int] | None = None,
+    ) -> ArticleSyncResponse:
+        """Sync local article edits to WeChat draft boxes."""
+        article, agent = await self._get_article_and_agent(article_id)
+        accounts = await self._resolve_target_accounts(agent, target_account_ids)
+        publish_html = await self._get_publish_html(article)
 
-        Returns sync status: 'synced', 'skipped', or raises on error.
-        Only articles with status='published' and a valid wechat_media_id
-        will be synced.
-        """
-        article = await self.session.get(Article, article_id)
-        if not article:
-            raise ValueError(f"Article {article_id} not found")
+        results: list[AccountScopedPublishResult] = []
+        synced_any = False
 
-        if article.status != "published" or not article.wechat_media_id:
-            logger.info(
-                "Article %d not published or no media_id, skipping sync",
-                article.id,
-            )
-            return "skipped"
-
-        agent = await self.session.get(Agent, article.agent_id)
-        if not agent:
-            raise ValueError(f"Agent {article.agent_id} not found")
-
-        account = await self.session.get(Account, agent.account_id)
-        if not account:
-            raise ValueError(f"Account {agent.account_id} not found")
-
-        # Refresh token if needed
-        now = datetime.now(timezone.utc)
-        token_expired = (
-            not account.access_token
-            or not account.token_expires_at
-            or account.token_expires_at.replace(tzinfo=timezone.utc) < now
-        )
-        if token_expired:
-            token, expires_at = await WeChatService.get_access_token(
-                account.appid, account.appsecret
-            )
-            account.access_token = token
-            account.token_expires_at = expires_at
-            await self.session.commit()
-
-        # Re-upload cover image if available
-        thumb_media_id = ""
-        if article.cover_image_url:
-            try:
-                cover_url = article.cover_image_url
-                if cover_url.startswith("/api/media/") and cover_url.endswith("/download"):
-                    from pathlib import Path
-                    from agent_publisher.api.media import UPLOAD_DIR
-                    from agent_publisher.models.media import MediaAsset
-
-                    media_id_str = cover_url.split("/api/media/")[1].split("/download")[0]
-                    media_asset = await self.session.get(MediaAsset, int(media_id_str))
-                    if media_asset:
-                        local_path = UPLOAD_DIR / media_asset.stored_filename
-                        if local_path.is_file():
-                            image_bytes = local_path.read_bytes()
-                        else:
-                            raise FileNotFoundError(f"Media file not found: {local_path}")
-                    else:
-                        raise ValueError(f"Media asset {media_id_str} not found")
-                elif cover_url.startswith("http"):
-                    async with httpx.AsyncClient(timeout=30) as client:
-                        img_resp = await client.get(cover_url)
-                        img_resp.raise_for_status()
-                        image_bytes = img_resp.content
+        for account in accounts:
+            relation = await self._get_or_create_relation(article.id, account.id)
+            media_id = relation.wechat_media_id or ''
+            if not media_id:
+                if account.id == agent.account_id and article.wechat_media_id:
+                    media_id = article.wechat_media_id
+                    relation.wechat_media_id = media_id
                 else:
-                    image_bytes = HunyuanImageService.base64_to_bytes(cover_url)
+                    relation.sync_status = 'skipped'
+                    relation.last_error = 'Draft media_id not found for this account'
+                    results.append(
+                        AccountScopedPublishResult(
+                            account_id=account.id,
+                            account_name=account.name,
+                            status='skipped',
+                            wechat_media_id='',
+                            stage='sync',
+                            error=relation.last_error,
+                        )
+                    )
+                    continue
 
-                thumb_media_id = await WeChatService.upload_thumb(
-                    account.access_token, image_bytes
+            relation.sync_status = 'processing'
+            relation.last_error = ''
+            await self.session.flush()
+
+            try:
+                access_token = await self._ensure_account_access_token(account)
+                thumb_media_id = await self._upload_cover_thumb(article, access_token)
+                scoped_html = await self._rewrite_wechat_body_images(
+                    account=account,
+                    access_token=access_token,
+                    html_content=publish_html,
+                    article_id=article.id,
                 )
-            except Exception as e:
-                logger.error("Failed to upload cover image for sync: %s", e)
+                draft_article = self._build_wechat_draft_article(
+                    article=article,
+                    agent=agent,
+                    html_content=scoped_html,
+                    thumb_media_id=thumb_media_id,
+                )
+                await WeChatService.update_draft(
+                    access_token=access_token,
+                    media_id=media_id,
+                    articles=draft_article,
+                    index=0,
+                )
 
-        # Ensure html is wenyan-rendered
-        publish_html = article.html_content
-        if article.content and 'data-provider="WenYan"' not in (publish_html or ""):
-            rendered = self._markdown_to_html(article.content)
-            if 'data-provider="WenYan"' in rendered:
-                publish_html = rendered
-                article.html_content = rendered
+                relation.sync_status = 'synced'
+                relation.last_error = ''
+                relation.last_synced_at = datetime.now(timezone.utc)
 
-        author_name = agent.name
-        if len(author_name) > 8:
-            author_name = author_name[:8]
+                record = self._build_publish_record(
+                    article_id=article.id,
+                    account_id=account.id,
+                    action='sync',
+                    wechat_media_id=media_id,
+                    status='success',
+                    operator=operator,
+                )
+                self.session.add(record)
 
-        draft_article: dict = {
-            "title": article.title,
-            "author": author_name,
-            "digest": article.digest,
-            "content": publish_html,
-            "content_source_url": "",
-        }
-        if thumb_media_id:
-            draft_article["thumb_media_id"] = thumb_media_id
+                results.append(
+                    AccountScopedPublishResult(
+                        account_id=account.id,
+                        account_name=account.name,
+                        status='success',
+                        wechat_media_id=media_id,
+                        stage='sync',
+                        error='',
+                    )
+                )
+                synced_any = True
+            except Exception as exc:
+                logger.error(
+                    'Article %d sync failed for account %d: %s',
+                    article.id,
+                    account.id,
+                    exc,
+                )
+                relation.sync_status = 'failed'
+                relation.last_error = str(exc)
 
-        await WeChatService.update_draft(
-            access_token=account.access_token,
-            media_id=article.wechat_media_id,
-            articles=draft_article,
-            index=0,
-        )
+                record = self._build_publish_record(
+                    article_id=article.id,
+                    account_id=account.id,
+                    action='sync',
+                    wechat_media_id=media_id,
+                    status='failed',
+                    operator=operator,
+                    error_message=str(exc),
+                )
+                self.session.add(record)
 
-        # Create sync record
-        record = PublishRecord(
-            article_id=article.id,
-            action="sync",
-            wechat_media_id=article.wechat_media_id,
-            status="success",
-            operator=operator,
-        )
-        self.session.add(record)
+                results.append(
+                    AccountScopedPublishResult(
+                        account_id=account.id,
+                        account_name=account.name,
+                        status='failed',
+                        wechat_media_id=media_id,
+                        stage='sync',
+                        error=str(exc),
+                    )
+                )
+
         await self.session.commit()
+        await self.session.refresh(article)
 
-        logger.info("Article %d synced to draft, media_id=%s", article.id, article.wechat_media_id)
-        return "synced"
+        overall_status = self._aggregate_result_status(results)
+        sync_status = 'synced' if synced_any else 'skipped'
+        logger.info(
+            'Article %d sync finished: overall_status=%s targets=%s',
+            article.id,
+            overall_status,
+            [account.id for account in accounts],
+        )
+        return ArticleSyncResponse(
+            ok=synced_any,
+            article_id=article.id,
+            overall_status=overall_status,
+            sync_status=sync_status,
+            target_account_ids=[account.id for account in accounts],
+            results=results,
+        )
 
     async def generate_variant(
         self,
@@ -682,3 +856,392 @@ class ArticleService:
             variant.id, source_article_id, style_id, target_agent_id,
         )
         return variant
+
+    async def _get_article_and_agent(self, article_id: int) -> tuple[Article, Agent]:
+        article = await self.session.get(Article, article_id)
+        if not article:
+            raise ValueError(f'Article {article_id} not found')
+
+        agent = await self.session.get(Agent, article.agent_id)
+        if not agent:
+            raise ValueError(f'Agent {article.agent_id} not found')
+
+        return article, agent
+
+    async def _resolve_target_accounts(
+        self,
+        agent: Agent,
+        target_account_ids: list[int] | None,
+    ) -> list[Account]:
+        resolved_ids = target_account_ids or [agent.account_id]
+        unique_ids: list[int] = []
+        for account_id in resolved_ids:
+            if account_id not in unique_ids:
+                unique_ids.append(account_id)
+
+        accounts: list[Account] = []
+        for account_id in unique_ids:
+            account = await self.session.get(Account, account_id)
+            if not account:
+                raise ValueError(f'Account {account_id} not found')
+            accounts.append(account)
+
+        if not accounts:
+            raise ValueError('No target accounts resolved for publishing')
+        return accounts
+
+    async def _ensure_account_access_token(self, account: Account) -> str:
+        now = datetime.now(timezone.utc)
+        token_expired = (
+            not account.access_token
+            or not account.token_expires_at
+            or account.token_expires_at.replace(tzinfo=timezone.utc) < now
+        )
+        if token_expired:
+            token, expires_at = await WeChatService.get_access_token(
+                account.appid,
+                account.appsecret,
+            )
+            account.access_token = token
+            account.token_expires_at = expires_at
+            await self.session.flush()
+        return account.access_token or ''
+
+    async def _upload_cover_thumb(self, article: Article, access_token: str) -> str:
+        image_source = article.cover_image_url
+
+        # Fallback: use the first body image when no explicit cover is set
+        if not image_source:
+            html_content = article.html_content or ''
+            img_match = re.search(
+                r'<img\b[^>]*\bsrc=["\']([^"\']+)["\']',
+                html_content,
+                flags=re.IGNORECASE,
+            )
+            if img_match:
+                image_source = img_match.group(1).strip()
+                logger.info(
+                    'Article %d has no cover, using first body image as thumb: %s',
+                    article.id,
+                    image_source[:100],
+                )
+
+        if not image_source:
+            logger.warning('Article %d has no cover and no body images for thumb', article.id)
+            return ''
+
+        try:
+            image_bytes, filename, _ = await self._load_image_resource(image_source)
+            # Ensure filename has an extension for WeChat validation
+            if not Path(filename).suffix:
+                filename = f'{filename}.png'
+            return await WeChatService.upload_thumb(
+                access_token,
+                image_bytes,
+                filename=filename,
+            )
+        except Exception as exc:
+            logger.error('Failed to upload cover image for article %d: %s', article.id, exc)
+            return ''
+
+    async def _get_publish_html(self, article: Article) -> str:
+        publish_html = article.html_content
+        if article.content and 'data-provider="WenYan"' not in (publish_html or ''):
+            logger.info(
+                'Article %d html not wenyan-rendered, re-rendering markdown',
+                article.id,
+            )
+            rendered = self._markdown_to_html(article.content)
+            if 'data-provider="WenYan"' in rendered:
+                publish_html = rendered
+                article.html_content = rendered
+                await self.session.flush()
+        return publish_html
+
+    async def _get_or_create_relation(
+        self,
+        article_id: int,
+        account_id: int,
+    ) -> ArticlePublishRelation:
+        stmt = select(ArticlePublishRelation).where(
+            ArticlePublishRelation.article_id == article_id,
+            ArticlePublishRelation.account_id == account_id,
+        )
+        result = await self.session.execute(stmt)
+        relation = result.scalar_one_or_none()
+        if relation:
+            return relation
+
+        relation = ArticlePublishRelation(
+            article_id=article_id,
+            account_id=account_id,
+            wechat_media_id='',
+            publish_status='pending',
+            sync_status='pending',
+            last_error='',
+        )
+        self.session.add(relation)
+        await self.session.flush()
+        return relation
+
+    def _build_wechat_draft_article(
+        self,
+        article: Article,
+        agent: Agent,
+        html_content: str,
+        thumb_media_id: str,
+    ) -> dict:
+        author_name = agent.name
+        if len(author_name) > 8:
+            author_name = author_name[:8]
+
+        draft_article: dict[str, str] = {
+            'title': article.title,
+            'author': author_name,
+            'digest': article.digest,
+            'content': html_content,
+            'content_source_url': '',
+        }
+        if thumb_media_id:
+            draft_article['thumb_media_id'] = thumb_media_id
+        return draft_article
+
+    def _build_publish_record(
+        self,
+        article_id: int,
+        account_id: int,
+        action: str,
+        wechat_media_id: str,
+        status: str,
+        operator: str,
+        error_message: str = '',
+    ) -> PublishRecord:
+        return PublishRecord(
+            article_id=article_id,
+            account_id=account_id,
+            action=action,
+            wechat_media_id=wechat_media_id,
+            status=status,
+            operator=operator,
+            error_message=error_message,
+        )
+
+    @staticmethod
+    def _aggregate_result_status(results: list[AccountScopedPublishResult]) -> str:
+        if not results:
+            return 'skipped'
+
+        success_count = sum(1 for item in results if item.status == 'success')
+        failed_count = sum(1 for item in results if item.status == 'failed')
+        skipped_count = sum(1 for item in results if item.status == 'skipped')
+
+        if success_count == len(results):
+            return 'success'
+        if failed_count == len(results):
+            return 'failed'
+        if skipped_count == len(results):
+            return 'skipped'
+        return 'partial'
+
+    @staticmethod
+    def _extract_media_id_from_download_url(image_source: str) -> int | None:
+        normalized_source = (image_source or '').strip()
+        # Support both relative (/api/media/13/download) and absolute URLs
+        # (http://host:port/api/media/13/download)
+        if '/api/media/' in normalized_source and normalized_source.endswith('/download'):
+            try:
+                return int(normalized_source.split('/api/media/')[1].split('/download')[0])
+            except (ValueError, IndexError):
+                pass
+        return None
+
+    @staticmethod
+    def _is_wechat_image_url(image_source: str) -> bool:
+        normalized_source = (image_source or '').strip().lower()
+        return normalized_source.startswith('wx_fmt=') or 'mmbiz.qpic.cn' in normalized_source
+
+    @staticmethod
+    def _build_article_body_source_key(image_source: str) -> str:
+        normalized_source = (image_source or '').strip()
+        is_inline_source = normalized_source.startswith('data:') or (
+            not normalized_source.startswith('http://')
+            and not normalized_source.startswith('https://')
+            and not normalized_source.startswith('/api/media/')
+            and len(normalized_source) > 128
+        )
+        if is_inline_source:
+            digest = hashlib.sha256(normalized_source.encode('utf-8')).hexdigest()
+            return f'inline:{digest}'
+        return normalized_source[:1000]
+
+    async def _resolve_article_owner_email(self, article: Article) -> str:
+        agent = await self.session.get(Agent, article.agent_id)
+        if not agent:
+            return ''
+
+        account = await self.session.get(Account, agent.account_id)
+        if not account:
+            return ''
+        return account.owner_email or ''
+
+    async def _get_or_create_body_media_asset(
+        self,
+        article: Article,
+        image_source: str,
+    ) -> MediaAsset:
+        media_id = self._extract_media_id_from_download_url(image_source)
+        if media_id is not None:
+            media_asset = await self.session.get(MediaAsset, media_id)
+            if not media_asset:
+                raise ValueError(f'Media asset {media_id} not found')
+            return media_asset
+
+        source_key = self._build_article_body_source_key(image_source)
+        stmt = select(MediaAsset).where(
+            MediaAsset.article_id == article.id,
+            MediaAsset.source_kind == 'article_body',
+            MediaAsset.source_url == source_key,
+        )
+        result = await self.session.execute(stmt)
+        existing_asset = result.scalar_one_or_none()
+        if existing_asset:
+            return existing_asset
+
+        image_bytes, filename, content_type = await self._load_image_resource(image_source)
+
+        from agent_publisher.api.media import UPLOAD_DIR, _ensure_upload_dir
+
+        _ensure_upload_dir()
+        extension = Path(filename).suffix or mimetypes.guess_extension(content_type) or '.png'
+        stored_filename = f'{uuid.uuid4().hex}{extension}'
+        (UPLOAD_DIR / stored_filename).write_bytes(image_bytes)
+
+        media_asset = MediaAsset(
+            filename=filename,
+            stored_filename=stored_filename,
+            content_type=content_type,
+            file_size=len(image_bytes),
+            tags=['article_body'],
+            description=f'Article {article.id} body image',
+            owner_email=await self._resolve_article_owner_email(article),
+            source_kind='article_body',
+            source_url=source_key,
+            article_id=article.id,
+        )
+        self.session.add(media_asset)
+        await self.session.flush()
+        return media_asset
+
+    async def _sync_article_body_media_assets(self, article: Article) -> bool:
+        html_content = article.html_content or ''
+        if not html_content:
+            return False
+
+        img_pattern = re.compile(
+            r'(<img\b[^>]*\bsrc=["\'])([^"\']+)(["\'][^>]*>)',
+            flags=re.IGNORECASE,
+        )
+        rewritten_parts: list[str] = []
+        last_end = 0
+        changed = False
+
+        for match in img_pattern.finditer(html_content):
+            rewritten_parts.append(html_content[last_end:match.start()])
+            prefix = match.group(1)
+            original_src = match.group(2).strip()
+            suffix = match.group(3)
+
+            replacement = match.group(0)
+            if original_src and not self._is_wechat_image_url(original_src):
+                try:
+                    media_asset = await self._get_or_create_body_media_asset(article, original_src)
+                    localized_src = f'/api/media/{media_asset.id}/download'
+                    replacement = f'{prefix}{localized_src}{suffix}'
+                    changed = changed or localized_src != original_src
+                except Exception as exc:
+                    logger.warning(
+                        'Article %d body image localization failed for %s: %s',
+                        article.id,
+                        original_src,
+                        exc,
+                    )
+
+            rewritten_parts.append(replacement)
+            last_end = match.end()
+
+        rewritten_parts.append(html_content[last_end:])
+        localized_html = ''.join(rewritten_parts)
+        if localized_html != html_content:
+            article.html_content = localized_html
+            await self.session.flush()
+            return True
+        return changed
+
+    async def _get_or_create_wechat_media_mapping(
+        self,
+        media_asset_id: int,
+        account_id: int,
+    ) -> MediaAssetWechatMapping:
+        stmt = select(MediaAssetWechatMapping).where(
+            MediaAssetWechatMapping.media_asset_id == media_asset_id,
+            MediaAssetWechatMapping.account_id == account_id,
+        )
+        result = await self.session.execute(stmt)
+        mapping = result.scalar_one_or_none()
+        if mapping:
+            return mapping
+
+        mapping = MediaAssetWechatMapping(
+            media_asset_id=media_asset_id,
+            account_id=account_id,
+            wechat_url='',
+            upload_status='pending',
+            error_message='',
+        )
+        self.session.add(mapping)
+        await self.session.flush()
+        return mapping
+
+    async def _upload_article_body_image_for_account(
+        self,
+        account: Account,
+        access_token: str,
+        media_asset: MediaAsset,
+    ) -> str:
+        mapping = await self._get_or_create_wechat_media_mapping(media_asset.id, account.id)
+        if mapping.upload_status == 'success' and mapping.wechat_url:
+            return mapping.wechat_url
+
+        from agent_publisher.api.media import UPLOAD_DIR
+
+        local_path = UPLOAD_DIR / media_asset.stored_filename
+        if not local_path.is_file():
+            raise FileNotFoundError(f'Media file not found on disk: {local_path}')
+
+        mapping.upload_status = 'processing'
+        mapping.error_message = ''
+        await self.session.flush()
+
+        try:
+            # Ensure filename has a proper extension for WeChat validation
+            upload_filename = media_asset.filename
+            if not Path(upload_filename).suffix:
+                ext = mimetypes.guess_extension(media_asset.content_type or '') or '.png'
+                upload_filename = f'{upload_filename}{ext}'
+            wechat_url = await WeChatService.upload_article_image(
+                access_token=access_token,
+                image_data=local_path.read_bytes(),
+                filename=upload_filename,
+                content_type=media_asset.content_type or 'image/jpeg',
+            )
+            mapping.wechat_url = wechat_url
+            mapping.upload_status = 'success'
+            mapping.error_message = ''
+            mapping.uploaded_at = datetime.now(timezone.utc)
+            await self.session.flush()
+            return wechat_url
+        except Exception as exc:
+            mapping.upload_status = 'failed'
+            mapping.error_message = str(exc)
+            await self.session.flush()
+            raise

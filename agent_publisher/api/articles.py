@@ -2,13 +2,21 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from agent_publisher.api.deps import get_db, get_current_user, UserContext
 from agent_publisher.models.account import Account
 from agent_publisher.models.agent import Agent
 from agent_publisher.models.article import Article
+from agent_publisher.models.article_publish_relation import ArticlePublishRelation
 from agent_publisher.models.publish_record import PublishRecord
-from agent_publisher.schemas.article import ArticleOut
+from agent_publisher.schemas.article import (
+    ArticleOut,
+    ArticlePublishRequest,
+    ArticlePublishResponse,
+    ArticleSyncRequest,
+    ArticleSyncResponse,
+)
 from agent_publisher.services.article_service import ArticleService
 from agent_publisher.services.task_service import TaskService
 
@@ -34,7 +42,13 @@ async def _get_article_with_ownership(
     article_id: int, user: UserContext, db: AsyncSession
 ) -> Article:
     """Fetch an article and verify ownership through Agent -> Account chain."""
-    article = await db.get(Article, article_id)
+    stmt = select(Article).where(Article.id == article_id).options(
+        selectinload(Article.publish_relations).selectinload(
+            ArticlePublishRelation.account
+        ),
+    )
+    result = await db.execute(stmt)
+    article = result.scalar_one_or_none()
     if not article:
         raise HTTPException(404, "Article not found")
     if not user.is_admin:
@@ -114,9 +128,10 @@ async def get_article(
     return await _get_article_with_ownership(article_id, user, db)
 
 
-@router.post("/{article_id}/publish")
+@router.post("/{article_id}/publish", response_model=ArticlePublishResponse)
 async def publish_article(
     article_id: int,
+    data: ArticlePublishRequest | None = None,
     db: AsyncSession = Depends(get_db),
     user: UserContext = Depends(get_current_user),
 ):
@@ -124,8 +139,11 @@ async def publish_article(
     article_svc = ArticleService(db)
     try:
         operator = user.email if not user.is_admin else "admin"
-        media_id = await article_svc.publish_article(article_id, operator=operator)
-        return {"ok": True, "media_id": media_id}
+        return await article_svc.publish_article(
+            article_id,
+            operator=operator,
+            target_account_ids=data.target_account_ids if data else None,
+        )
     except ValueError as e:
         raise HTTPException(404, str(e))
 
@@ -149,15 +167,17 @@ async def update_article(
 
     article_svc = ArticleService(db)
     try:
-        updated = await article_svc.update_article(article_id, updates)
-        return updated
+        await article_svc.update_article(article_id, updates)
+        # Re-fetch with eager-loaded relations for response serialization
+        return await _get_article_with_ownership(article_id, user, db)
     except ValueError as e:
         raise HTTPException(404, str(e))
 
 
-@router.post("/{article_id}/sync")
+@router.post("/{article_id}/sync", response_model=ArticleSyncResponse)
 async def sync_article(
     article_id: int,
+    data: ArticleSyncRequest | None = None,
     db: AsyncSession = Depends(get_db),
     user: UserContext = Depends(get_current_user),
 ):
@@ -166,8 +186,11 @@ async def sync_article(
     article_svc = ArticleService(db)
     try:
         operator = user.email if not user.is_admin else "admin"
-        sync_status = await article_svc.sync_article_to_draft(article_id, operator=operator)
-        return {"ok": True, "sync_status": sync_status}
+        return await article_svc.sync_article_to_draft(
+            article_id,
+            operator=operator,
+            target_account_ids=data.target_account_ids if data else None,
+        )
     except ValueError as e:
         raise HTTPException(404, str(e))
     except RuntimeError as e:

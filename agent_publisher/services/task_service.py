@@ -39,8 +39,12 @@ class TaskService:
         asyncio.create_task(_execute_generate(task.id, agent_id))
         return task
 
-    async def run_publish(self, article_id: int) -> Task:
-        """Publish an article to WeChat draft box."""
+    async def run_publish(
+        self,
+        article_id: int,
+        target_account_ids: list[int] | None = None,
+    ) -> Task:
+        """Publish an article to one or more WeChat draft boxes."""
         task = await self.create_task(None, "publish")
         task.status = "running"
         task.started_at = datetime.now(timezone.utc)
@@ -48,14 +52,17 @@ class TaskService:
 
         try:
             article_svc = ArticleService(self.session)
-            media_id = await article_svc.publish_article(article_id)
+            publish_result = await article_svc.publish_article(
+                article_id,
+                target_account_ids=target_account_ids,
+            )
 
-            task.status = "success"
-            task.result = {"article_id": article_id, "media_id": media_id}
+            task.status = "success" if publish_result.ok else "failed"
+            task.result = publish_result.model_dump()
         except Exception as e:
             logger.error("Publish task %d failed: %s", task.id, e)
             task.status = "failed"
-            task.result = {"error": str(e)}
+            task.result = {"article_id": article_id, "error": str(e)}
 
         task.finished_at = datetime.now(timezone.utc)
         await self.session.commit()

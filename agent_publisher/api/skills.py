@@ -10,8 +10,9 @@ import re
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, field_validator
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from agent_publisher.api.deps import get_db
 from agent_publisher.config import settings
@@ -128,6 +129,7 @@ class SkillArticleCreate(BaseModel):
     html_content: str = ""  # Pre-rendered HTML (used if content is empty)
     cover_image_url: str = ""  # URL or media library path e.g. media:<id>
     status: str = "draft"
+    target_account_ids: list[int] | None = None
 
 
 class SkillArticleUpdate(BaseModel):
@@ -137,10 +139,16 @@ class SkillArticleUpdate(BaseModel):
     content: str | None = None
     html_content: str | None = None
     cover_image_url: str | None = None
+    target_account_ids: list[int] | None = None
+
+
+class ArticleAccountTargetRequest(BaseModel):
+    target_account_ids: list[int] | None = None
 
 
 class BatchPublishRequest(BaseModel):
     article_ids: list[int]
+    target_account_ids: list[int] | None = None
 
 
 class BatchPublishResult(BaseModel):
@@ -378,8 +386,27 @@ async def skill_batch_publish(
 
     for article_id in data.article_ids:
         try:
-            media_id = await article_svc.publish_article(article_id, operator=email)
-            results.append(BatchPublishResult(article_id=article_id, success=True, media_id=media_id))
+            publish_result = await article_svc.publish_article(
+                article_id,
+                operator=email,
+                target_account_ids=data.target_account_ids,
+            )
+            media_id = next(
+                (
+                    item.wechat_media_id
+                    for item in publish_result.results
+                    if item.wechat_media_id
+                ),
+                "",
+            )
+            results.append(
+                BatchPublishResult(
+                    article_id=article_id,
+                    success=publish_result.ok,
+                    media_id=media_id,
+                    error="" if publish_result.ok else publish_result.overall_status,
+                )
+            )
         except Exception as e:
             logger.error("Batch publish failed for article %d: %s", article_id, e)
             results.append(BatchPublishResult(article_id=article_id, success=False, error=str(e)))
@@ -754,6 +781,11 @@ async def skill_create_article(
     await db.commit()
     await db.refresh(article)
 
+    article_svc = ArticleService(db)
+    await article_svc._sync_article_body_media_assets(article)
+    await db.commit()
+    await db.refresh(article)
+
     logger.info("Skill created article id=%d title=%s for email=%s", article.id, article.title, email)
     return {
         "id": article.id,
@@ -769,10 +801,11 @@ async def skill_create_article(
 @router.post("/articles/{article_id}/publish")
 async def skill_publish_article(
     article_id: int,
-    request: Request,
+    data: ArticleAccountTargetRequest | None = None,
+    request: Request = None,
     db: AsyncSession = Depends(get_db),
 ):
-    """Publish a single article to WeChat draft box."""
+    """Publish a single article to one or more WeChat draft boxes."""
     email = _get_skill_email(request)
     is_admin = settings.is_admin(email)
 
@@ -790,8 +823,11 @@ async def skill_publish_article(
 
     article_svc = ArticleService(db)
     try:
-        media_id = await article_svc.publish_article(article_id, operator=email)
-        return {"ok": True, "media_id": media_id}
+        return await article_svc.publish_article(
+            article_id,
+            operator=email,
+            target_account_ids=data.target_account_ids if data else None,
+        )
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
@@ -866,14 +902,11 @@ async def skill_update_article(
 @router.post("/articles/{article_id}/sync")
 async def skill_sync_article(
     article_id: int,
-    request: Request,
+    data: ArticleAccountTargetRequest | None = None,
+    request: Request = None,
     db: AsyncSession = Depends(get_db),
 ):
-    """Sync local article edits to WeChat draft box.
-
-    Only published articles with a valid wechat_media_id will be synced.
-    Draft articles are skipped.
-    """
+    """Sync local article edits to one or more WeChat draft boxes."""
     email = _get_skill_email(request)
     is_admin = settings.is_admin(email)
 
@@ -891,8 +924,11 @@ async def skill_sync_article(
 
     article_svc = ArticleService(db)
     try:
-        status = await article_svc.sync_article_to_draft(article_id, operator=email)
-        return {"ok": True, "sync_status": status}
+        return await article_svc.sync_article_to_draft(
+            article_id,
+            operator=email,
+            target_account_ids=data.target_account_ids if data else None,
+        )
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except RuntimeError as e:
@@ -907,39 +943,60 @@ async def skill_sync_article(
 async def skill_list_media(
     request: Request,
     tag: str = "",
+    source_kind: str = "",
+    article_id: int | None = None,
+    account_id: int | None = None,
+    upload_status: str = "",
     page: int = 1,
     page_size: int = 50,
     db: AsyncSession = Depends(get_db),
 ):
-    """List media assets. Normal users see their own; admins see all."""
+    """List media assets with pagination. Normal users see their own; admins see all."""
+    from agent_publisher.api.media import _serialize_media_asset
+
     email = _get_skill_email(request)
     is_admin = settings.is_admin(email)
 
-    stmt = select(MediaAsset).order_by(MediaAsset.id.desc())
+    stmt = select(MediaAsset).options(selectinload(MediaAsset.wechat_mappings)).order_by(MediaAsset.id.desc())
+    count_stmt = select(func.count(MediaAsset.id))
+
     if not is_admin:
         stmt = stmt.where(MediaAsset.owner_email == email)
+        count_stmt = count_stmt.where(MediaAsset.owner_email == email)
 
     if tag:
         stmt = stmt.where(MediaAsset.tags.contains(tag))
+        count_stmt = count_stmt.where(MediaAsset.tags.contains(tag))
+
+    if source_kind:
+        stmt = stmt.where(MediaAsset.source_kind == source_kind)
+        count_stmt = count_stmt.where(MediaAsset.source_kind == source_kind)
+
+    if article_id is not None:
+        stmt = stmt.where(MediaAsset.article_id == article_id)
+        count_stmt = count_stmt.where(MediaAsset.article_id == article_id)
+
+    if account_id is not None:
+        stmt = stmt.where(MediaAsset.wechat_mappings.any(account_id=account_id))
+        count_stmt = count_stmt.where(MediaAsset.wechat_mappings.any(account_id=account_id))
+
+    if upload_status:
+        stmt = stmt.where(MediaAsset.wechat_mappings.any(upload_status=upload_status))
+        count_stmt = count_stmt.where(MediaAsset.wechat_mappings.any(upload_status=upload_status))
 
     stmt = stmt.offset((page - 1) * page_size).limit(page_size)
     result = await db.execute(stmt)
     assets = result.scalars().all()
 
-    return [
-        {
-            "id": a.id,
-            "filename": a.filename,
-            "content_type": a.content_type,
-            "file_size": a.file_size,
-            "tags": a.tags or [],
-            "description": a.description,
-            "owner_email": a.owner_email,
-            "url": f"/api/media/{a.id}/download",
-            "created_at": a.created_at.isoformat() if a.created_at else None,
-        }
-        for a in assets
-    ]
+    total_result = await db.execute(count_stmt)
+    total = total_result.scalar_one()
+
+    return {
+        "items": [_serialize_media_asset(a) for a in assets],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+    }
 
 
 @router.post("/media")

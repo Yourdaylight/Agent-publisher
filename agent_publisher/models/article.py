@@ -36,6 +36,10 @@ class Article(Base):
     publish_records: Mapped[list["PublishRecord"]] = relationship(  # noqa: F821
         back_populates="article", order_by="PublishRecord.id.desc()"
     )
+    publish_relations: Mapped[list["ArticlePublishRelation"]] = relationship(  # noqa: F821
+        back_populates="article",
+        order_by="ArticlePublishRelation.id.desc()",
+    )
     # Self-referencing relationships for variant tracking
     source_article: Mapped["Article | None"] = relationship(
         back_populates="variants",

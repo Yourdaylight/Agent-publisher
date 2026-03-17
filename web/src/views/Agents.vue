@@ -14,12 +14,12 @@
       </template>
       <template #role="{ row }">
         <t-tag :theme="row.role === 'full_pipeline' ? 'primary' : row.role === 'collector' ? 'success' : row.role === 'processor' ? 'warning' : 'default'" variant="light" size="small">
-          {{ { collector: '采集', processor: '加工', publisher: '发布', full_pipeline: '全流程' }[row.role] || row.role }}
+          {{ roleLabelMap[row.role as keyof typeof roleLabelMap] || row.role }}
         </t-tag>
       </template>
       <template #source_mode="{ row }">
         <t-tag :theme="row.source_mode === 'rss' ? 'primary' : row.source_mode === 'skills_feed' ? 'success' : 'warning'" variant="light" size="small">
-          {{ { rss: 'RSS', skills_feed: 'Skills', independent_search: '独立采集' }[row.source_mode] || row.source_mode }}
+          {{ sourceModeLabelMap[row.source_mode as keyof typeof sourceModeLabelMap] || row.source_mode }}
         </t-tag>
       </template>
       <template #is_active="{ row }">
@@ -67,6 +67,17 @@ const dialogVisible = ref(false);
 const editingAgent = ref<any>(null);
 const generatingIds = ref<Set<number>>(new Set());
 const stylePresets = ref<any[]>([]);
+const roleLabelMap = {
+  collector: '采集',
+  processor: '加工',
+  publisher: '发布',
+  full_pipeline: '全流程',
+};
+const sourceModeLabelMap = {
+  rss: 'RSS',
+  skills_feed: 'Skills',
+  independent_search: '独立采集',
+};
 
 const getStyleName = (styleId: string | null): string => {
   if (!styleId) return '-';

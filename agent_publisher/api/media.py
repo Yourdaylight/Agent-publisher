@@ -7,8 +7,9 @@ import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from agent_publisher.api.deps import get_db, get_current_user, UserContext
 from agent_publisher.config import settings
@@ -35,11 +36,57 @@ def _ensure_upload_dir():
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 
+def _serialize_media_asset(asset: MediaAsset) -> dict:
+    wechat_mappings = [
+        {
+            "id": mapping.id,
+            "account_id": mapping.account_id,
+            "wechat_url": mapping.wechat_url,
+            "upload_status": mapping.upload_status,
+            "error_message": mapping.error_message,
+            "uploaded_at": mapping.uploaded_at.isoformat() if mapping.uploaded_at else None,
+            "created_at": mapping.created_at.isoformat() if mapping.created_at else None,
+            "updated_at": mapping.updated_at.isoformat() if mapping.updated_at else None,
+        }
+        for mapping in sorted(asset.wechat_mappings, key=lambda item: item.account_id)
+    ]
+    latest_upload_status = ''
+    if wechat_mappings:
+        latest_upload_status = (
+            'failed'
+            if any(mapping["upload_status"] == 'failed' for mapping in wechat_mappings)
+            else 'processing'
+            if any(mapping["upload_status"] == 'processing' for mapping in wechat_mappings)
+            else 'success'
+            if all(mapping["upload_status"] == 'success' for mapping in wechat_mappings)
+            else 'pending'
+        )
+    return {
+        "id": asset.id,
+        "filename": asset.filename,
+        "stored_filename": asset.stored_filename,
+        "content_type": asset.content_type,
+        "file_size": asset.file_size,
+        "tags": asset.tags or [],
+        "description": asset.description,
+        "owner_email": asset.owner_email,
+        "source_kind": asset.source_kind,
+        "source_url": asset.source_url,
+        "article_id": asset.article_id,
+        "url": f"/api/media/{asset.id}/download",
+        "latest_upload_status": latest_upload_status,
+        "wechat_mappings": wechat_mappings,
+        "created_at": asset.created_at.isoformat() if asset.created_at else None,
+    }
+
+
 async def _get_media_with_ownership(
     media_id: int, user: UserContext, db: AsyncSession
 ) -> MediaAsset:
     """Fetch a media asset and verify ownership."""
-    asset = await db.get(MediaAsset, media_id)
+    stmt = select(MediaAsset).options(selectinload(MediaAsset.wechat_mappings)).where(MediaAsset.id == media_id)
+    result = await db.execute(stmt)
+    asset = result.scalar_one_or_none()
     if not asset:
         raise HTTPException(status_code=404, detail="Media asset not found")
     if not user.is_admin and asset.owner_email != user.email:
@@ -101,54 +148,61 @@ async def upload_media(
     await db.refresh(asset)
 
     logger.info("Media uploaded: id=%d filename=%s size=%d", asset.id, original_filename, file_size)
-    return {
-        "id": asset.id,
-        "filename": asset.filename,
-        "stored_filename": asset.stored_filename,
-        "content_type": asset.content_type,
-        "file_size": asset.file_size,
-        "tags": asset.tags,
-        "description": asset.description,
-        "url": f"/api/media/{asset.id}/download",
-        "created_at": asset.created_at.isoformat() if asset.created_at else None,
-    }
+    return _serialize_media_asset(asset)
 
 
 @router.get("")
 async def list_media(
     tag: str = Query("", description="Filter by tag"),
+    source_kind: str = Query("", description="Filter by source kind"),
+    article_id: int | None = Query(None, description="Filter by article ID"),
+    account_id: int | None = Query(None, description="Filter by account ID in WeChat upload mappings"),
+    upload_status: str = Query("", description="Filter by WeChat upload status"),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
     user: UserContext = Depends(get_current_user),
 ):
-    """List media assets, optionally filtered by tag."""
-    stmt = select(MediaAsset).order_by(MediaAsset.id.desc())
+    """List media assets, optionally filtered by tag, source kind, article, or per-account upload mapping."""
+    stmt = select(MediaAsset).options(selectinload(MediaAsset.wechat_mappings))
+    count_stmt = select(func.count(MediaAsset.id))
     if not user.is_admin:
         stmt = stmt.where(MediaAsset.owner_email == user.email)
+        count_stmt = count_stmt.where(MediaAsset.owner_email == user.email)
 
     if tag:
-        # JSON contains for SQLite/Postgres
         stmt = stmt.where(MediaAsset.tags.contains(tag))
+        count_stmt = count_stmt.where(MediaAsset.tags.contains(tag))
 
-    stmt = stmt.offset((page - 1) * page_size).limit(page_size)
+    if source_kind:
+        stmt = stmt.where(MediaAsset.source_kind == source_kind)
+        count_stmt = count_stmt.where(MediaAsset.source_kind == source_kind)
+
+    if article_id is not None:
+        stmt = stmt.where(MediaAsset.article_id == article_id)
+        count_stmt = count_stmt.where(MediaAsset.article_id == article_id)
+
+    if account_id is not None:
+        stmt = stmt.where(MediaAsset.wechat_mappings.any(account_id=account_id))
+        count_stmt = count_stmt.where(MediaAsset.wechat_mappings.any(account_id=account_id))
+
+    if upload_status:
+        stmt = stmt.where(MediaAsset.wechat_mappings.any(upload_status=upload_status))
+        count_stmt = count_stmt.where(MediaAsset.wechat_mappings.any(upload_status=upload_status))
+
+    stmt = stmt.order_by(MediaAsset.id.desc()).offset((page - 1) * page_size).limit(page_size)
     result = await db.execute(stmt)
     assets = result.scalars().all()
 
-    return [
-        {
-            "id": a.id,
-            "filename": a.filename,
-            "content_type": a.content_type,
-            "file_size": a.file_size,
-            "tags": a.tags or [],
-            "description": a.description,
-            "owner_email": a.owner_email,
-            "url": f"/api/media/{a.id}/download",
-            "created_at": a.created_at.isoformat() if a.created_at else None,
-        }
-        for a in assets
-    ]
+    total_result = await db.execute(count_stmt)
+    total = total_result.scalar_one()
+
+    return {
+        "items": [_serialize_media_asset(asset) for asset in assets],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+    }
 
 
 @router.get("/{media_id}")
@@ -159,18 +213,7 @@ async def get_media_detail(
 ):
     """Get media asset detail by ID."""
     asset = await _get_media_with_ownership(media_id, user, db)
-    return {
-        "id": asset.id,
-        "filename": asset.filename,
-        "stored_filename": asset.stored_filename,
-        "content_type": asset.content_type,
-        "file_size": asset.file_size,
-        "tags": asset.tags or [],
-        "description": asset.description,
-        "owner_email": asset.owner_email,
-        "url": f"/api/media/{asset.id}/download",
-        "created_at": asset.created_at.isoformat() if asset.created_at else None,
-    }
+    return _serialize_media_asset(asset)
 
 
 @router.get("/{media_id}/download")
@@ -239,4 +282,6 @@ async def update_media(
         "filename": asset.filename,
         "tags": asset.tags or [],
         "description": asset.description,
+        "source_kind": asset.source_kind,
+        "article_id": asset.article_id,
     }

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import mimetypes
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -66,6 +67,37 @@ class WeChatService:
             raise RuntimeError(f"WeChat upload thumb error: {data}")
 
         return data.get("media_id", "")
+
+    @staticmethod
+    async def upload_article_image(
+        access_token: str,
+        image_data: bytes,
+        filename: str = "image.png",
+        content_type: str | None = None,
+    ) -> str:
+        """Upload an inline article image and return the WeChat-hosted image URL."""
+        url = f"{WECHAT_API_BASE}/media/uploadimg"
+        params = {"access_token": access_token}
+        resolved_content_type = (
+            content_type
+            or mimetypes.guess_type(filename)[0]
+            or "image/png"
+        )
+        files = {"media": (filename, image_data, resolved_content_type)}
+
+        async with httpx.AsyncClient(timeout=60) as client:
+            resp = await client.post(url, params=params, files=files)
+            resp.raise_for_status()
+            data = resp.json()
+
+        WeChatService._check_wechat_error(data, "media/uploadimg")
+
+        image_url = data.get("url", "")
+        if not image_url:
+            raise RuntimeError("WeChat media/uploadimg returned empty url")
+
+        logger.info("Uploaded article image: filename=%s url=%s", filename, image_url)
+        return image_url
 
     @staticmethod
     async def add_draft(

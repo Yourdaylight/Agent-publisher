@@ -247,8 +247,11 @@ def article_preview(article_id: int = typer.Argument(..., help="Article ID")):
 
 
 @article_app.command("publish")
-def article_publish(article_id: int = typer.Argument(..., help="Article ID")):
-    """Publish an article to WeChat draft box."""
+def article_publish(
+    article_id: int = typer.Argument(..., help="Article ID"),
+    account_id: list[int] = typer.Option([], "--account-id", help="Target account ID, repeatable"),
+):
+    """Publish an article to one or more WeChat draft boxes."""
 
     async def _publish():
         from agent_publisher.services.article_service import ArticleService
@@ -257,8 +260,30 @@ def article_publish(article_id: int = typer.Argument(..., help="Article ID")):
             svc = ArticleService(session)
             console.print(f"[yellow]Publishing article {article_id}...[/yellow]")
             try:
-                media_id = await svc.publish_article(article_id)
-                console.print(f"[green]Published! media_id={media_id}[/green]")
+                publish_result = await svc.publish_article(
+                    article_id,
+                    target_account_ids=account_id or None,
+                )
+                status_style = "green" if publish_result.ok else "yellow"
+                console.print(
+                    f"[{status_style}]Publish finished: overall_status={publish_result.overall_status}[/{status_style}]"
+                )
+                result_table = Table(title=f"Article {article_id} publish results")
+                result_table.add_column("Account ID", style="cyan")
+                result_table.add_column("Account")
+                result_table.add_column("Status")
+                result_table.add_column("Media ID")
+                result_table.add_column("Error")
+                for item in publish_result.results:
+                    row_style = "green" if item.status == "success" else "yellow"
+                    result_table.add_row(
+                        str(item.account_id),
+                        item.account_name,
+                        f"[{row_style}]{item.status}[/{row_style}]",
+                        item.wechat_media_id or "-",
+                        item.error or "-",
+                    )
+                console.print(result_table)
             except Exception as e:
                 console.print(f"[red]Publish failed: {e}[/red]")
 

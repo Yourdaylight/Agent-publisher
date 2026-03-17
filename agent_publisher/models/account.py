@@ -24,6 +24,10 @@ class Account(Base):
     )
 
     agents: Mapped[list["Agent"]] = relationship(back_populates="account")  # noqa: F821
+    publish_records: Mapped[list["PublishRecord"]] = relationship(back_populates="account")  # noqa: F821
+    article_publish_relations: Mapped[list["ArticlePublishRelation"]] = relationship(  # noqa: F821
+        back_populates="account"
+    )
 
     def __repr__(self) -> str:
         return f"<Account id={self.id} name={self.name!r}>"
