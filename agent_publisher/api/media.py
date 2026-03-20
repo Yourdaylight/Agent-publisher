@@ -22,10 +22,11 @@ router = APIRouter(prefix="/api/media", tags=["media"])
 # Upload directory: data/uploads/ relative to project root
 UPLOAD_DIR = Path(os.environ.get("MEDIA_UPLOAD_DIR", "data/uploads"))
 
-# Allowed image MIME types
+# Allowed MIME types (images + documents)
 ALLOWED_TYPES = {
     "image/png", "image/jpeg", "image/jpg", "image/gif", "image/webp",
     "image/svg+xml", "image/bmp", "image/tiff",
+    "text/markdown", "text/plain", "text/x-markdown",
 }
 
 MAX_FILE_SIZE = 20 * 1024 * 1024  # 20MB

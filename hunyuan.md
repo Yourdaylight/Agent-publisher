@@ -124,3 +124,5 @@ X-TC-Action: SubmitTextToImageJob
         "RequestId": "ee8f21db-e724-4333-8130-e0520ac73e4f"
     }
 }
+# 加一张图片
+![混元生图示例](Clipboard_Screenshot_1773320600.png)
