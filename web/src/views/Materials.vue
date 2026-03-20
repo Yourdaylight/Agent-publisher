@@ -17,6 +17,10 @@
           <template #icon><t-icon name="upload" /></template>
           上传图片
         </t-button>
+        <t-button v-if="libraryMode === 'media'" theme="default" @click="showMarkdownUploadDialog = true">
+          <template #icon><t-icon name="upload" /></template>
+          上传 Markdown
+        </t-button>
       </t-space>
     </div>
 
@@ -173,6 +177,7 @@
           <t-link theme="primary" @click="openDetail(row)">详情</t-link>
           <t-link v-if="libraryMode === 'candidate'" theme="primary" @click="openTagEditor(row)">标签</t-link>
           <t-link v-if="libraryMode === 'media'" theme="primary" :href="row.url" target="_blank">查看</t-link>
+          <t-link v-if="libraryMode === 'media'" theme="danger" @click="confirmDeleteMedia(row)">删除</t-link>
         </t-space>
       </template>
     </t-table>
@@ -223,6 +228,46 @@
           <t-space>
             <t-button theme="primary" type="submit" :loading="mediaUploading">上传</t-button>
             <t-button variant="outline" @click="showMediaUploadDialog = false">取消</t-button>
+          </t-space>
+        </t-form-item>
+      </t-form>
+    </t-dialog>
+
+    <t-dialog v-model:visible="showMarkdownUploadDialog" header="上传 Markdown" :footer="false" width="700px">
+      <t-form layout="vertical">
+        <t-form-item label="Markdown 内容">
+          <t-textarea
+            v-model="markdownUploadForm.content"
+            placeholder="粘贴 Markdown 内容，或上传 .md 文件"
+            :autosize="{ minRows: 8, maxRows: 16 }"
+          />
+        </t-form-item>
+        <t-form-item label="上传 .md 文件">
+          <t-upload
+            ref="markdownFileRef"
+            theme="file"
+            accept=".md,.markdown"
+            :size-limit="{ size: 5, unit: 'MB' }"
+            @change="onMarkdownFileChange"
+          />
+        </t-form-item>
+        <t-form-item label="图片标签">
+          <t-input v-model="markdownUploadForm.tagsInput" placeholder="输入标签，逗号分隔（可选）" />
+        </t-form-item>
+        <t-form-item v-if="markdownUploadResult">
+          <t-alert :theme="markdownUploadResult.images_count > 0 ? 'success' : 'warning'" :title="`处理完成：${markdownUploadResult.images_count} 个图片已上传，${markdownUploadResult.skipped_count} 个跳过`" />
+          <div v-if="markdownUploadResult.images.length" style="margin-top: 12px; max-height: 200px; overflow-y: auto">
+            <div v-for="img in markdownUploadResult.images" :key="img.media_id" style="font-size: 12px; padding: 4px 0; border-bottom: 1px solid var(--td-border-level-1-color)">
+              <div style="color: var(--td-text-color-secondary)">{{ img.filename }}</div>
+              <div style="color: var(--td-brand-color)">{{ img.original_url }} → {{ img.url }}</div>
+            </div>
+          </div>
+        </t-form-item>
+        <t-form-item>
+          <t-space>
+            <t-button theme="primary" type="submit" :loading="markdownUploading" @click="onMarkdownUpload">处理并上传图片</t-button>
+            <t-button variant="outline" @click="showMarkdownUploadDialog = false; markdownUploadResult = null">取消</t-button>
+            <t-button v-if="markdownUploadResult" variant="outline" theme="default" @click="copyProcessedMarkdown">复制处理后的 Markdown</t-button>
           </t-space>
         </t-form-item>
       </t-form>
@@ -339,6 +384,18 @@
       </template>
     </t-drawer>
 
+    <t-dialog v-model:visible="showDeleteConfirm" header="确认删除" :footer="false" width="400px">
+      <div style="padding: 8px 0">
+        <div style="margin-bottom: 16px">
+          确定要删除素材 <strong>{{ deletingMedia?.filename || deletingMedia?.title }}</strong> 吗？此操作不可恢复。
+        </div>
+        <t-space>
+          <t-button theme="danger" :loading="deleting" @click="onDeleteMedia">删除</t-button>
+          <t-button variant="outline" @click="showDeleteConfirm = false">取消</t-button>
+        </t-space>
+      </div>
+    </t-dialog>
+
     <t-dialog v-model:visible="showTagEditor" header="管理标签" :footer="false" width="500px">
       <template v-if="tagEditMaterial">
         <div style="margin-bottom: 12px">
@@ -359,7 +416,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
-import { getAccounts, getAgents, getMaterial, getMaterials, getMedia, getMediaDetail, updateMaterialTags, uploadMaterial, uploadMedia, deleteMedia } from '@/api';
+import { getAccounts, getAgents, getMaterial, getMaterials, getMedia, getMediaDetail, updateMaterialTags, uploadMaterial, uploadMedia, uploadMarkdown, deleteMedia } from '@/api';
 import { MessagePlugin } from 'tdesign-vue-next';
 
 const loading = ref(false);
@@ -425,6 +482,16 @@ const uploadForm = reactive({ title: '', content: '', original_url: '', tagsInpu
 const showMediaUploadDialog = ref(false);
 const mediaUploading = ref(false);
 const mediaUploadForm = reactive({ fileList: [] as any[], tagsInput: '', description: '' });
+
+const showMarkdownUploadDialog = ref(false);
+const markdownUploading = ref(false);
+const markdownUploadForm = reactive({ content: '', tagsInput: '' });
+const markdownUploadResult = ref<any>(null);
+const markdownFileRef = ref();
+
+const showDeleteConfirm = ref(false);
+const deletingMedia = ref<any>(null);
+const deleting = ref(false);
 
 const showDetail = ref(false);
 const detailMaterial = ref<any>(null);
@@ -656,6 +723,67 @@ const onMediaUpload = async () => {
 
 const onMediaUploadFail = ({ file }: any) => {
   MessagePlugin.warning(`文件 ${file.name} 超过 20MB 大小限制`);
+};
+
+const onMarkdownFileChange = (files: any[]) => {
+  const file = files?.[0]?.raw || files?.[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    markdownUploadForm.content = e.target?.result as string || '';
+  };
+  reader.readAsText(file);
+};
+
+const onMarkdownUpload = async () => {
+  if (!markdownUploadForm.content.trim()) {
+    MessagePlugin.warning('请输入 Markdown 内容');
+    return;
+  }
+  markdownUploading.value = true;
+  try {
+    const tags = markdownUploadForm.tagsInput
+      ? markdownUploadForm.tagsInput.split(',').map((t: string) => t.trim()).filter(Boolean)
+      : [];
+    const res = await uploadMarkdown(markdownUploadForm.content, tags);
+    markdownUploadResult.value = res.data;
+    MessagePlugin.success('Markdown 处理完成，图片已上传到素材库');
+    fetchData();
+  } catch {
+    MessagePlugin.error('Markdown 处理失败');
+  } finally {
+    markdownUploading.value = false;
+  }
+};
+
+const copyProcessedMarkdown = () => {
+  if (!markdownUploadResult.value?.content) return;
+  navigator.clipboard.writeText(markdownUploadResult.value.content).then(() => {
+    MessagePlugin.success('已复制到剪贴板');
+  }).catch(() => {
+    MessagePlugin.error('复制失败');
+  });
+};
+
+const confirmDeleteMedia = (row: any) => {
+  deletingMedia.value = row;
+  showDeleteConfirm.value = true;
+};
+
+const onDeleteMedia = async () => {
+  if (!deletingMedia.value) return;
+  deleting.value = true;
+  try {
+    await deleteMedia(deletingMedia.value.id);
+    MessagePlugin.success('素材已删除');
+    showDeleteConfirm.value = false;
+    deletingMedia.value = null;
+    fetchData();
+  } catch {
+    MessagePlugin.error('删除失败');
+  } finally {
+    deleting.value = false;
+  }
 };
 
 const openDetail = async (row: any) => {

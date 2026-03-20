@@ -1664,3 +1664,70 @@ async def submit_skill_feed(
         "material_ids": created_ids,
         "errors": errors,
     }
+
+
+# ---------------------------------------------------------------------------
+# Markdown Upload (Image Proxy)
+# ---------------------------------------------------------------------------
+
+class MarkdownUploadRequest(BaseModel):
+    content: str
+    tags: list[str] = []
+
+
+class MarkdownImageInfo(BaseModel):
+    original_url: str
+    media_id: int
+    filename: str
+    url: str
+
+
+class MarkdownUploadResponse(BaseModel):
+    content: str
+    images: list[MarkdownImageInfo]
+    images_count: int
+    skipped_count: int
+
+
+@router.post("/markdown", response_model=MarkdownUploadResponse)
+async def skill_upload_markdown(
+    body: MarkdownUploadRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Upload a markdown file with remote images.
+
+    Downloads all remote images, uploads them to the media library,
+    and replaces the image URLs in the markdown with media library URLs.
+
+    Returns the processed markdown and a list of image mappings.
+    """
+    from agent_publisher.services.markdown_service import MarkdownService
+
+    email = _get_skill_email(request)
+
+    svc = MarkdownService(db)
+    processed_content, image_infos = await svc.process_markdown(
+        content=body.content,
+        owner_email=email,
+        tags=body.tags,
+    )
+
+    skipped = 0
+    total_matches = len([m for m in re.finditer(r'!\[([^\]]*)\]\(([^)]+)\)', body.content)])
+    if total_matches > len(image_infos):
+        skipped = total_matches - len(image_infos)
+
+    logger.info(
+        "Markdown processed: email=%s images=%d skipped=%d",
+        email,
+        len(image_infos),
+        skipped,
+    )
+
+    return MarkdownUploadResponse(
+        content=processed_content,
+        images=[MarkdownImageInfo(**info) for info in image_infos],
+        images_count=len(image_infos),
+        skipped_count=skipped,
+    )

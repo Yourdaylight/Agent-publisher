@@ -165,4 +165,7 @@ export const uploadMedia = (file: File, tags?: string, description?: string) => 
 };
 export const deleteMedia = (id: number) => http.delete(`/media/${id}`);
 
+export const uploadMarkdown = (content: string, tags?: string[]) =>
+  http.post('/markdown', { content, tags });
+
 export default http;
