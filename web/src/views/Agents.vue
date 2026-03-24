@@ -107,7 +107,7 @@ import { ref, computed, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { getAgents, generateForAgent, getStylePresets, deleteAgent as deleteAgentAPI } from '@/api';
 import AgentForm from '@/components/AgentForm.vue';
-import { MessagePlugin } from 'tdesign-vue-next';
+import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next';
 
 const router = useRouter();
 const loading = ref(false);
@@ -203,9 +203,9 @@ const onGenerate = async (agent: any) => {
 };
 
 const deleteAgent = async (agent: any) => {
-  MessagePlugin.confirm({
-    header: `删除 Agent`,
-    content: `确定要删除 Agent "${agent.name}" 吗？此操作无法撤销。`,
+  const dialog = DialogPlugin.confirm({
+    header: '删除 Agent',
+    body: `确定要删除 Agent "${agent.name}" 吗？此操作无法撤销。`,
     onConfirm: async () => {
       try {
         await deleteAgentAPI(agent.id);
@@ -214,6 +214,10 @@ const deleteAgent = async (agent: any) => {
       } catch (err: any) {
         MessagePlugin.error(err?.response?.data?.detail || '删除失败');
       }
+      dialog.destroy();
+    },
+    onClose: () => {
+      dialog.destroy();
     },
   });
 };
