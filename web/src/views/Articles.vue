@@ -32,6 +32,15 @@
       </div>
     </div>
 
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px">
+      <div>
+        <h3 style="margin: 0 0 8px 0">文章管理</h3>
+        <p style="margin: 0; color: var(--td-text-color-secondary); font-size: 13px">
+          共 {{ articles.length }} 篇文章 · 已发布 {{ publishedCount }} 篇 · 草稿 {{ draftCount }} 篇
+        </p>
+      </div>
+    </div>
+
     <div style="display: flex; gap: 12px; margin-bottom: 16px">
       <t-select v-model="filterAgentId" placeholder="筛选 Agent" clearable style="width: 200px" @change="fetchData">
         <t-option v-for="a in agentOptions" :key="a.id" :label="a.name" :value="a.id" />
@@ -614,7 +623,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, nextTick } from 'vue';
+import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue';
 import {
   getArticles,
   getArticle,
@@ -739,6 +748,9 @@ const getTaskProgress = (task: any): number => {
   const totalSteps = 4;
   return Math.round((steps.length / totalSteps) * 100);
 };
+
+const publishedCount = computed(() => articles.value.filter(a => a.status === 'published').length);
+const draftCount = computed(() => articles.value.filter(a => a.status === 'draft').length);
 
 const columns = [
   { colKey: 'id', title: 'ID', width: 60 },
