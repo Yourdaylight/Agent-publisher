@@ -69,15 +69,53 @@
         <span v-else style="color: var(--td-text-color-placeholder)">0</span>
       </template>
       <template #op="{ row }">
-        <t-space>
-          <t-link theme="primary" @click="openPreview(row)">预览</t-link>
-          <t-link theme="primary" @click="openEditor(row)">编辑</t-link>
-          <t-link theme="primary" @click="openVariantDialog(row)">生成变体</t-link>
-          <t-link v-if="row.status !== 'published'" theme="primary" @click="onPublish(row)">发布</t-link>
-          <t-link v-if="row.status === 'published'" theme="primary" @click="onSync(row)">
-            同步草稿
-          </t-link>
-          <t-link theme="primary" @click="openPublishRecords(row)">发布记录</t-link>
+        <t-space break-line>
+          <t-button
+            theme="primary"
+            variant="text"
+            size="small"
+            @click="openPreview(row)"
+          >
+            👁 预览
+          </t-button>
+          <t-button
+            theme="primary"
+            variant="text"
+            size="small"
+            @click="openEditor(row)"
+          >
+            ✏️ 编辑
+          </t-button>
+
+          <t-divider layout="vertical" />
+
+          <t-button
+            v-if="row.status !== 'published'"
+            theme="primary"
+            variant="text"
+            size="small"
+            @click="onPublish(row)"
+          >
+            📤 发布
+          </t-button>
+          <t-button
+            v-else
+            theme="primary"
+            variant="text"
+            size="small"
+            @click="onSync(row)"
+          >
+            🔄 同步
+          </t-button>
+
+          <t-button
+            theme="default"
+            variant="text"
+            size="small"
+            @click="openPublishRecords(row)"
+          >
+            📋 记录
+          </t-button>
         </t-space>
       </template>
     </t-table>
@@ -450,54 +488,94 @@
     <t-dialog
       v-model:visible="publishDialogVisible"
       :header="getPublishDialogTitle()"
-      :confirm-btn="publishAction === 'publish' ? '开始发布' : '开始同步'"
+      :confirm-btn="publishAction === 'publish' ? '确认发布' : '确认同步'"
       :confirm-loading="publishSubmitting"
       @confirm="executePublishAction"
-      width="500px"
+      width="700px"
+      @opened="publishTab = 'select'"
     >
-      <div style="margin-bottom: 16px">
-        <div style="margin-bottom: 12px; color: var(--td-text-color-secondary); font-size: 14px">
-          请选择要{{ publishAction === 'publish' ? '发布到' : '同步到' }}的公众号，可多选。
-          <span v-if="publishTargetIds.length > 0" style="color: var(--td-brand-color); margin-left: 8px">
-            已选择 {{ publishTargetIds.length }} 个
-          </span>
-        </div>
+      <t-tabs v-model:value="publishTab" default-value="select">
+        <!-- Tab 1: 选择账号 -->
+        <t-tab-panel value="select" label="选择目标">
+          <div style="padding: 12px 0">
+            <div style="margin-bottom: 12px; color: var(--td-text-color-secondary); font-size: 14px">
+              请选择要{{ publishAction === 'publish' ? '发布到' : '同步到' }}的公众号，可多选。
+              <span v-if="publishTargetIds.length > 0" style="color: var(--td-brand-color); margin-left: 8px">
+                已选择 {{ publishTargetIds.length }} 个
+              </span>
+            </div>
 
-        <t-checkbox-group v-model="publishTargetIds">
-          <div style="display: flex; flex-direction: column; gap: 12px">
-            <t-checkbox
-              v-for="account in accountOptions"
-              :key="account.id"
-              :value="account.id"
-              :label="`${account.name} (ID: ${account.id})`"
-            />
+            <t-checkbox-group v-model="publishTargetIds">
+              <div style="display: flex; flex-direction: column; gap: 12px">
+                <t-checkbox
+                  v-for="account in accountOptions"
+                  :key="account.id"
+                  :value="account.id"
+                  :label="`${account.name} (ID: ${account.id})`"
+                />
+              </div>
+            </t-checkbox-group>
+
+            <t-alert
+              v-if="accountOptions.length === 0"
+              theme="warning"
+              style="margin-top: 16px"
+            >
+              当前没有可用公众号，请先创建账号。
+            </t-alert>
+
+            <t-alert
+              v-else-if="publishTargetIds.length === 0"
+              theme="info"
+              style="margin-top: 16px"
+            >
+              ⚠️ 未选择任何账号。将使用该文章的默认绑定账号（如有）。
+            </t-alert>
+
+            <t-alert
+              v-else
+              theme="success"
+              style="margin-top: 16px"
+            >
+              ✓ 已选择 {{ publishTargetIds.length }} 个账号进行{{ publishAction === 'publish' ? '发布' : '同步' }}
+            </t-alert>
           </div>
-        </t-checkbox-group>
-      </div>
+        </t-tab-panel>
 
-      <t-alert
-        v-if="accountOptions.length === 0"
-        theme="warning"
-        style="margin-top: 12px"
-      >
-        当前没有可用公众号，请先创建账号。
-      </t-alert>
+        <!-- Tab 2: 预览内容 -->
+        <t-tab-panel value="preview" label="内容预览">
+          <div style="padding: 12px 0">
+            <div v-if="publishTargetArticle" class="article-preview-container">
+              <div style="margin-bottom: 16px">
+                <div style="font-size: 18px; font-weight: 600; margin-bottom: 8px">
+                  {{ publishTargetArticle.title }}
+                </div>
+                <div style="color: var(--td-text-color-secondary); font-size: 13px; margin-bottom: 12px">
+                  {{ publishTargetArticle.digest }}
+                </div>
+              </div>
 
-      <t-alert
-        v-else-if="publishTargetIds.length === 0"
-        theme="info"
-        style="margin-top: 12px"
-      >
-        ⚠️ 未选择任何账号。将使用该文章的默认绑定账号（如有）。
-      </t-alert>
+              <div
+                v-if="publishTargetArticle.html_content"
+                class="article-html-preview"
+                v-html="publishTargetArticle.html_content"
+                style="
+                  border-top: 1px solid var(--td-border-level-1);
+                  padding-top: 16px;
+                  max-height: 400px;
+                  overflow-y: auto;
+                  font-size: 14px;
+                  line-height: 1.6;
+                "
+              />
 
-      <t-alert
-        v-else
-        theme="success"
-        style="margin-top: 12px"
-      >
-        ✓ 已选择 {{ publishTargetIds.length }} 个账号进行{{ publishAction === 'publish' ? '发布' : '同步' }}
-      </t-alert>
+              <div v-else style="color: var(--td-text-color-secondary); text-align: center; padding: 40px 0">
+                暂无内容预览
+              </div>
+            </div>
+          </div>
+        </t-tab-panel>
+      </t-tabs>
     </t-dialog>
 
     <!-- Publish Records drawer -->
@@ -573,6 +651,7 @@ const publishAction = ref<'publish' | 'sync'>('publish');
 const publishTargetArticle = ref<any>(null);
 const publishTargetIds = ref<number[]>([]);
 const publishFromEditor = ref(false);
+const publishTab = ref<string>('select');  // 'select' | 'preview'
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 
 // Edit drawer state
