@@ -604,7 +604,7 @@
             :theme="row.action === 'publish' ? 'primary' : 'warning'"
             variant="light"
           >
-            {{ row.action === 'publish' ? '发布' : '同步' }}
+            {{ row.action === 'publish' ? '📤 发布' : '🔄 同步' }}
           </t-tag>
         </template>
         <template #recordStatus="{ row }">
@@ -612,11 +612,59 @@
             :theme="row.status === 'success' ? 'success' : 'danger'"
             variant="light"
           >
-            {{ row.status === 'success' ? '成功' : '失败' }}
+            {{ row.status === 'success' ? '✓ 成功' : '✗ 失败' }}
           </t-tag>
+        </template>
+        <template #op="{ row }">
+          <t-space size="small">
+            <t-button
+              v-if="row.error_message"
+              theme="danger"
+              variant="text"
+              size="small"
+              @click="showErrorDetail(row)"
+            >
+              错误
+            </t-button>
+            <t-link v-else theme="primary" disabled>
+              -
+            </t-link>
+          </t-space>
         </template>
       </t-table>
     </t-drawer>
+
+    <!-- Error Detail Dialog -->
+    <t-dialog
+      v-model:visible="errorDetailVisible"
+      header="发布错误详情"
+      :footer="false"
+      width="600px"
+    >
+      <div v-if="selectedErrorRecord">
+        <t-alert theme="error" style="margin-bottom: 16px">
+          <div>账号：{{ selectedErrorRecord.account_name || selectedErrorRecord.account_id }}</div>
+          <div>操作：{{ selectedErrorRecord.action === 'publish' ? '发布' : '同步' }}</div>
+          <div>时间：{{ new Date(selectedErrorRecord.created_at).toLocaleString() }}</div>
+        </t-alert>
+        <div style="margin-bottom: 12px; color: var(--td-text-color-secondary); font-size: 13px">
+          错误信息：
+        </div>
+        <pre
+          style="
+            background: var(--td-bg-color-page);
+            padding: 12px;
+            border-radius: 6px;
+            overflow-x: auto;
+            font-size: 12px;
+            line-height: 1.5;
+            color: var(--td-text-color);
+            white-space: pre-wrap;
+            word-break: break-all;
+          "
+        >{{ selectedErrorRecord.error_message }}</pre>
+      </div>
+    </t-dialog>
   </div>
 </template>
 
@@ -674,6 +722,8 @@ const markdownTextarea = ref<HTMLTextAreaElement | null>(null);
 const publishRecordsDrawerVisible = ref(false);
 const publishRecordsLoading = ref(false);
 const publishRecordsData = ref<any[]>([]);
+const errorDetailVisible = ref(false);
+const selectedErrorRecord = ref<any>(null);
 const publishRecordsTitle = ref('');
 
 // Variant generation state
@@ -709,9 +759,9 @@ const publishRecordColumns = [
   { colKey: 'account_name', title: '公众号', width: 180, cell: (_h: any, { row }: any) => row.account_name || (row.account_id ? `#${row.account_id}` : '-') },
   { colKey: 'action', title: '类型', width: 80 },
   { colKey: 'recordStatus', title: '状态', width: 80 },
-  { colKey: 'operator', title: '操作人', width: 160 },
-  { colKey: 'wechat_media_id', title: 'Media ID', ellipsis: true },
-  { colKey: 'created_at', title: '时间', width: 180, cell: (_h: any, { row }: any) => row.created_at ? new Date(row.created_at).toLocaleString() : '-' },
+  { colKey: 'operator', title: '操作人', width: 140 },
+  { colKey: 'created_at', title: '时间', width: 160, cell: (_h: any, { row }: any) => row.created_at ? new Date(row.created_at).toLocaleString() : '-' },
+  { colKey: 'op', title: '操作', width: 80 },
 ];
 
 interface EditForm {
@@ -1096,6 +1146,11 @@ const openPublishRecords = async (row: any) => {
   } finally {
     publishRecordsLoading.value = false;
   }
+};
+
+const showErrorDetail = (record: any) => {
+  selectedErrorRecord.value = record;
+  errorDetailVisible.value = true;
 };
 
 // --- Variant generation functions ---
