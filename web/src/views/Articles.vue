@@ -78,54 +78,52 @@
         <span v-else style="color: var(--td-text-color-placeholder)">0</span>
       </template>
       <template #op="{ row }">
-        <t-space break-line>
-          <t-button
-            theme="primary"
-            variant="text"
-            size="small"
-            @click="openPreview(row)"
-          >
-            👁 预览
-          </t-button>
-          <t-button
-            theme="primary"
-            variant="text"
-            size="small"
-            @click="openEditor(row)"
-          >
-            ✏️ 编辑
-          </t-button>
+        <div style="display: flex; gap: 4px; flex-wrap: wrap">
+          <t-tooltip :content="`预览文章：${row.title}`">
+            <t-button
+              theme="primary"
+              variant="text"
+              size="small"
+              @click="openPreview(row)"
+            >
+              👁
+            </t-button>
+          </t-tooltip>
+          <t-tooltip content="编辑文章">
+            <t-button
+              theme="primary"
+              variant="text"
+              size="small"
+              @click="openEditor(row)"
+            >
+              ✏️
+            </t-button>
+          </t-tooltip>
 
-          <t-divider layout="vertical" />
+          <t-divider layout="vertical" style="margin: 0 4px" />
 
-          <t-button
-            v-if="row.status !== 'published'"
-            theme="primary"
-            variant="text"
-            size="small"
-            @click="onPublish(row)"
-          >
-            📤 发布
-          </t-button>
-          <t-button
-            v-else
-            theme="primary"
-            variant="text"
-            size="small"
-            @click="onSync(row)"
-          >
-            🔄 同步
-          </t-button>
+          <t-tooltip :content="row.status !== 'published' ? '发布到公众号' : '同步到草稿箱'">
+            <t-button
+              :theme="row.status !== 'published' ? 'primary' : 'default'"
+              variant="text"
+              size="small"
+              @click="row.status !== 'published' ? onPublish(row) : onSync(row)"
+            >
+              {{ row.status !== 'published' ? '📤' : '🔄' }}
+            </t-button>
+          </t-tooltip>
 
-          <t-button
-            theme="default"
-            variant="text"
-            size="small"
-            @click="openPublishRecords(row)"
-          >
-            📋 记录
-          </t-button>
-        </t-space>
+          <t-tooltip content="查看发布记录">
+            <t-button
+              theme="default"
+              variant="text"
+              size="small"
+              @click="openPublishRecords(row)"
+            >
+              📋
+            </t-button>
+          </t-tooltip>
+        </div>
       </template>
     </t-table>
 
@@ -760,7 +758,7 @@ const columns = [
   { colKey: 'variant_count', title: '变体', width: 70 },
   { colKey: 'publish_count', title: '发布次数', width: 90 },
   { colKey: 'created_at', title: '创建时间', width: 180, cell: (_h: any, { row }: any) => new Date(row.created_at).toLocaleString() },
-  { colKey: 'op', title: '操作', width: 400 },
+  { colKey: 'op', title: '操作', width: 120 },
 ];
 
 const variantColumns = [
