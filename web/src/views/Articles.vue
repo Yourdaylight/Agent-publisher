@@ -453,30 +453,50 @@
       :confirm-btn="publishAction === 'publish' ? '开始发布' : '开始同步'"
       :confirm-loading="publishSubmitting"
       @confirm="executePublishAction"
+      width="500px"
     >
-      <div style="margin-bottom: 12px; color: var(--td-text-color-secondary)">
-        请选择要{{ publishAction === 'publish' ? '发布到' : '同步到' }}的公众号，可多选。
-      </div>
-      <t-checkbox-group v-model="publishTargetIds">
-        <div style="display: flex; flex-direction: column; gap: 8px">
-          <t-checkbox v-for="account in accountOptions" :key="account.id" :value="account.id">
-            {{ account.name }}（ID: {{ account.id }}）
-          </t-checkbox>
+      <div style="margin-bottom: 16px">
+        <div style="margin-bottom: 12px; color: var(--td-text-color-secondary); font-size: 14px">
+          请选择要{{ publishAction === 'publish' ? '发布到' : '同步到' }}的公众号，可多选。
+          <span v-if="publishTargetIds.length > 0" style="color: var(--td-brand-color); margin-left: 8px">
+            已选择 {{ publishTargetIds.length }} 个
+          </span>
         </div>
-      </t-checkbox-group>
+
+        <t-checkbox-group v-model="publishTargetIds">
+          <div style="display: flex; flex-direction: column; gap: 12px">
+            <t-checkbox
+              v-for="account in accountOptions"
+              :key="account.id"
+              :value="account.id"
+              :label="`${account.name} (ID: ${account.id})`"
+            />
+          </div>
+        </t-checkbox-group>
+      </div>
+
       <t-alert
         v-if="accountOptions.length === 0"
         theme="warning"
         style="margin-top: 12px"
       >
-        当前没有可用公众号，请先创建或检查账号权限。
+        当前没有可用公众号，请先创建账号。
       </t-alert>
+
       <t-alert
-        v-else
+        v-else-if="publishTargetIds.length === 0"
         theme="info"
         style="margin-top: 12px"
       >
-        未选择时将沿用默认绑定或已建立的发布关系。
+        ⚠️ 未选择任何账号。将使用该文章的默认绑定账号（如有）。
+      </t-alert>
+
+      <t-alert
+        v-else
+        theme="success"
+        style="margin-top: 12px"
+      >
+        ✓ 已选择 {{ publishTargetIds.length }} 个账号进行{{ publishAction === 'publish' ? '发布' : '同步' }}
       </t-alert>
     </t-dialog>
 
@@ -670,12 +690,14 @@ interface AccountScopedResult {
   account_id: number;
   account_name: string;
   status: string;
-  wechat_media_id?: string;
-  error?: string;
+  wechat_media_id: string;
+  stage: string;
+  error: string;
 }
 
 interface PublishResponsePayload {
   ok: boolean;
+  article_id: number;
   overall_status: string;
   results: AccountScopedResult[];
 }
@@ -702,14 +724,21 @@ const getPublishDialogTitle = (): string => {
 };
 
 const buildPublishResultMessage = (payload: PublishResponsePayload): string => {
+  if (!payload.results || payload.results.length === 0) {
+    return payload.overall_status || '已处理';
+  }
+
   const successCount = payload.results.filter((item) => item.status === 'success').length;
   const failedItems = payload.results.filter((item) => item.status !== 'success');
+
   if (failedItems.length === 0) {
     return `成功处理 ${successCount} 个公众号`;
   }
+
   const failureSummary = failedItems
     .map((item) => `${item.account_name || `#${item.account_id}`}: ${item.error || item.status}`)
     .join('；');
+
   return `成功 ${successCount} 个，失败 ${failedItems.length} 个：${failureSummary}`;
 };
 
@@ -833,41 +862,68 @@ const openPublishDialog = (row: any, action: 'publish' | 'sync', fromEditor = fa
 
 const executePublishAction = async () => {
   if (!publishTargetArticle.value?.id) {
+    MessagePlugin.error('请先选择要发布的文章');
     return;
   }
+
+  if (publishTargetIds.value.length === 0) {
+    MessagePlugin.error('请至少选择一个目标公众号');
+    return;
+  }
+
   publishSubmitting.value = true;
   if (publishFromEditor.value) {
     syncing.value = true;
   }
+
   try {
     if (publishFromEditor.value) {
       const saveSucceeded = await onSave();
       if (!saveSucceeded) {
+        MessagePlugin.error('保存文章失败，请重试');
         return;
       }
     }
+
+    const articleId = publishTargetArticle.value.id;
+    const actionText = publishAction.value === 'publish' ? '发布' : '同步';
+
+    // Log for debugging
+    console.log(`[${actionText}] Article ID: ${articleId}, Target Accounts:`, publishTargetIds.value);
+
     const requestData = {
       target_account_ids: publishTargetIds.value.length > 0 ? publishTargetIds.value : undefined,
     };
+
     const request = publishAction.value === 'publish'
-      ? publishArticle(publishTargetArticle.value.id, requestData)
-      : syncArticle(publishTargetArticle.value.id, requestData);
+      ? publishArticle(articleId, requestData)
+      : syncArticle(articleId, requestData);
+
     const res = await request;
+    console.log(`[${actionText}] Response:`, res.data);
+
     const payload = res.data as PublishResponsePayload;
-    const actionText = publishAction.value === 'publish' ? '发布' : '同步';
     const message = buildPublishResultMessage(payload);
+
     if (payload.ok) {
       MessagePlugin.success(`${actionText}完成：${message}`);
     } else {
       MessagePlugin.warning(`${actionText}完成：${message}`);
     }
+
     publishDialogVisible.value = false;
     await Promise.all([fetchData(), fetchAccounts()]);
+
     if (publishTargetArticle.value) {
       await openPublishRecords(publishTargetArticle.value);
     }
   } catch (err: any) {
-    MessagePlugin.error(err?.response?.data?.detail || `${publishAction.value === 'publish' ? '发布' : '同步'}失败`);
+    console.error(`[${publishAction.value}] Error:`, err);
+    const errorMsg = err?.response?.data?.detail
+      || err?.response?.data?.message
+      || err?.message
+      || `${publishAction.value === 'publish' ? '发布' : '同步'}失败，请检查日志`;
+    MessagePlugin.error(errorMsg);
   } finally {
     publishSubmitting.value = false;
     if (publishFromEditor.value) {
