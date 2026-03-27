@@ -8,7 +8,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from agent_publisher.models.base import Base
 
 # Valid values for the 'source_type' field
-MATERIAL_SOURCE_TYPES = ("rss", "search", "skills_feed", "manual")
+MATERIAL_SOURCE_TYPES = ("rss", "search", "skills_feed", "manual", "trending")
 
 # Valid values for the 'status' field
 MATERIAL_STATUSES = ("pending", "accepted", "rejected")

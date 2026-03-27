@@ -1,0 +1,13 @@
+<div class="slide-layout--title">
+  <h1>{{ slide.title | default('') }}</h1>
+  {% if slide.content and slide.content.subtitle %}
+  <div class="subtitle">{{ slide.content.subtitle }}</div>
+  {% endif %}
+  {% if slide.content and (slide.content.author or slide.content.date) %}
+  <div class="meta">
+    {% if slide.content.author %}{{ slide.content.author }}{% endif %}
+    {% if slide.content.author and slide.content.date %} · {% endif %}
+    {% if slide.content.date %}{{ slide.content.date }}{% endif %}
+  </div>
+  {% endif %}
+</div>

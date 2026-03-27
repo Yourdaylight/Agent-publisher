@@ -1,0 +1,16 @@
+[Unit]
+Description=Agent Publisher - AI-driven multi-account content publisher
+After=network.target
+
+[Service]
+Type=simple
+User={USER}
+WorkingDirectory={INSTALL_DIR}
+ExecStart={INSTALL_DIR}/.venv/bin/uvicorn agent_publisher.main:app --host {HOST} --port {PORT}
+Restart=on-failure
+RestartSec=5
+Environment="PATH={INSTALL_DIR}/.venv/bin:/usr/local/bin:/usr/bin"
+EnvironmentFile={INSTALL_DIR}/.env
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,37 @@
+{% set pos = slide.content.image.position | default('left') if slide.content and slide.content.image else 'left' %}
+<h2>{{ slide.title | default('') }}</h2>
+<div class="slide-grid--image-text">
+  {% if pos != 'right' %}
+  <div>
+    {% if slide.content and slide.content.image %}
+    <img src="{{ slide.content.image.url | default('') }}" alt="{{ slide.content.image.alt | default('') }}">
+    {% endif %}
+  </div>
+  <div>
+    {% if slide.content and slide.content.text_content %}
+    <h3>{{ slide.content.text_content.heading | default('') }}</h3>
+    <ul>
+      {% for item in slide.content.text_content.items | default([]) %}
+      <li>{{ item.text }}</li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+  </div>
+  {% else %}
+  <div>
+    {% if slide.content and slide.content.text_content %}
+    <h3>{{ slide.content.text_content.heading | default('') }}</h3>
+    <ul>
+      {% for item in slide.content.text_content.items | default([]) %}
+      <li>{{ item.text }}</li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+  </div>
+  <div>
+    {% if slide.content and slide.content.image %}
+    <img src="{{ slide.content.image.url | default('') }}" alt="{{ slide.content.image.alt | default('') }}">
+    {% endif %}
+  </div>
+  {% endif %}
+</div>

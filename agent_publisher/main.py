@@ -1,17 +1,20 @@
 from __future__ import annotations
 
+import io
 import logging
+import zipfile
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Depends, Request, Response
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agent_publisher.api.accounts import router as accounts_router
 from agent_publisher.api.agents import router as agents_router
+from agent_publisher.api.llm_profiles import router as llm_profiles_router
 from agent_publisher.api.articles import router as articles_router
 from agent_publisher.api.auth import router as auth_router, verify_token
 from agent_publisher.api.candidate_materials import router as candidate_materials_router
@@ -19,6 +22,7 @@ from agent_publisher.api.media import router as media_router
 from agent_publisher.api.publish_records import router as publish_records_router
 from agent_publisher.api.settings import router as settings_router
 from agent_publisher.api.skills import router as skills_router, verify_skill_token
+from agent_publisher.api.sources import router as sources_router
 from agent_publisher.api.style_presets import router as style_presets_router
 from agent_publisher.api.tasks import router as tasks_router
 from agent_publisher.api.deps import get_db, get_current_user, UserContext
@@ -26,11 +30,14 @@ from agent_publisher.config import settings
 from agent_publisher.models.account import Account
 from agent_publisher.models.agent import Agent
 from agent_publisher.models.article import Article
+from agent_publisher.models.llm_profile import LLMProfile
 from agent_publisher.models.media import MediaAsset
 from agent_publisher.models.style_preset import StylePreset
 from agent_publisher.models.task import Task
 from agent_publisher.database import engine
 from agent_publisher.models.base import Base
+from agent_publisher.extensions import registry as extension_registry
+from agent_publisher.api.extensions import router as extensions_router
 from agent_publisher.scheduler import scheduler, sync_agent_schedules
 
 logging.basicConfig(
@@ -42,6 +49,7 @@ logger = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).parent / "static"
 GUIDE_IMAGES_DIR = Path(__file__).parent.parent / "docs" / "images"
+SKILLS_DIR = Path(__file__).parent.parent / "skills"
 
 
 async def _auto_migrate_sqlite(conn):
@@ -91,6 +99,14 @@ async def lifespan(app: FastAPI):
         sps = StylePresetService(session)
         await sps.init_builtin_presets()
 
+    # Seed default trending platform sources
+    from agent_publisher.services.source_registry_service import SourceRegistryService
+    async with async_session_factory() as session:
+        registry = SourceRegistryService(session)
+        seeded = await registry.seed_default_sources()
+        if seeded:
+            logger.info("Seeded %d default trending sources.", seeded)
+
     logger.info("Starting Agent Publisher scheduler...")
     await sync_agent_schedules()
     scheduler.start()
@@ -103,7 +119,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Agent Publisher", version="0.1.0", lifespan=lifespan)
 
 # Public routes (no auth required)
-PUBLIC_PREFIXES = ("/api/auth/", "/api/skills/auth", "/api/skills/setup-guide", "/assets/", "/favicon.ico")
+PUBLIC_PREFIXES = ("/api/auth/", "/api/skills/auth", "/api/skills/setup-guide", "/api/skill-package/", "/assets/", "/favicon.ico")
 
 
 @app.middleware("http")
@@ -157,13 +173,20 @@ app.include_router(auth_router)
 app.include_router(settings_router)
 app.include_router(accounts_router)
 app.include_router(agents_router)
+app.include_router(llm_profiles_router)
 app.include_router(articles_router)
 app.include_router(tasks_router)
 app.include_router(media_router)
 app.include_router(publish_records_router)
 app.include_router(style_presets_router)
 app.include_router(skills_router)
+app.include_router(sources_router)
 app.include_router(candidate_materials_router)
+app.include_router(extensions_router)
+
+# Discover and register extensions (graceful degradation: failures only logged)
+extension_registry.discover_and_load()
+extension_registry.register_all(app)
 
 
 @app.get("/api/stats")
@@ -217,6 +240,24 @@ async def intake_trend(days: int = 30, db: AsyncSession = Depends(get_db)):
     from agent_publisher.services.governance_service import GovernanceService
     svc = GovernanceService(db)
     return await svc.get_daily_intake_trend(days)
+
+
+@app.get("/api/skill-package/download")
+async def download_skill_package():
+    """Package the skills/ directory as a zip for download."""
+    if not SKILLS_DIR.is_dir():
+        return JSONResponse(status_code=404, content={"detail": "Skills directory not found"})
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for f in SKILLS_DIR.rglob("*"):
+            if f.is_file() and "__pycache__" not in f.parts:
+                zf.write(f, f.relative_to(SKILLS_DIR))
+    buf.seek(0)
+    return StreamingResponse(
+        buf,
+        media_type="application/zip",
+        headers={"Content-Disposition": "attachment; filename=agent-publisher-skill.zip"},
+    )
 
 
 # Serve guide images (setup screenshots) from docs/images/

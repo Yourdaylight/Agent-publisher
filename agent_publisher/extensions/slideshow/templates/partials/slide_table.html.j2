@@ -1,0 +1,31 @@
+<div class="slide-layout--table">
+  <h2>{{ slide.title | default('') }}</h2>
+  {% if slide.content and slide.content.table %}
+  <table>
+    <thead>
+      <tr>
+        {% for header in slide.content.table.headers | default([]) %}
+        <th>{{ header }}</th>
+        {% endfor %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in slide.content.table.rows | default([]) %}
+      <tr>
+        {% for cell in row %}
+        {% set highlight = false %}
+        {% if slide.content.table.highlight_rules %}
+          {% for rule in slide.content.table.highlight_rules %}
+            {% if rule.row == loop.parent.index0 and rule.col == loop.index0 %}
+              {% set highlight = true %}
+            {% endif %}
+          {% endfor %}
+        {% endif %}
+        <td class="{{ 'highlight' if highlight else '' }}">{{ cell }}</td>
+        {% endfor %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>

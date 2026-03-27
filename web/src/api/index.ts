@@ -168,4 +168,34 @@ export const deleteMedia = (id: number) => http.delete(`/media/${id}`);
 export const uploadMarkdown = (content: string, tags?: string[]) =>
   http.post('/markdown', { content, tags });
 
+// Sources (热点数据源)
+export const getSources = (params?: { source_type?: string; is_enabled?: boolean }) =>
+  http.get('/sources', { params });
+export const getSourceDetail = (id: number) => http.get(`/sources/${id}`);
+export const createSource = (data: any) => http.post('/sources', data);
+export const updateSource = (id: number, data: any) => http.put(`/sources/${id}`, data);
+export const deleteSource = (id: number) => http.delete(`/sources/${id}`);
+export const toggleSource = (id: number, is_enabled: boolean) =>
+  http.patch(`/sources/${id}/toggle`, { is_enabled });
+export const testRssUrl = (url: string) => http.post('/sources/test-rss', { url });
+export const bindAgentSource = (agentId: number, data: any) =>
+  http.post(`/sources/agents/${agentId}/bindings`, data);
+export const unbindAgentSource = (agentId: number, sourceId: number) =>
+  http.delete(`/sources/agents/${agentId}/bindings/${sourceId}`);
+
+// LLM Profiles
+export const getLLMProfiles = () => http.get('/llm-profiles');
+
+// Extensions
+export const getExtensions = () => http.get('/extensions');
+export const createLLMProfile = (data: any) => http.post('/llm-profiles', data);
+export const updateLLMProfile = (id: number, data: any) => http.put(`/llm-profiles/${id}`, data);
+export const deleteLLMProfile = (id: number) => http.delete(`/llm-profiles/${id}`);
+export const setDefaultLLMProfile = (id: number) => http.post(`/llm-profiles/${id}/set-default`);
+export const getTrendingPlatforms = () => http.get('/sources/trending-platforms');
+export const getAgentBindings = (agentId: number) =>
+  http.get(`/sources/agents/${agentId}/bindings`);
+export const collectForAgent = (agentId: number) =>
+  http.post(`/sources/agents/${agentId}/collect`);
+
 export default http;

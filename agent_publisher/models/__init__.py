@@ -6,10 +6,12 @@ from agent_publisher.models.article_publish_relation import ArticlePublishRelati
 from agent_publisher.models.candidate_material import CandidateMaterial
 from agent_publisher.models.media import MediaAsset, MediaAssetWechatMapping
 from agent_publisher.models.publish_record import PublishRecord
+from agent_publisher.models.source_config import SourceConfig, AgentSourceBinding
 from agent_publisher.models.style_preset import StylePreset
 from agent_publisher.models.task import Task
 
 __all__ = [
     "Base", "Account", "Agent", "Article", "ArticlePublishRelation", "CandidateMaterial",
-    "MediaAsset", "MediaAssetWechatMapping", "PublishRecord", "StylePreset", "Task",
+    "MediaAsset", "MediaAssetWechatMapping", "PublishRecord", "SourceConfig",
+    "AgentSourceBinding", "StylePreset", "Task",
 ]

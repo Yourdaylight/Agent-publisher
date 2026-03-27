@@ -13,9 +13,10 @@ class AgentCreate(BaseModel):
     account_id: int
     rss_sources: list[dict] = []
     role: Literal["collector", "processor", "publisher", "full_pipeline"] = "full_pipeline"
-    source_mode: Literal["independent_search", "rss", "skills_feed"] = "rss"
+    source_mode: Literal["independent_search", "rss", "skills_feed", "multi_source"] = "rss"
     search_config: dict | None = None
     allowed_skill_sources: list[str] | None = None
+    llm_profile_id: int | None = None
     llm_provider: str = "openai"
     llm_model: str = "gpt-4o"
     llm_api_key: str = ""
@@ -33,9 +34,10 @@ class AgentUpdate(BaseModel):
     description: str | None = None
     rss_sources: list[dict] | None = None
     role: Literal["collector", "processor", "publisher", "full_pipeline"] | None = None
-    source_mode: Literal["independent_search", "rss", "skills_feed"] | None = None
+    source_mode: Literal["independent_search", "rss", "skills_feed", "multi_source"] | None = None
     search_config: dict | None = None
     allowed_skill_sources: list[str] | None = None
+    llm_profile_id: int | None = None
     llm_provider: str | None = None
     llm_model: str | None = None
     llm_api_key: str | None = None
@@ -58,6 +60,7 @@ class AgentOut(BaseModel):
     source_mode: str
     search_config: dict | None = None
     allowed_skill_sources: list[str] | None = None
+    llm_profile_id: int | None = None
     llm_provider: str
     llm_model: str
     llm_base_url: str

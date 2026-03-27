@@ -67,6 +67,19 @@ class ArticleService:
         materials = await material_svc.list_pending_for_agent(agent.id, limit=15)
         consumed_material_ids: list[int] = []
 
+        # If pool is empty, try on-demand collection via source registry
+        if not materials:
+            try:
+                from agent_publisher.services.source_registry_service import SourceRegistryService
+                registry = SourceRegistryService(self.session)
+                collect_result = await registry.collect_for_agent(agent)
+                total_collected = sum(len(ids) for ids in collect_result.values())
+                if total_collected > 0:
+                    logger.info("On-demand collection yielded %d materials for agent %s", total_collected, agent.name)
+                    materials = await material_svc.list_pending_for_agent(agent.id, limit=15)
+            except Exception as e:
+                logger.warning("On-demand collection failed for agent %s: %s", agent.name, e)
+
         if materials:
             # Use candidate materials as news source
             news_text = "\n".join(

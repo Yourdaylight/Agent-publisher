@@ -1,0 +1,13 @@
+/* Minimal theme for reveal.js slideshow */
+.reveal .slides section {
+  font-family: "Inter", "PingFang SC", "Helvetica Neue", sans-serif;
+}
+.reveal .slides section h1,
+.reveal .slides section h2,
+.reveal .slides section h3 {
+  font-weight: 600;
+  color: #1a1a1a;
+}
+.reveal .slides section {
+  color: #333;
+}

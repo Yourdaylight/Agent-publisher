@@ -1,14 +1,9 @@
 <template>
   <div>
+    <!-- Header: Title + Tabs + Upload buttons -->
     <div style="display: flex; justify-content: space-between; margin-bottom: 16px; gap: 12px; flex-wrap: wrap; align-items: center">
       <h3 style="margin: 0">素材库</h3>
       <t-space>
-        <t-button :theme="libraryMode === 'candidate' ? 'primary' : 'default'" @click="switchLibraryMode('candidate')">
-          内容素材
-        </t-button>
-        <t-button :theme="libraryMode === 'media' ? 'primary' : 'default'" @click="switchLibraryMode('media')">
-          图片素材
-        </t-button>
         <t-button v-if="libraryMode === 'candidate'" theme="primary" @click="showUploadDialog = true">
           <template #icon><t-icon name="upload" /></template>
           手动上传
@@ -24,8 +19,47 @@
       </t-space>
     </div>
 
+    <!-- Three-tab navigation -->
+    <t-tabs v-model="libraryMode" @change="onTabChange" style="margin-bottom: 16px">
+      <t-tab-panel value="trending" label="🔥 热点素材" />
+      <t-tab-panel value="candidate" label="📦 内容素材" />
+      <t-tab-panel value="media" label="🖼 图片素材" />
+    </t-tabs>
+
+    <!-- Filter bar -->
     <t-card :bordered="true" style="margin-bottom: 16px">
       <div style="display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end">
+        <!-- Trending filters -->
+        <template v-if="libraryMode === 'trending'">
+          <div style="min-width: 160px">
+            <div style="font-size: 12px; color: var(--td-text-color-secondary); margin-bottom: 4px">Agent</div>
+            <t-select v-model="filters.agent_id" placeholder="全部 Agent" clearable @change="fetchData">
+              <t-option v-for="a in agents" :key="a.id" :value="a.id" :label="a.name" />
+            </t-select>
+          </div>
+          <div style="min-width: 140px">
+            <div style="font-size: 12px; color: var(--td-text-color-secondary); margin-bottom: 4px">平台</div>
+            <t-select v-model="trendingPlatformFilter" placeholder="全部平台" clearable multiple @change="fetchData">
+              <t-option v-for="p in availablePlatforms" :key="p" :value="p" :label="p" />
+            </t-select>
+          </div>
+          <div style="min-width: 120px">
+            <div style="font-size: 12px; color: var(--td-text-color-secondary); margin-bottom: 4px">质量分</div>
+            <t-select v-model="trendingQualityFilter" placeholder="全部" clearable @change="fetchData">
+              <t-option value="0.5" label="≥ 0.5 (高热)" />
+              <t-option value="0.3" label="≥ 0.3 (中热)" />
+            </t-select>
+          </div>
+          <t-button
+            theme="primary"
+            :loading="collecting"
+            @click="onCollect"
+          >
+            <template #icon><t-icon name="refresh" /></template>
+            一键采集
+          </t-button>
+        </template>
+        <!-- Candidate filters -->
         <template v-if="libraryMode === 'candidate'">
           <div style="min-width: 160px">
             <div style="font-size: 12px; color: var(--td-text-color-secondary); margin-bottom: 4px">Agent</div>
@@ -40,6 +74,7 @@
               <t-option value="search" label="网络搜索" />
               <t-option value="skills_feed" label="Skills 供稿" />
               <t-option value="manual" label="手动上传" />
+              <t-option value="trending" label="🔥 热点" />
             </t-select>
           </div>
           <div style="min-width: 120px">
@@ -51,7 +86,8 @@
             </t-select>
           </div>
         </template>
-        <template v-else>
+        <!-- Media filters -->
+        <template v-if="libraryMode === 'media'">
           <div style="min-width: 160px">
             <div style="font-size: 12px; color: var(--td-text-color-secondary); margin-bottom: 4px">素材来源</div>
             <t-select v-model="filters.media_source_kind" placeholder="全部来源" clearable @change="fetchData">
@@ -84,21 +120,107 @@
       </div>
     </t-card>
 
+    <!-- Empty state -->
     <t-card v-if="!loading && materials.length === 0" :bordered="true" style="text-align: center; padding: 60px 0">
       <t-icon name="folder-open" size="48px" style="color: var(--td-text-color-placeholder); margin-bottom: 16px" />
       <div style="font-size: 16px; color: var(--td-text-color-secondary); margin-bottom: 8px">
-        {{ libraryMode === 'candidate' ? '内容素材库为空' : '图片素材库为空' }}
+        {{ emptyTitle }}
       </div>
       <div style="font-size: 14px; color: var(--td-text-color-placeholder); margin-bottom: 24px">
-        {{ libraryMode === 'candidate' ? '可以通过 Agent 自动采集或手动上传来获取素材' : '可以手动上传图片，或通过文章自动入库' }}
+        {{ emptyDesc }}
       </div>
       <t-space>
+        <t-button v-if="libraryMode === 'trending'" theme="primary" :loading="collecting" @click="onCollect">一键采集热点</t-button>
         <t-button v-if="libraryMode === 'candidate'" theme="primary" @click="showUploadDialog = true">手动上传素材</t-button>
         <t-button v-if="libraryMode === 'media'" theme="primary" @click="showMediaUploadDialog = true">上传图片</t-button>
         <t-button variant="outline" @click="$router.push('/agents')">配置 Agent 采集</t-button>
       </t-space>
     </t-card>
 
+    <!-- Trending card grid -->
+    <template v-else-if="libraryMode === 'trending'">
+      <div class="trending-grid" :style="{ opacity: loading ? 0.5 : 1 }">
+        <div
+          v-for="item in filteredTrendingMaterials"
+          :key="item.id"
+          class="trending-card"
+          :style="{ borderLeftColor: qualityBorderColor(item.quality_score) }"
+          @click="openDetail(item)"
+        >
+          <!-- Top row: platform tag + rank + quality bar -->
+          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px">
+            <t-tag size="small" variant="light" theme="primary">
+              {{ extractPlatform(item) || '未知来源' }}
+            </t-tag>
+            <span v-if="extractRank(item)" style="font-size: 12px; font-weight: 600; color: var(--td-error-color)">
+              #{{ extractRank(item) }}
+            </span>
+            <div style="flex: 1" />
+            <!-- Quality mini bar -->
+            <div v-if="item.quality_score != null" style="display: flex; align-items: center; gap: 4px; min-width: 70px">
+              <div style="flex:1; height: 6px; background: var(--td-bg-color-component); border-radius: 3px; overflow: hidden">
+                <div :style="{ width: (item.quality_score * 100) + '%', height: '100%', background: qualityBarColor(item.quality_score), borderRadius: '3px', transition: 'width 0.3s' }" />
+              </div>
+              <span style="font-size: 11px; color: var(--td-text-color-secondary); min-width: 24px; text-align: right">
+                {{ (item.quality_score * 100).toFixed(0) }}
+              </span>
+            </div>
+          </div>
+
+          <!-- Title -->
+          <div style="font-weight: 600; font-size: 14px; line-height: 1.5; margin-bottom: 6px; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical">
+            {{ item.title || '(无标题)' }}
+          </div>
+
+          <!-- Source summary -->
+          <div style="font-size: 12px; color: var(--td-text-color-secondary); margin-bottom: 8px; line-height: 1.4">
+            <template v-if="extractCrossPlatformInfo(item)">
+              热榜来源: {{ extractCrossPlatformInfo(item)!.sources }} | 跨{{ extractCrossPlatformInfo(item)!.count }}平台
+            </template>
+            <template v-else-if="item.summary">
+              {{ item.summary.slice(0, 60) }}{{ item.summary.length > 60 ? '...' : '' }}
+            </template>
+          </div>
+
+          <!-- Tags (show first 3) -->
+          <div style="margin-bottom: 8px">
+            <t-space size="4px" v-if="item.tags && item.tags.length">
+              <t-tag
+                v-for="tag in displayTags(item.tags)"
+                :key="tag"
+                size="small"
+                variant="outline"
+                :theme="tag.startsWith('platform:') ? 'primary' : 'default'"
+              >
+                {{ tag.startsWith('platform:') ? tag.replace('platform:', '') : tag }}
+              </t-tag>
+              <t-tag v-if="item.tags.length > 3" size="small" variant="light">+{{ item.tags.length - 3 }}</t-tag>
+            </t-space>
+          </div>
+
+          <!-- Bottom: time + action -->
+          <div style="display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: var(--td-text-color-placeholder)">
+            <span>{{ formatDate(item.created_at) }}</span>
+            <t-link theme="primary" size="small" @click.stop="openDetail(item)">详情</t-link>
+          </div>
+        </div>
+      </div>
+
+      <!-- Trending pagination -->
+      <div style="margin-top: 16px; display: flex; justify-content: flex-end">
+        <t-pagination
+          :current="filters.page"
+          :page-size="filters.page_size"
+          :total="total"
+          show-jumper
+          :page-size-options="[12, 24, 48]"
+          @current-change="(v: number) => { filters.page = v; fetchData(); }"
+          @page-size-change="(v: number) => { filters.page_size = v; filters.page = 1; fetchData(); }"
+        />
+      </div>
+    </template>
+
+    <!-- Candidate / Media table -->
     <t-table
       v-else
       :data="materials"
@@ -140,7 +262,12 @@
         <t-tag :theme="statusTheme(row.status)" variant="light" size="small">{{ statusLabel(row.status) }}</t-tag>
       </template>
       <template #quality_score="{ row }">
-        <span v-if="row.quality_score != null">{{ row.quality_score.toFixed(2) }}</span>
+        <div v-if="row.quality_score != null" style="display: flex; align-items: center; gap: 6px">
+          <div style="flex: 1; height: 6px; background: var(--td-bg-color-component); border-radius: 3px; overflow: hidden">
+            <div :style="{ width: (row.quality_score * 100) + '%', height: '100%', background: qualityBarColor(row.quality_score), borderRadius: '3px' }" />
+          </div>
+          <span style="font-size: 12px; min-width: 24px; text-align: right">{{ (row.quality_score * 100).toFixed(0) }}</span>
+        </div>
         <span v-else style="color: var(--td-text-color-placeholder)">-</span>
       </template>
       <template #latest_upload_status="{ row }">
@@ -182,6 +309,7 @@
       </template>
     </t-table>
 
+    <!-- Upload dialog (candidate) -->
     <t-dialog v-model:visible="showUploadDialog" header="手动上传素材" :footer="false" width="600px">
       <t-form :data="uploadForm" @submit="onUpload" layout="vertical">
         <t-form-item label="标题" name="title" :rules="[{ required: true, message: '请输入标题' }]">
@@ -205,6 +333,7 @@
       </t-form>
     </t-dialog>
 
+    <!-- Upload dialog (media) -->
     <t-dialog v-model:visible="showMediaUploadDialog" header="上传图片素材" :footer="false" width="600px">
       <t-form :data="mediaUploadForm" @submit="onMediaUpload" layout="vertical">
         <t-form-item label="选择图片" name="file" :rules="[{ required: true, message: '请选择图片文件' }]">
@@ -233,6 +362,7 @@
       </t-form>
     </t-dialog>
 
+    <!-- Markdown upload dialog -->
     <t-dialog v-model:visible="showMarkdownUploadDialog" header="上传 Markdown" :footer="false" width="700px">
       <t-form layout="vertical">
         <t-form-item label="Markdown 内容">
@@ -273,9 +403,42 @@
       </t-form>
     </t-dialog>
 
+    <!-- Detail drawer -->
     <t-drawer v-model:visible="showDetail" :header="detailTitle" size="600px">
       <template v-if="detailMaterial">
         <template v-if="detailMode === 'candidate'">
+          <!-- Trending metadata card -->
+          <t-card
+            v-if="detailMaterial.source_type === 'trending' && detailMaterial.metadata"
+            :bordered="true"
+            style="margin-bottom: 16px; background: var(--td-bg-color-container-hover)"
+          >
+            <div style="font-weight: 600; margin-bottom: 12px; font-size: 14px">🔥 热点信息</div>
+            <t-descriptions :column="2" bordered size="small">
+              <t-descriptions-item label="平台">
+                {{ extractPlatform(detailMaterial) || '-' }}
+              </t-descriptions-item>
+              <t-descriptions-item label="排名">
+                <span v-if="extractRank(detailMaterial)" style="font-weight: 600; color: var(--td-error-color)">
+                  #{{ extractRank(detailMaterial) }}
+                </span>
+                <span v-else>-</span>
+              </t-descriptions-item>
+              <t-descriptions-item label="热度值">
+                {{ extractHotValue(detailMaterial) || '-' }}
+              </t-descriptions-item>
+              <t-descriptions-item label="跨平台次数">
+                {{ extractCrossPlatformCount(detailMaterial) || '-' }}
+              </t-descriptions-item>
+              <t-descriptions-item label="出现平台" :span="2">
+                {{ extractAllPlatforms(detailMaterial) || '-' }}
+              </t-descriptions-item>
+              <t-descriptions-item label="权重分" :span="2">
+                {{ extractWeightScore(detailMaterial) || '-' }}
+              </t-descriptions-item>
+            </t-descriptions>
+          </t-card>
+
           <t-descriptions :column="1" bordered>
             <t-descriptions-item label="ID">{{ detailMaterial.id }}</t-descriptions-item>
             <t-descriptions-item label="来源类型">
@@ -287,7 +450,15 @@
             <t-descriptions-item label="状态">
               <t-tag :theme="statusTheme(detailMaterial.status)" variant="light">{{ statusLabel(detailMaterial.status) }}</t-tag>
             </t-descriptions-item>
-            <t-descriptions-item label="质量分">{{ detailMaterial.quality_score ?? '-' }}</t-descriptions-item>
+            <t-descriptions-item label="质量分">
+              <div v-if="detailMaterial.quality_score != null" style="display: flex; align-items: center; gap: 8px; width: 160px">
+                <div style="flex: 1; height: 6px; background: var(--td-bg-color-component); border-radius: 3px; overflow: hidden">
+                  <div :style="{ width: (detailMaterial.quality_score * 100) + '%', height: '100%', background: qualityBarColor(detailMaterial.quality_score), borderRadius: '3px' }" />
+                </div>
+                <span style="font-size: 12px">{{ detailMaterial.quality_score.toFixed(2) }}</span>
+              </div>
+              <span v-else>-</span>
+            </t-descriptions-item>
             <t-descriptions-item label="重复">{{ detailMaterial.is_duplicate ? '是' : '否' }}</t-descriptions-item>
             <t-descriptions-item label="原始链接">
               <a v-if="detailMaterial.original_url" :href="detailMaterial.original_url" target="_blank">{{ detailMaterial.original_url }}</a>
@@ -384,6 +555,7 @@
       </template>
     </t-drawer>
 
+    <!-- Delete confirm dialog -->
     <t-dialog v-model:visible="showDeleteConfirm" header="确认删除" :footer="false" width="400px">
       <div style="padding: 8px 0">
         <div style="margin-bottom: 16px">
@@ -396,6 +568,7 @@
       </div>
     </t-dialog>
 
+    <!-- Tag editor dialog -->
     <t-dialog v-model:visible="showTagEditor" header="管理标签" :footer="false" width="500px">
       <template v-if="tagEditMaterial">
         <div style="margin-bottom: 12px">
@@ -416,7 +589,20 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
-import { getAccounts, getAgents, getMaterial, getMaterials, getMedia, getMediaDetail, updateMaterialTags, uploadMaterial, uploadMedia, uploadMarkdown, deleteMedia } from '@/api';
+import {
+  getAccounts,
+  getAgents,
+  getMaterial,
+  getMaterials,
+  getMedia,
+  getMediaDetail,
+  updateMaterialTags,
+  uploadMaterial,
+  uploadMedia,
+  uploadMarkdown,
+  deleteMedia,
+  collectForAgent,
+} from '@/api';
 import { MessagePlugin } from 'tdesign-vue-next';
 
 const loading = ref(false);
@@ -424,8 +610,13 @@ const materials = ref<any[]>([]);
 const agents = ref<any[]>([]);
 const accounts = ref<any[]>([]);
 const total = ref(0);
-const libraryMode = ref<'candidate' | 'media'>('candidate');
+const libraryMode = ref<'trending' | 'candidate' | 'media'>('trending');
 const detailMode = ref<'candidate' | 'media'>('candidate');
+
+// Trending-specific filters
+const trendingPlatformFilter = ref<string[]>([]);
+const trendingQualityFilter = ref<string | undefined>(undefined);
+const collecting = ref(false);
 
 const filters = reactive({
   agent_id: undefined as number | undefined,
@@ -448,12 +639,81 @@ const pagination = computed(() => ({
   pageSizeOptions: [10, 20, 50],
 }));
 
+// Empty state text
+const emptyTitle = computed(() => {
+  const map: Record<string, string> = {
+    trending: '热点素材库为空',
+    candidate: '内容素材库为空',
+    media: '图片素材库为空',
+  };
+  return map[libraryMode.value];
+});
+
+const emptyDesc = computed(() => {
+  const map: Record<string, string> = {
+    trending: '可以选择 Agent 后点击「一键采集」获取热点素材',
+    candidate: '可以通过 Agent 自动采集或手动上传来获取素材',
+    media: '可以手动上传图片，或通过文章自动入库',
+  };
+  return map[libraryMode.value];
+});
+
+// Extract available platforms from trending materials' tags
+const availablePlatforms = computed(() => {
+  const platforms = new Set<string>();
+  materials.value.forEach((item: any) => {
+    if (item.tags) {
+      item.tags.forEach((tag: string) => {
+        if (tag.startsWith('platform:')) {
+          platforms.add(tag.replace('platform:', ''));
+        }
+      });
+    }
+    // Also extract from metadata
+    if (item.metadata?.platform) {
+      platforms.add(item.metadata.platform);
+    }
+  });
+  return Array.from(platforms).sort();
+});
+
+// Frontend filtering for trending materials (platform + quality)
+const filteredTrendingMaterials = computed(() => {
+  let items = materials.value;
+
+  // Platform filter
+  if (trendingPlatformFilter.value && trendingPlatformFilter.value.length > 0) {
+    items = items.filter((item: any) => {
+      const itemPlatforms = new Set<string>();
+      if (item.tags) {
+        item.tags.forEach((tag: string) => {
+          if (tag.startsWith('platform:')) {
+            itemPlatforms.add(tag.replace('platform:', ''));
+          }
+        });
+      }
+      if (item.metadata?.platform) {
+        itemPlatforms.add(item.metadata.platform);
+      }
+      return trendingPlatformFilter.value.some((p: string) => itemPlatforms.has(p));
+    });
+  }
+
+  // Quality filter
+  if (trendingQualityFilter.value) {
+    const threshold = parseFloat(trendingQualityFilter.value);
+    items = items.filter((item: any) => item.quality_score != null && item.quality_score >= threshold);
+  }
+
+  return items;
+});
+
 const candidateColumns = [
   { colKey: 'id', title: 'ID', width: 60 },
   { colKey: 'source_type', title: '来源', width: 100 },
   { colKey: 'title', title: '标题', ellipsis: true },
   { colKey: 'tags', title: '标签', width: 200 },
-  { colKey: 'quality_score', title: '质量分', width: 80 },
+  { colKey: 'quality_score', title: '质量分', width: 120 },
   { colKey: 'status', title: '状态', width: 80 },
   { colKey: 'created_at', title: '采集时间', width: 160 },
   { colKey: 'op', title: '操作', width: 120 },
@@ -509,13 +769,27 @@ const showTagEditor = ref(false);
 const tagEditMaterial = ref<any>(null);
 const tagEditorInput = ref('');
 
+// ── Label / Theme helpers ──
+
 const sourceTypeLabel = (type: string) => {
-  const map: Record<string, string> = { rss: 'RSS', search: '搜索', skills_feed: 'Skills', manual: '手动' };
+  const map: Record<string, string> = {
+    rss: 'RSS',
+    search: '搜索',
+    skills_feed: 'Skills',
+    manual: '手动',
+    trending: '🔥 热点',
+  };
   return map[type] || type;
 };
 
 const sourceTypeTheme = (type: string): string => {
-  const map: Record<string, string> = { rss: 'primary', search: 'warning', skills_feed: 'success', manual: 'default' };
+  const map: Record<string, string> = {
+    rss: 'primary',
+    search: 'warning',
+    skills_feed: 'success',
+    manual: 'default',
+    trending: 'danger',
+  };
   return map[type] || 'default';
 };
 
@@ -566,6 +840,102 @@ const accountNameById = (accountId?: number) => {
   return accounts.value.find((item) => item.id === accountId)?.name || `公众号 ${accountId}`;
 };
 
+// ── Quality color helpers ──
+
+const qualityBarColor = (score: number | null): string => {
+  if (score == null) return 'var(--td-gray-color-5)';
+  if (score >= 0.5) return 'var(--td-error-color)';
+  if (score >= 0.35) return 'var(--td-warning-color)';
+  return 'var(--td-gray-color-5)';
+};
+
+const qualityBorderColor = (score: number | null): string => {
+  if (score == null) return 'var(--td-gray-color-5)';
+  if (score >= 0.5) return 'var(--td-error-color)';
+  if (score >= 0.35) return 'var(--td-warning-color)';
+  return 'var(--td-gray-color-5)';
+};
+
+// ── Trending metadata extractors ──
+
+const extractPlatform = (item: any): string => {
+  // Try metadata first
+  if (item.metadata?.platform) return item.metadata.platform;
+  if (item.metadata?.source_name) return item.metadata.source_name;
+  // Fallback: extract from tags
+  if (item.tags) {
+    const platformTag = item.tags.find((t: string) => t.startsWith('platform:'));
+    if (platformTag) return platformTag.replace('platform:', '');
+  }
+  return '';
+};
+
+const extractRank = (item: any): number | null => {
+  if (item.metadata?.rank != null) return item.metadata.rank;
+  if (item.metadata?.position != null) return item.metadata.position;
+  return null;
+};
+
+const extractHotValue = (item: any): string => {
+  if (item.metadata?.hot_value != null) {
+    const val = item.metadata.hot_value;
+    if (typeof val === 'number') {
+      return val >= 10000 ? (val / 10000).toFixed(1) + '万' : String(val);
+    }
+    return String(val);
+  }
+  if (item.metadata?.heat != null) return String(item.metadata.heat);
+  return '';
+};
+
+const extractCrossPlatformCount = (item: any): number | null => {
+  if (item.metadata?.cross_platform_count != null) return item.metadata.cross_platform_count;
+  if (item.metadata?.platform_count != null) return item.metadata.platform_count;
+  // Infer from platforms array
+  if (item.metadata?.platforms && Array.isArray(item.metadata.platforms)) {
+    return item.metadata.platforms.length;
+  }
+  return null;
+};
+
+const extractAllPlatforms = (item: any): string => {
+  if (item.metadata?.platforms && Array.isArray(item.metadata.platforms)) {
+    return item.metadata.platforms.join(', ');
+  }
+  // Fallback: collect all platform: tags
+  if (item.tags) {
+    const platforms = item.tags
+      .filter((t: string) => t.startsWith('platform:'))
+      .map((t: string) => t.replace('platform:', ''));
+    if (platforms.length) return platforms.join(', ');
+  }
+  const p = extractPlatform(item);
+  return p || '';
+};
+
+const extractWeightScore = (item: any): string => {
+  if (item.metadata?.weight_score != null) return Number(item.metadata.weight_score).toFixed(2);
+  if (item.metadata?.weight != null) return Number(item.metadata.weight).toFixed(2);
+  return '';
+};
+
+const extractCrossPlatformInfo = (item: any): { sources: string; count: number } | null => {
+  const count = extractCrossPlatformCount(item);
+  if (count && count > 1) {
+    return {
+      sources: extractAllPlatforms(item),
+      count,
+    };
+  }
+  return null;
+};
+
+const displayTags = (tags: string[]): string[] => {
+  return tags.slice(0, 3);
+};
+
+// ── Format helpers ──
+
 const formatDate = (dateStr: string) => {
   if (!dateStr) {
     return '-';
@@ -586,10 +956,27 @@ const formatFileSize = (size: number) => {
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 };
 
+// ── Data fetching ──
+
 const fetchData = async () => {
   loading.value = true;
   try {
-    if (libraryMode.value === 'candidate') {
+    if (libraryMode.value === 'trending') {
+      const params: Record<string, any> = {
+        page: filters.page,
+        page_size: filters.page_size,
+        source_type: 'trending',
+      };
+      if (filters.agent_id) {
+        params.agent_id = filters.agent_id;
+      }
+      if (filters.tags) {
+        params.tags = filters.tags;
+      }
+      const res = await getMaterials(params);
+      materials.value = res.data.items;
+      total.value = res.data.total;
+    } else if (libraryMode.value === 'candidate') {
       const params: Record<string, any> = { page: filters.page, page_size: filters.page_size };
       if (filters.agent_id) {
         params.agent_id = filters.agent_id;
@@ -625,17 +1012,19 @@ const fetchData = async () => {
       total.value = res.data.total;
     }
   } catch {
-    MessagePlugin.error(libraryMode.value === 'candidate' ? '加载素材失败' : '加载图片素材失败');
+    const labels: Record<string, string> = {
+      trending: '加载热点素材失败',
+      candidate: '加载素材失败',
+      media: '加载图片素材失败',
+    };
+    MessagePlugin.error(labels[libraryMode.value]);
   } finally {
     loading.value = false;
   }
 };
 
-const switchLibraryMode = (mode: 'candidate' | 'media') => {
-  if (libraryMode.value === mode) {
-    return;
-  }
-  libraryMode.value = mode;
+const onTabChange = (val: string | number) => {
+  libraryMode.value = val as 'trending' | 'candidate' | 'media';
   showUploadDialog.value = false;
   showMediaUploadDialog.value = false;
   showTagEditor.value = false;
@@ -652,6 +1041,13 @@ const resetFilters = () => {
   filters.status = undefined;
   filters.tags = '';
   filters.page = 1;
+  trendingPlatformFilter.value = [];
+  trendingQualityFilter.value = undefined;
+  if (libraryMode.value === 'trending') {
+    filters.page_size = 24;
+  } else {
+    filters.page_size = 20;
+  }
   fetchData();
 };
 
@@ -660,6 +1056,28 @@ const onPageChange = (pageInfo: { current: number; pageSize: number }) => {
   filters.page_size = pageInfo.pageSize;
   fetchData();
 };
+
+// ── Collect ──
+
+const onCollect = async () => {
+  if (!filters.agent_id) {
+    MessagePlugin.warning('请先选择 Agent');
+    return;
+  }
+  collecting.value = true;
+  try {
+    const res = await collectForAgent(filters.agent_id);
+    const count = res.data?.total_collected ?? res.data?.count ?? 0;
+    MessagePlugin.success(`采集完成，新增 ${count} 条素材`);
+    fetchData();
+  } catch {
+    MessagePlugin.error('采集失败，请稍后重试');
+  } finally {
+    collecting.value = false;
+  }
+};
+
+// ── Upload handlers ──
 
 const onUpload = async () => {
   if (!uploadForm.title.trim()) {
@@ -765,6 +1183,8 @@ const copyProcessedMarkdown = () => {
   });
 };
 
+// ── Delete media ──
+
 const confirmDeleteMedia = (row: any) => {
   deletingMedia.value = row;
   showDeleteConfirm.value = true;
@@ -785,6 +1205,8 @@ const onDeleteMedia = async () => {
     deleting.value = false;
   }
 };
+
+// ── Detail drawer ──
 
 const openDetail = async (row: any) => {
   if (libraryMode.value === 'media') {
@@ -809,6 +1231,8 @@ const openDetail = async (row: any) => {
     MessagePlugin.error('加载详情失败');
   }
 };
+
+// ── Tag management ──
 
 const addDetailTag = async () => {
   const tag = newTagInput.value.trim();
@@ -875,6 +1299,8 @@ const removeTag = async (tag: string) => {
   }
 };
 
+// ── Init ──
+
 onMounted(async () => {
   try {
     const [agentsResponse, accountsResponse] = await Promise.all([
@@ -889,6 +1315,31 @@ onMounted(async () => {
       agents.value = r.data;
     } catch {}
   }
+  filters.page_size = 24; // Default for trending grid
   fetchData();
 });
 </script>
+
+<style scoped>
+.trending-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 16px;
+  transition: opacity 0.2s;
+}
+
+.trending-card {
+  background: var(--td-bg-color-container);
+  border: 1px solid var(--td-border-level-1-color);
+  border-left: 4px solid var(--td-gray-color-5);
+  border-radius: 8px;
+  padding: 16px;
+  cursor: pointer;
+  transition: box-shadow 0.2s, transform 0.15s;
+}
+
+.trending-card:hover {
+  box-shadow: var(--td-shadow-2);
+  transform: translateY(-2px);
+}
+</style>

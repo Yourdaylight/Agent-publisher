@@ -11,7 +11,7 @@ from agent_publisher.models.base import Base
 AGENT_ROLES = ("collector", "processor", "publisher", "full_pipeline")
 
 # Valid values for the 'source_mode' field
-AGENT_SOURCE_MODES = ("independent_search", "rss", "skills_feed")
+AGENT_SOURCE_MODES = ("independent_search", "rss", "skills_feed", "multi_source")
 
 
 class Agent(Base):
@@ -32,6 +32,11 @@ class Agent(Base):
     search_config: Mapped[dict | None] = mapped_column(JSON, default=None, nullable=True)
     # Allowed skill source identities for skills_feed mode
     allowed_skill_sources: Mapped[list | None] = mapped_column(JSON, default=None, nullable=True)
+
+    # LLM Profile reference (preferred over individual LLM fields)
+    llm_profile_id: Mapped[int | None] = mapped_column(
+        ForeignKey("llm_profiles.id"), nullable=True, default=None
+    )
 
     # Deprecated: LLM config now comes from platform settings (DEFAULT_LLM_*)
     llm_provider: Mapped[str] = mapped_column(String(50), default="", nullable=True)

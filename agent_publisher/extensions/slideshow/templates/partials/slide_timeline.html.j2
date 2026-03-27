@@ -1,0 +1,14 @@
+<div class="slide-layout--timeline">
+  <h2>{{ slide.title | default('') }}</h2>
+  <div class="timeline">
+    {% if slide.content and slide.content.milestones %}
+      {% for m in slide.content.milestones %}
+      <div class="milestone {{ 'completed' if m.status == 'completed' else '' }}">
+        <div class="date">{{ m.date | default('') }}</div>
+        <div class="label">{{ m.label | default('') }}</div>
+        <div class="desc">{{ m.description | default('') }}</div>
+      </div>
+      {% endfor %}
+    {% endif %}
+  </div>
+</div>

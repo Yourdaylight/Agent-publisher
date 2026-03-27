@@ -123,6 +123,20 @@
               📋
             </t-button>
           </t-tooltip>
+
+          <template v-if="extensionActions.length > 0">
+            <t-divider layout="vertical" style="margin: 0 4px" />
+            <t-tooltip v-for="action in extensionActions" :key="action.key" :content="action.label">
+              <t-button
+                theme="primary"
+                variant="text"
+                size="small"
+                @click="onExtensionAction(action, row)"
+              >
+                <t-icon :name="action.icon" />
+              </t-button>
+            </t-tooltip>
+          </template>
         </div>
       </template>
     </t-table>
@@ -688,7 +702,9 @@ import {
   generateVariants,
   getArticleVariants,
   getTask,
+  getExtensions,
 } from '@/api';
+import http from '@/api';
 import { MessagePlugin } from 'tdesign-vue-next';
 
 const loading = ref(false);
@@ -754,6 +770,9 @@ const variantsLoading = ref(false);
 const variantsData = ref<any[]>([]);
 const variantsSourceTitle = ref('');
 
+// Extension actions state
+const extensionActions = ref<any[]>([]);
+
 const publishRecordColumns = [
   { colKey: 'id', title: 'ID', width: 60 },
   { colKey: 'account_name', title: '公众号', width: 180, cell: (_h: any, { row }: any) => row.account_name || (row.account_id ? `#${row.account_id}` : '-') },
@@ -808,7 +827,7 @@ const columns = [
   { colKey: 'variant_count', title: '变体', width: 70 },
   { colKey: 'publish_count', title: '发布次数', width: 90 },
   { colKey: 'created_at', title: '创建时间', width: 180, cell: (_h: any, { row }: any) => new Date(row.created_at).toLocaleString() },
-  { colKey: 'op', title: '操作', width: 120 },
+  { colKey: 'op', title: '操作', width: 160 },
 ];
 
 const variantColumns = [
@@ -1336,6 +1355,16 @@ const fetchRunningTasks = async () => {
   }
 };
 
+// --- Extension action handler ---
+const onExtensionAction = async (action: any, article: any) => {
+  try {
+    const { data } = await http.post(action.endpoint, { article_id: article.id });
+    MessagePlugin.success(`${action.label} 任务已创建 (ID: ${data.task_id})`);
+  } catch (err: any) {
+    MessagePlugin.error(err?.response?.data?.detail || `${action.label} 失败`);
+  }
+};
+
 onMounted(async () => {
   try {
     const [agentsRes, accountsRes] = await Promise.all([
@@ -1346,6 +1375,13 @@ onMounted(async () => {
     accountOptions.value = accountsRes.data || [];
   } catch {
     // ignore
+  }
+  // Load extension actions (graceful: empty array if none installed)
+  try {
+    const { data } = await getExtensions();
+    extensionActions.value = (data.extensions || []).flatMap((e: any) => e.article_actions || []);
+  } catch {
+    // no extensions available
   }
   fetchData();
   fetchRunningTasks();

@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 
 
 class CandidateMaterialCreate(BaseModel):
-    source_type: Literal["rss", "search", "skills_feed", "manual"]
+    source_type: Literal["rss", "search", "skills_feed", "manual", "trending"]
     source_identity: str = ""
     original_url: str = ""
     title: str

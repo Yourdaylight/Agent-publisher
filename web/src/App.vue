@@ -25,6 +25,14 @@
           <template #icon><t-icon name="robot" /></template>
           Agent 管理
         </t-menu-item>
+        <t-menu-item value="/llm-profiles">
+          <template #icon><t-icon name="server" /></template>
+          LLM 配置
+        </t-menu-item>
+        <t-menu-item value="/sources">
+          <template #icon><t-icon name="wifi" /></template>
+          数据源管理
+        </t-menu-item>
         <t-menu-item value="/materials">
           <template #icon><t-icon name="folder-open" /></template>
           素材库
