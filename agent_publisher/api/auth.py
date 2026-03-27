@@ -141,7 +141,7 @@ async def login(req: LoginRequest, request: Request):
         email = req.email.strip().lower()
         if not settings.is_email_allowed(email):
             _record_failed_attempt(ip)
-            raise HTTPException(status_code=401, detail="Email not in whitelist")
+            raise HTTPException(status_code=401, detail="该邮箱不在白名单中，请联系管理员")
         _reset_attempts(ip)
         token = _create_skill_token(email)
         return LoginResponse(

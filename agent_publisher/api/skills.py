@@ -302,7 +302,7 @@ async def skill_auth(req: SkillAuthRequest, request: Request):
 
     if not settings.is_email_allowed(email):
         logger.warning("Skill auth rejected for email=%s (not in whitelist)", email)
-        raise HTTPException(status_code=403, detail="Email not in whitelist")
+        raise HTTPException(status_code=403, detail="该邮箱不在白名单中，请联系管理员")
 
     token = _create_skill_token(email)
     is_admin = settings.is_admin(email)

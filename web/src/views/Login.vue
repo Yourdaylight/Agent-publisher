@@ -31,8 +31,8 @@
           theme="error"
           :message="errorMsg"
           style="margin-bottom: 16px"
-          close
-          @close="errorMsg = ''"
+          close-btn
+          @close-btn-click="errorMsg = ''"
         />
         <t-alert
           v-if="banned"
@@ -66,8 +66,8 @@
           theme="error"
           :message="errorMsg"
           style="margin-bottom: 16px"
-          close
-          @close="errorMsg = ''"
+          close-btn
+          @close-btn-click="errorMsg = ''"
         />
         <t-alert
           v-if="banned"
