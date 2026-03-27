@@ -107,9 +107,10 @@ async def run_pipeline(
         await _record_step(task, session, "video_export", "running", {})
 
         exporter = VideoExporter()
-        video_path = str(out_dir / "video.mp4")
+        # Prefer mp4 (requires system ffmpeg with libx264); exporter auto-falls back to webm
+        video_path_requested = str(out_dir / "video.mp4")
         tts_audio = tts_result["audio_path"] if tts_result else None
-        await exporter.export(str(video_html_path), video_path, tts_audio)
+        actual_video_path = await exporter.export(str(video_html_path), video_path_requested, tts_audio)
 
         await _record_step(task, session, "video_export", "success", {})
 
@@ -117,7 +118,7 @@ async def run_pipeline(
         result: dict[str, Any] = {
             "article_id": article_id,
             "preview_html_path": str(preview_path),
-            "video_path": video_path,
+            "video_path": actual_video_path,
         }
         if tts_result:
             result["narration_path"] = tts_result["audio_path"]

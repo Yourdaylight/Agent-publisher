@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Slideshow</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5/dist/reveal.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5/dist/theme/white.css">
+  
+  <style>
+    /* Corporate theme for reveal.js slideshow */
+.reveal .slides section {
+  font-family: "PingFang SC", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+}
+.reveal .slides section h1,
+.reveal .slides section h2,
+.reveal .slides section h3 {
+  font-family: "PingFang SC", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+  font-weight: 700;
+}
+.reveal .slides section h1 { color: #1a365d; }
+.reveal .slides section h2 { color: #2a4365; }
+.reveal .slides section h3 { color: #2c5282; }
+
+.slide-layout--title {
+  background: linear-gradient(135deg, #1a365d 0%, #2a4365 50%, #2b6cb0 100%);
+}
+.slide-layout--title h1 { color: #fff; }
+.slide-layout--title .subtitle { color: #bee3f8; }
+.slide-layout--title .meta { color: #90cdf4; }
+
+
+    /* Base slide styles */
+    .reveal .slides section {
+      text-align: left;
+      padding: 40px 60px;
+      box-sizing: border-box;
+    }
+    .reveal .slides section h1,
+    .reveal .slides section h2,
+    .reveal .slides section h3 {
+      color: #2c3e50;
+    }
+    .reveal .slides section h1 { font-size: 2.2em; }
+    .reveal .slides section h2 { font-size: 1.6em; margin-bottom: 0.6em; }
+    .reveal .slides section h3 { font-size: 1.2em; margin-bottom: 0.4em; }
+
+    /* Layout: title */
+    .slide-layout--title {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      text-align: center;
+    }
+    .slide-layout--title h1 { font-size: 2.6em; margin-bottom: 0.3em; }
+    .slide-layout--title .subtitle { font-size: 1.3em; color: #7f8c8d; }
+    .slide-layout--title .meta { font-size: 0.9em; color: #95a5a6; margin-top: 1em; }
+
+    /* Layout: bullets */
+    .slide-layout--bullets ul { list-style: none; padding: 0; }
+    .slide-layout--bullets li {
+      padding: 6px 0 6px 20px;
+      position: relative;
+      font-size: 0.95em;
+      line-height: 1.6;
+    }
+    .slide-layout--bullets li::before {
+      content: "▸";
+      position: absolute;
+      left: 0;
+      color: #3498db;
+    }
+    .slide-layout--bullets li.level-2 { padding-left: 40px; font-size: 0.88em; color: #555; }
+    .slide-layout--bullets .group-heading {
+      font-weight: 600;
+      margin-top: 0.8em;
+      margin-bottom: 0.3em;
+      color: #2c3e50;
+    }
+
+    /* Layout: chart (full page) */
+    .slide-layout--chart { display: flex; flex-direction: column; }
+    .slide-layout--chart .chart-container { flex: 1; min-height: 400px; }
+
+    /* Layout: chart_with_text */
+    .slide-grid--chart-text {
+      display: grid;
+      grid-template-columns: 3fr 2fr;
+      gap: 32px;
+      align-items: start;
+      height: 100%;
+    }
+    .slide-grid--chart-text.chart-right {
+      grid-template-columns: 2fr 3fr;
+    }
+    .slide-grid--chart-text .chart-container { min-height: 350px; }
+    .slide-grid--chart-text ul { list-style: disc; padding-left: 1.2em; }
+    .slide-grid--chart-text li { padding: 4px 0; font-size: 0.9em; line-height: 1.5; }
+
+    /* Layout: two_column */
+    .slide-grid--two-col {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 40px;
+    }
+    .slide-grid--two-col h3 { border-bottom: 2px solid #3498db; padding-bottom: 8px; }
+    .slide-grid--two-col ul { list-style: disc; padding-left: 1.2em; }
+    .slide-grid--two-col li { padding: 4px 0; font-size: 0.9em; line-height: 1.5; }
+
+    /* Layout: image_text */
+    .slide-grid--image-text {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 32px;
+      align-items: center;
+    }
+    .slide-grid--image-text img {
+      max-width: 100%;
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    }
+
+    /* Layout: timeline */
+    .slide-layout--timeline .timeline {
+      position: relative;
+      padding-left: 30px;
+    }
+    .slide-layout--timeline .timeline::before {
+      content: "";
+      position: absolute;
+      left: 8px;
+      top: 0;
+      bottom: 0;
+      width: 3px;
+      background: #3498db;
+    }
+    .slide-layout--timeline .milestone {
+      position: relative;
+      margin-bottom: 18px;
+    }
+    .slide-layout--timeline .milestone::before {
+      content: "";
+      position: absolute;
+      left: -26px;
+      top: 6px;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: #3498db;
+      border: 2px solid #fff;
+      box-shadow: 0 0 0 2px #3498db;
+    }
+    .slide-layout--timeline .milestone.completed::before { background: #27ae60; box-shadow: 0 0 0 2px #27ae60; }
+    .slide-layout--timeline .milestone .date { font-weight: 600; color: #2c3e50; font-size: 0.95em; }
+    .slide-layout--timeline .milestone .label { font-weight: 500; }
+    .slide-layout--timeline .milestone .desc { font-size: 0.85em; color: #666; }
+
+    /* Layout: table */
+    .slide-layout--table table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.88em;
+    }
+    .slide-layout--table th {
+      background: #2c3e50;
+      color: #fff;
+      padding: 10px 14px;
+      text-align: left;
+    }
+    .slide-layout--table td {
+      padding: 8px 14px;
+      border-bottom: 1px solid #ecf0f1;
+    }
+    .slide-layout--table tr:nth-child(even) { background: #f9f9f9; }
+    .slide-layout--table .highlight { background: #fff3cd !important; font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="reveal">
+    <div class="slides">
+      
+      <section data-auto-animate data-timing="6.336">
+        
+        
+          <div class="slide-layout--bullets">
+  <h2>2025年AI大模型发展趋势</h2>
+  
+</div>
+        
+      </section>
+      
+      <section data-auto-animate data-timing="4.416">
+        
+        
+          <div class="slide-layout--bullets">
+  <h2>一、多模态能力全面爆发</h2>
+  
+</div>
+        
+      </section>
+      
+      <section data-auto-animate data-timing="3.096">
+        
+        
+          <div class="slide-layout--bullets">
+  <h2>AI Agent时代已来</h2>
+  
+</div>
+        
+      </section>
+      
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/reveal.js@5/dist/reveal.js"></script>
+  <script>
+    Reveal.initialize({
+      hash: true,
+      autoSlide: 5000,
+      autoSlideStoppable: false,
+      loop: false,
+      controls: false,
+      progress: true,
+      transition: 'slide',
+      width: 1280,
+      height: 720,
+      margin: 0,
+    });
+
+    
+
+    // Ready signal for Playwright recording
+    window.__REVEAL_READY__ = false;
+    Reveal.on('ready', function() { window.__REVEAL_READY__ = true; });
+  </script>
+</body>
+</html>

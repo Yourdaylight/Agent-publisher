@@ -68,10 +68,13 @@ async def download_video(task_id: int, db: AsyncSession = Depends(get_db)):
     if not video_path or not Path(video_path).exists():
         raise HTTPException(404, "Video file not found")
 
+    is_webm = video_path.endswith(".webm")
+    media_type = "video/webm" if is_webm else "video/mp4"
+    task_suffix = ".webm" if is_webm else ".mp4"
     return FileResponse(
         video_path,
-        media_type="video/mp4",
-        filename=f"slideshow_{task_id}.mp4",
+        media_type=media_type,
+        filename=f"slideshow_{task_id}{task_suffix}",
     )
 
 

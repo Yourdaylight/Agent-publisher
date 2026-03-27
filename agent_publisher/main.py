@@ -188,8 +188,11 @@ app.include_router(candidate_materials_router)
 app.include_router(extensions_router)
 
 # Discover and register extensions (graceful degradation: failures only logged)
-extension_registry.discover_and_load()
-extension_registry.register_all(app)
+# Call once at module load — before any requests are handled.
+# Guard against double-loading if this module is imported multiple times (e.g. hot-reload).
+if not len(extension_registry):
+    extension_registry.discover_and_load()
+    extension_registry.register_all(app)
 
 
 @app.get("/api/stats")
