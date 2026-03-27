@@ -600,6 +600,7 @@ async def skill_create_agent(
     db: AsyncSession = Depends(get_db),
 ):
     """Create an agent. The target account must be owned by the caller (or caller is admin)."""
+    from sqlalchemy import func as sqla_func
     email = _get_skill_email(request)
     is_admin = settings.is_admin(email)
 
@@ -609,6 +610,21 @@ async def skill_create_agent(
         raise HTTPException(status_code=404, detail="Account not found")
     if not is_admin and account.owner_email != email:
         raise HTTPException(status_code=403, detail="You do not own this account")
+
+    # Enforce per-user agent limit for non-admins
+    if not is_admin:
+        existing_count = (
+            await db.execute(
+                select(sqla_func.count(Agent.id))
+                .join(Account, Agent.account_id == Account.id)
+                .where(Account.owner_email == email)
+            )
+        ).scalar() or 0
+        if existing_count >= 5:
+            raise HTTPException(
+                status_code=403,
+                detail="Agent limit reached: non-admin users may create at most 5 agents",
+            )
 
     agent = Agent(**data.model_dump())
     db.add(agent)
@@ -1731,3 +1747,96 @@ async def skill_upload_markdown(
         images_count=len(image_infos),
         skipped_count=skipped,
     )
+
+
+# ---------------------------------------------------------------------------
+# Delete endpoints (ownership-checked)
+# ---------------------------------------------------------------------------
+
+@router.delete("/agents/{agent_id}")
+async def skill_delete_agent(
+    agent_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete an agent. Caller must own the agent's account (or be admin)."""
+    email = _get_skill_email(request)
+    is_admin = settings.is_admin(email)
+
+    agent = await db.get(Agent, agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    if not is_admin:
+        account = await db.get(Account, agent.account_id)
+        if not account or account.owner_email != email:
+            raise HTTPException(status_code=403, detail="You do not own this agent's account")
+
+    await db.delete(agent)
+    await db.commit()
+    logger.info("Skill deleted agent id=%d by email=%s", agent_id, email)
+    return {"ok": True}
+
+
+@router.delete("/accounts/{account_id}")
+async def skill_delete_account(
+    account_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete a WeChat account. Caller must own the account (or be admin)."""
+    email = _get_skill_email(request)
+    is_admin = settings.is_admin(email)
+
+    account = await db.get(Account, account_id)
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+
+    if not is_admin and account.owner_email != email:
+        raise HTTPException(status_code=403, detail="You do not own this account")
+
+    await db.delete(account)
+    await db.commit()
+    logger.info("Skill deleted account id=%d by email=%s", account_id, email)
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Permission group visibility (read-only for skill users)
+# ---------------------------------------------------------------------------
+
+@router.get("/groups")
+async def skill_list_my_groups(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Return the groups the current user belongs to (read-only)."""
+    from agent_publisher.models.group import UserGroup, UserGroupMember
+    from sqlalchemy.orm import selectinload
+
+    email = _get_skill_email(request)
+
+    group_ids_result = await db.execute(
+        select(UserGroupMember.group_id).where(UserGroupMember.email == email)
+    )
+    group_ids = [row[0] for row in group_ids_result.all()]
+
+    if not group_ids:
+        return []
+
+    result = await db.execute(
+        select(UserGroup)
+        .where(UserGroup.id.in_(group_ids))
+        .options(selectinload(UserGroup.members))
+        .order_by(UserGroup.id)
+    )
+    groups = result.scalars().all()
+    return [
+        {
+            "id": g.id,
+            "name": g.name,
+            "description": g.description,
+            "member_emails": [m.email for m in g.members],
+        }
+        for g in groups
+    ]

@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from agent_publisher.api.accounts import router as accounts_router
 from agent_publisher.api.agents import router as agents_router
+from agent_publisher.api.groups import router as groups_router
 from agent_publisher.api.llm_profiles import router as llm_profiles_router
 from agent_publisher.api.articles import router as articles_router
 from agent_publisher.api.auth import router as auth_router, verify_token
@@ -34,6 +35,7 @@ from agent_publisher.models.llm_profile import LLMProfile
 from agent_publisher.models.media import MediaAsset
 from agent_publisher.models.style_preset import StylePreset
 from agent_publisher.models.task import Task
+from agent_publisher.models.group import UserGroup, UserGroupMember  # noqa: F401 – ensure tables are created
 from agent_publisher.database import engine
 from agent_publisher.models.base import Base
 from agent_publisher.extensions import registry as extension_registry
@@ -173,6 +175,7 @@ app.include_router(auth_router)
 app.include_router(settings_router)
 app.include_router(accounts_router)
 app.include_router(agents_router)
+app.include_router(groups_router)
 app.include_router(llm_profiles_router)
 app.include_router(articles_router)
 app.include_router(tasks_router)
@@ -222,24 +225,38 @@ async def stats(
 
 
 @app.get("/api/stats/source-modes")
-async def source_mode_stats(db: AsyncSession = Depends(get_db)):
+async def source_mode_stats(
+    db: AsyncSession = Depends(get_db),
+    user: UserContext = Depends(get_current_user),
+):
     from agent_publisher.services.governance_service import GovernanceService
     svc = GovernanceService(db)
-    return await svc.get_source_mode_stats()
+    # Admin sees global stats; regular users see only their own
+    owner_email = None if user.is_admin else user.email
+    return await svc.get_source_mode_stats(owner_email=owner_email)
 
 
 @app.get("/api/stats/tags")
-async def tag_stats(db: AsyncSession = Depends(get_db)):
+async def tag_stats(
+    db: AsyncSession = Depends(get_db),
+    user: UserContext = Depends(get_current_user),
+):
     from agent_publisher.services.governance_service import GovernanceService
     svc = GovernanceService(db)
-    return await svc.get_tag_stats()
+    owner_email = None if user.is_admin else user.email
+    return await svc.get_tag_stats(owner_email=owner_email)
 
 
 @app.get("/api/stats/intake-trend")
-async def intake_trend(days: int = 30, db: AsyncSession = Depends(get_db)):
+async def intake_trend(
+    days: int = 30,
+    db: AsyncSession = Depends(get_db),
+    user: UserContext = Depends(get_current_user),
+):
     from agent_publisher.services.governance_service import GovernanceService
     svc = GovernanceService(db)
-    return await svc.get_daily_intake_trend(days)
+    owner_email = None if user.is_admin else user.email
+    return await svc.get_daily_intake_trend(days, owner_email=owner_email)
 
 
 @app.get("/api/skill-package/download")

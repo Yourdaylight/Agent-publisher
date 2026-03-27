@@ -7,6 +7,8 @@ from datetime import datetime, timedelta
 from sqlalchemy import and_, case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from agent_publisher.models.account import Account
+from agent_publisher.models.agent import Agent
 from agent_publisher.models.article import Article
 from agent_publisher.models.candidate_material import CandidateMaterial
 
@@ -17,11 +19,12 @@ class GovernanceService:
     def __init__(self, session: AsyncSession):
         self.session = session
 
-    async def get_source_mode_stats(self) -> list[dict]:
+    async def get_source_mode_stats(self, owner_email: str | None = None) -> list[dict]:
         """Calculate per-source-type statistics.
 
         Returns list of dicts with: source_type, total, accepted, rejected,
         duplicate_count, acceptance_rate, duplicate_rate, conversion_rate.
+        If owner_email is provided, only materials belonging to that user's agents are counted.
         """
         # Material counts by source_type
         stmt = (
@@ -34,11 +37,25 @@ class GovernanceService:
             )
             .group_by(CandidateMaterial.source_type)
         )
+        if owner_email:
+            stmt = (
+                stmt
+                .join(Agent, CandidateMaterial.agent_id == Agent.id)
+                .join(Account, Agent.account_id == Account.id)
+                .where(Account.owner_email == owner_email)
+            )
         result = await self.session.execute(stmt)
         rows = result.all()
 
         # Article count for conversion rate
         article_count_stmt = select(func.count(Article.id))
+        if owner_email:
+            article_count_stmt = (
+                select(func.count(Article.id))
+                .join(Agent, Article.agent_id == Agent.id)
+                .join(Account, Agent.account_id == Account.id)
+                .where(Account.owner_email == owner_email)
+            )
         total_articles = (await self.session.execute(article_count_stmt)).scalar() or 0
 
         stats = []
@@ -60,7 +77,7 @@ class GovernanceService:
             })
         return stats
 
-    async def get_tag_stats(self) -> list[dict]:
+    async def get_tag_stats(self, owner_email: str | None = None) -> list[dict]:
         """Calculate per-tag statistics.
 
         Since tags are stored as JSON arrays, we need to process them in Python.
@@ -70,6 +87,13 @@ class GovernanceService:
             CandidateMaterial.tags,
             CandidateMaterial.status,
         ).where(CandidateMaterial.tags.isnot(None))
+        if owner_email:
+            stmt = (
+                stmt
+                .join(Agent, CandidateMaterial.agent_id == Agent.id)
+                .join(Account, Agent.account_id == Account.id)
+                .where(Account.owner_email == owner_email)
+            )
 
         result = await self.session.execute(stmt)
         rows = result.all()
@@ -98,7 +122,7 @@ class GovernanceService:
             })
         return stats
 
-    async def get_daily_intake_trend(self, days: int = 30) -> list[dict]:
+    async def get_daily_intake_trend(self, days: int = 30, owner_email: str | None = None) -> list[dict]:
         """Daily material intake trend for the last N days."""
         since = datetime.utcnow() - timedelta(days=days)
         stmt = (
@@ -111,6 +135,13 @@ class GovernanceService:
             .group_by(func.date(CandidateMaterial.created_at), CandidateMaterial.source_type)
             .order_by(func.date(CandidateMaterial.created_at))
         )
+        if owner_email:
+            stmt = (
+                stmt
+                .join(Agent, CandidateMaterial.agent_id == Agent.id)
+                .join(Account, Agent.account_id == Account.id)
+                .where(Account.owner_email == owner_email)
+            )
         result = await self.session.execute(stmt)
         return [
             {"date": str(row.date), "source_type": row.source_type, "count": row.count}

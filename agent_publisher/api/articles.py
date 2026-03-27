@@ -4,7 +4,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from agent_publisher.api.deps import get_db, get_current_user, UserContext
+from agent_publisher.api.deps import get_db, get_current_user, get_visible_emails, UserContext
 from agent_publisher.models.account import Account
 from agent_publisher.models.agent import Agent
 from agent_publisher.models.article import Article
@@ -41,7 +41,39 @@ class VariantGenerateRequest(BaseModel):
 async def _get_article_with_ownership(
     article_id: int, user: UserContext, db: AsyncSession
 ) -> Article:
-    """Fetch an article and verify ownership through Agent -> Account chain."""
+    """Fetch an article and verify ownership through Agent -> Account chain.
+
+    A non-admin may read articles owned by themselves OR by any co-member in
+    a shared permission group. Write operations (update/publish/sync) must still
+    be performed by the article owner or an admin.
+    """
+    stmt = select(Article).where(Article.id == article_id).options(
+        selectinload(Article.publish_relations).selectinload(
+            ArticlePublishRelation.account
+        ),
+    )
+    result = await db.execute(stmt)
+    article = result.scalar_one_or_none()
+    if not article:
+        raise HTTPException(404, "Article not found")
+    if not user.is_admin:
+        agent = await db.get(Agent, article.agent_id)
+        if not agent:
+            raise HTTPException(404, "Agent not found")
+        account = await db.get(Account, agent.account_id)
+        if not account:
+            raise HTTPException(403, "Access denied")
+        # Allow owner OR group co-members
+        visible = await get_visible_emails(user, db)
+        if account.owner_email not in visible:
+            raise HTTPException(403, "Access denied")
+    return article
+
+
+async def _get_article_own_only(
+    article_id: int, user: UserContext, db: AsyncSession
+) -> Article:
+    """Stricter check: only the owner (or admin) may modify the article."""
     stmt = select(Article).where(Article.id == article_id).options(
         selectinload(Article.publish_relations).selectinload(
             ArticlePublishRelation.account
@@ -65,13 +97,31 @@ async def _get_article_with_ownership(
 async def list_articles(
     agent_id: int | None = None,
     status: str | None = None,
+    group_id: int | None = None,
     db: AsyncSession = Depends(get_db),
     user: UserContext = Depends(get_current_user),
 ):
-    """List articles with publish_count, filtered by user ownership."""
+    """List articles with publish_count, filtered by user ownership + permission groups."""
     stmt = select(Article).order_by(Article.id.desc())
     if not user.is_admin:
-        stmt = stmt.join(Agent).join(Account).where(Account.owner_email == user.email)
+        visible_emails = await get_visible_emails(user, db)
+        stmt = stmt.join(Agent, Article.agent_id == Agent.id).join(
+            Account, Agent.account_id == Account.id
+        ).where(Account.owner_email.in_(visible_emails))
+    elif group_id is not None:
+        # Admin filtering by a specific group
+        from agent_publisher.models.group import UserGroupMember
+        member_emails_stmt = select(UserGroupMember.email).where(
+            UserGroupMember.group_id == group_id
+        )
+        member_emails_result = await db.execute(member_emails_stmt)
+        group_emails = [row[0] for row in member_emails_result.all()]
+        if group_emails:
+            stmt = stmt.join(Agent, Article.agent_id == Agent.id).join(
+                Account, Agent.account_id == Account.id
+            ).where(Account.owner_email.in_(group_emails))
+        else:
+            return []
     if agent_id:
         stmt = stmt.where(Article.agent_id == agent_id)
     if status:
@@ -135,7 +185,7 @@ async def publish_article(
     db: AsyncSession = Depends(get_db),
     user: UserContext = Depends(get_current_user),
 ):
-    await _get_article_with_ownership(article_id, user, db)
+    await _get_article_own_only(article_id, user, db)
     article_svc = ArticleService(db)
     try:
         operator = user.email if not user.is_admin else "admin"
@@ -160,7 +210,7 @@ async def update_article(
     When Markdown content is modified, html_content is automatically re-rendered
     via wenyan.
     """
-    await _get_article_with_ownership(article_id, user, db)
+    await _get_article_own_only(article_id, user, db)
     updates = data.model_dump(exclude_none=True)
     if not updates:
         raise HTTPException(400, "No fields to update")
@@ -182,7 +232,7 @@ async def sync_article(
     user: UserContext = Depends(get_current_user),
 ):
     """Sync local article edits to WeChat draft box."""
-    await _get_article_with_ownership(article_id, user, db)
+    await _get_article_own_only(article_id, user, db)
     article_svc = ArticleService(db)
     try:
         operator = user.email if not user.is_admin else "admin"

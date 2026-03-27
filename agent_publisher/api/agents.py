@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agent_publisher.api.deps import get_db, get_current_user, UserContext
@@ -9,6 +9,9 @@ from agent_publisher.schemas.agent import AgentCreate, AgentOut, AgentUpdate
 from agent_publisher.services.task_service import TaskService
 
 router = APIRouter(prefix="/api/agents", tags=["agents"])
+
+# Maximum number of agents a non-admin user may create
+USER_AGENT_LIMIT = 5
 
 
 def _validate_agent_config(data: AgentCreate | AgentUpdate, is_create: bool = True) -> None:
@@ -61,6 +64,20 @@ async def create_agent(
     _validate_agent_config(data, is_create=True)
     # Verify user owns the target account
     await _check_account_ownership(data.account_id, user, db)
+    # Enforce per-user agent limit for non-admins
+    if not user.is_admin:
+        existing_count = (
+            await db.execute(
+                select(func.count(Agent.id))
+                .join(Account, Agent.account_id == Account.id)
+                .where(Account.owner_email == user.email)
+            )
+        ).scalar() or 0
+        if existing_count >= USER_AGENT_LIMIT:
+            raise HTTPException(
+                403,
+                f"Agent limit reached: non-admin users may create at most {USER_AGENT_LIMIT} agents",
+            )
     agent = Agent(**data.model_dump())
     db.add(agent)
     await db.commit()
@@ -118,10 +135,12 @@ async def generate_for_agent(
 
 
 @router.delete("/{agent_id}")
-async def delete_agent(agent_id: int, db: AsyncSession = Depends(get_db)):
-    agent = await db.get(Agent, agent_id)
-    if not agent:
-        raise HTTPException(404, "Agent not found")
+async def delete_agent(
+    agent_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: UserContext = Depends(get_current_user),
+):
+    agent = await _get_agent_with_ownership(agent_id, user, db)
     await db.delete(agent)
     await db.commit()
     return {"message": "Agent deleted"}

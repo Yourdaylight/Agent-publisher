@@ -41,13 +41,24 @@
       </div>
     </div>
 
-    <div style="display: flex; gap: 12px; margin-bottom: 16px">
+    <div style="display: flex; gap: 12px; margin-bottom: 16px; flex-wrap: wrap">
       <t-select v-model="filterAgentId" placeholder="筛选 Agent" clearable style="width: 200px" @change="fetchData">
         <t-option v-for="a in agentOptions" :key="a.id" :label="a.name" :value="a.id" />
       </t-select>
       <t-select v-model="filterStatus" placeholder="筛选状态" clearable style="width: 160px" @change="fetchData">
         <t-option label="草稿" value="draft" />
         <t-option label="已发布" value="published" />
+      </t-select>
+      <!-- 权限组筛选：仅管理员可见 -->
+      <t-select
+        v-if="isAdmin"
+        v-model="filterGroupId"
+        placeholder="按权限组筛选"
+        clearable
+        style="width: 200px"
+        @change="fetchData"
+      >
+        <t-option v-for="g in groupOptions" :key="g.id" :label="g.name" :value="g.id" />
       </t-select>
     </div>
 
@@ -703,16 +714,21 @@ import {
   getArticleVariants,
   getTask,
   getExtensions,
+  getGroups,
 } from '@/api';
 import http from '@/api';
 import { MessagePlugin } from 'tdesign-vue-next';
+import { getUserInfo } from '@/api';
 
 const loading = ref(false);
 const articles = ref<any[]>([]);
 const agentOptions = ref<any[]>([]);
 const accountOptions = ref<any[]>([]);
+const groupOptions = ref<any[]>([]);
 const filterAgentId = ref<number | undefined>();
 const filterStatus = ref<string | undefined>();
+const filterGroupId = ref<number | undefined>();
+const isAdmin = computed(() => getUserInfo()?.is_admin ?? false);
 const previewDrawerVisible = ref(false);
 const previewArticle = ref<any>(null);
 const runningTasks = ref<any[]>([]);
@@ -909,6 +925,9 @@ const fetchData = async () => {
     }
     if (filterStatus.value) {
       params.status = filterStatus.value;
+    }
+    if (filterGroupId.value) {
+      params.group_id = filterGroupId.value;
     }
     const res = await getArticles(params);
     articles.value = res.data;
@@ -1375,6 +1394,15 @@ onMounted(async () => {
     accountOptions.value = accountsRes.data || [];
   } catch {
     // ignore
+  }
+  // Load groups for admin filter
+  if (isAdmin.value) {
+    try {
+      const groupsRes = await getGroups();
+      groupOptions.value = groupsRes.data || [];
+    } catch {
+      // ignore
+    }
   }
   // Load extension actions (graceful: empty array if none installed)
   try {

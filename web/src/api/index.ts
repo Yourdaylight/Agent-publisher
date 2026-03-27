@@ -198,4 +198,14 @@ export const getAgentBindings = (agentId: number) =>
 export const collectForAgent = (agentId: number) =>
   http.post(`/sources/agents/${agentId}/collect`);
 
+// Permission Groups (admin-managed)
+export const getGroups = () => http.get('/groups');
+export const createGroup = (data: { name: string; description?: string }) => http.post('/groups', data);
+export const updateGroup = (id: number, data: { name?: string; description?: string }) => http.put(`/groups/${id}`, data);
+export const deleteGroup = (id: number) => http.delete(`/groups/${id}`);
+export const addGroupMember = (groupId: number, data: { email: string }) =>
+  http.post(`/groups/${groupId}/members`, data);
+export const removeGroupMember = (groupId: number, email: string) =>
+  http.delete(`/groups/${groupId}/members/${encodeURIComponent(email)}`);
+
 export default http;

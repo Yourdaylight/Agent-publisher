@@ -4,6 +4,7 @@ from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 
 from fastapi import HTTPException, Request
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agent_publisher.database import async_session_factory
@@ -39,3 +40,34 @@ def require_admin(user: UserContext) -> None:
     """Raise 403 if the user is not an admin."""
     if not user.is_admin:
         raise HTTPException(status_code=403, detail="Admin privileges required")
+
+
+async def get_visible_emails(user: UserContext, db: AsyncSession) -> set[str]:
+    """Return the set of owner emails whose articles the given user may see.
+
+    - Admin: returns empty set (caller should treat as "no filter" / see everything)
+    - Regular user: their own email + emails of all co-members across all groups they belong to
+    """
+    if user.is_admin:
+        return set()  # signal: no restriction
+
+    from agent_publisher.models.group import UserGroupMember
+
+    # Find all groups the user belongs to
+    group_result = await db.execute(
+        select(UserGroupMember.group_id).where(UserGroupMember.email == user.email)
+    )
+    group_ids = [row[0] for row in group_result.all()]
+
+    visible: set[str] = {user.email}
+    if group_ids:
+        member_result = await db.execute(
+            select(UserGroupMember.email).where(
+                UserGroupMember.group_id.in_(group_ids)
+            )
+        )
+        for (email,) in member_result.all():
+            visible.add(email)
+
+    return visible
+

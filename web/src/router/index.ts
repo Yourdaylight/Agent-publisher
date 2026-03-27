@@ -15,6 +15,7 @@ const routes = [
   { path: '/publishes', name: 'Publishes', component: () => import('@/views/Publishes.vue'), meta: { title: '发布管理' } },
   { path: '/tasks', name: 'Tasks', component: () => import('@/views/Tasks.vue'), meta: { title: '任务管理' } },
   { path: '/settings', name: 'Settings', component: () => import('@/views/Settings.vue'), meta: { title: '全局配置', requiresAdmin: true } },
+  { path: '/groups', name: 'Groups', component: () => import('@/views/Groups.vue'), meta: { title: '权限组管理', requiresAdmin: true } },
 ];
 
 const router = createRouter({

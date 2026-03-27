@@ -54,6 +54,11 @@
           <template #icon><t-icon name="setting" /></template>
           全局配置
         </t-menu-item>
+        <!-- Groups: admin only -->
+        <t-menu-item v-if="isAdmin" value="/groups">
+          <template #icon><t-icon name="usergroup" /></template>
+          权限组管理
+        </t-menu-item>
       </t-menu>
       <div style="padding: 12px 16px; border-top: 1px solid var(--td-component-stroke)">
         <div v-if="userEmail" style="padding: 4px 0 8px; font-size: 12px; color: var(--td-text-color-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap" :title="userEmail">
