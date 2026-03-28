@@ -1,11 +1,16 @@
 <template>
   <div>
-    <div style="display: flex; gap: 12px; margin-bottom: 16px">
+    <div style="display: flex; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; align-items: center">
       <t-select v-model="filterStatus" placeholder="筛选状态" clearable style="width: 160px" @change="fetchData">
         <t-option label="等待中" value="pending" />
         <t-option label="运行中" value="running" />
         <t-option label="成功" value="success" />
         <t-option label="失败" value="failed" />
+      </t-select>
+      <t-select v-model="filterType" placeholder="筛选类型" clearable style="width: 180px" @change="fetchData">
+        <t-option label="文章生成" value="generate" />
+        <t-option label="演示文稿" value="slideshow_generate" />
+        <t-option label="批量执行" value="batch_all" />
       </t-select>
       <t-button theme="primary" @click="onBatchRun">批量执行所有 Agent</t-button>
     </div>
@@ -19,14 +24,32 @@
       @row-click="onRowClick"
       style="cursor: pointer"
     >
+      <template #task_type="{ row }">
+        <t-tag
+          size="small"
+          :theme="row.task_type === 'slideshow_generate' ? 'primary' : 'default'"
+          variant="light"
+        >
+          {{ typeLabel(row.task_type) }}
+        </t-tag>
+      </template>
       <template #status="{ row }">
         <t-tag :theme="statusTheme(row.status)" variant="light">
           {{ statusLabel(row.status) }}
         </t-tag>
       </template>
-      <template #result="{ row }">
-        <span v-if="row.result" style="font-size: 12px; color: var(--td-text-color-secondary)">
-          {{ JSON.stringify(row.result).slice(0, 80) }}
+      <template #result_summary="{ row }">
+        <!-- Slideshow task: show quick action buttons directly in list -->
+        <div v-if="row.task_type === 'slideshow_generate' && row.status === 'success'" style="display: flex; gap: 8px" @click.stop>
+          <t-button size="small" theme="primary" @click="openSlideshowPreviewById(row)">
+            🎬 在线预览
+          </t-button>
+          <t-button size="small" @click="downloadVideoById(row)">
+            ⬇️ 下载视频
+          </t-button>
+        </div>
+        <span v-else-if="row.result" style="font-size: 12px; color: var(--td-text-color-secondary)">
+          {{ resultSummary(row) }}
         </span>
         <span v-else>-</span>
       </template>
@@ -39,7 +62,11 @@
           <t-descriptions :column="2" bordered>
             <t-descriptions-item label="任务 ID">{{ detailTask.id }}</t-descriptions-item>
             <t-descriptions-item label="Agent ID">{{ detailTask.agent_id || '-' }}</t-descriptions-item>
-            <t-descriptions-item label="类型">{{ detailTask.task_type }}</t-descriptions-item>
+            <t-descriptions-item label="类型">
+              <t-tag size="small" :theme="detailTask.task_type === 'slideshow_generate' ? 'primary' : 'default'" variant="light">
+                {{ typeLabel(detailTask.task_type) }}
+              </t-tag>
+            </t-descriptions-item>
             <t-descriptions-item label="状态">
               <t-tag :theme="statusTheme(detailTask.status)" variant="light">
                 {{ statusLabel(detailTask.status) }}
@@ -48,6 +75,22 @@
             <t-descriptions-item label="开始时间">{{ detailTask.started_at ? new Date(detailTask.started_at).toLocaleString() : '-' }}</t-descriptions-item>
             <t-descriptions-item label="结束时间">{{ detailTask.finished_at ? new Date(detailTask.finished_at).toLocaleString() : '-' }}</t-descriptions-item>
           </t-descriptions>
+        </div>
+
+        <!-- Slideshow quick actions (most prominent) -->
+        <div v-if="detailTask.task_type === 'slideshow_generate' && detailTask.status === 'success'" style="margin-bottom: 20px">
+          <div style="font-weight: 600; margin-bottom: 12px">🎬 演示文稿已生成</div>
+          <div style="display: flex; gap: 12px; flex-wrap: wrap">
+            <t-button theme="primary" @click="openSlideshowPreviewById(detailTask)">
+              在线预览演示文稿
+            </t-button>
+            <t-button @click="downloadVideoById(detailTask)">
+              下载视频
+            </t-button>
+            <t-button v-if="detailTask.result?.srt_path" variant="text" @click="downloadSubtitleById(detailTask)">
+              下载字幕（SRT）
+            </t-button>
+          </div>
         </div>
 
         <!-- Steps timeline -->
@@ -64,30 +107,18 @@
                 </t-tag>
               </div>
               <div style="font-size: 12px; color: var(--td-text-color-secondary); margin-top: 4px">
-                {{ step.started_at ? new Date(step.started_at).toLocaleTimeString() : '' }}
-                <span v-if="step.finished_at"> → {{ new Date(step.finished_at).toLocaleTimeString() }}</span>
+                {{ step.finished_at ? new Date(step.finished_at).toLocaleTimeString() : '' }}
               </div>
-              <!-- Step output summary -->
-              <div v-if="step.output" style="font-size: 12px; margin-top: 4px; background: var(--td-bg-color-container); padding: 8px; border-radius: 4px">
-                <template v-if="step.name === 'rss_fetch'">
-                  抓取到 {{ step.output.count }} 条新闻
-                  <div v-if="step.output.titles" style="margin-top: 4px">
-                    <div v-for="(title, i) in step.output.titles.slice(0, 5)" :key="i">• {{ title }}</div>
-                    <div v-if="step.output.titles.length > 5" style="color: var(--td-text-color-placeholder)">...及其他 {{ step.output.titles.length - 5 }} 条</div>
-                  </div>
-                </template>
-                <template v-else-if="step.name === 'llm_generate'">
-                  模型: {{ step.output.provider }}/{{ step.output.model }}，标题: {{ step.output.title }}，内容长度: {{ step.output.content_length }} 字
-                </template>
-                <template v-else-if="step.name === 'image_generate'">
-                  {{ step.output.has_image ? '封面图已生成' : '封面图生成失败' }}
-                </template>
-                <template v-else-if="step.name === 'save_article'">
-                  文章已保存，ID: {{ step.output.article_id }}
-                </template>
-                <template v-else>
-                  {{ JSON.stringify(step.output).slice(0, 200) }}
-                </template>
+              <div v-if="step.output && Object.keys(step.output).length" style="font-size: 12px; margin-top: 4px; background: var(--td-bg-color-container); padding: 8px; border-radius: 4px">
+                <template v-if="step.name === 'rss_fetch'">抓取到 {{ step.output.count }} 条新闻</template>
+                <template v-else-if="step.name === 'llm_generate'">模型: {{ step.output.provider }}/{{ step.output.model }}，标题: {{ step.output.title }}</template>
+                <template v-else-if="step.name === 'image_generate'">{{ step.output.has_image ? '封面图已生成' : '封面图生成失败' }}</template>
+                <template v-else-if="step.name === 'save_article'">文章已保存，ID: {{ step.output.article_id }}</template>
+                <template v-else-if="step.name === 'llm_outline'">生成了 {{ step.output.slide_count }} 张幻灯片大纲</template>
+                <template v-else-if="step.name === 'tts_generate'">语音时长: {{ Math.round((step.output.duration_ms || 0) / 1000) }} 秒</template>
+                <template v-else-if="step.name === 'build_html'">演示文稿 HTML 构建完成</template>
+                <template v-else-if="step.name === 'video_export'">视频录制完成</template>
+                <template v-else>{{ JSON.stringify(step.output).slice(0, 200) }}</template>
               </div>
             </div>
           </div>
@@ -104,8 +135,8 @@
           <div class="llm-output" v-text="llmStreamText" />
         </div>
 
-        <!-- Final result -->
-        <div v-if="detailTask.result && (detailTask.status === 'success' || detailTask.status === 'failed')" style="margin-top: 20px">
+        <!-- Final result — only for non-slideshow or failed -->
+        <div v-if="detailTask.result && detailTask.task_type !== 'slideshow_generate' && (detailTask.status === 'success' || detailTask.status === 'failed')" style="margin-top: 20px">
           <h4 style="margin-bottom: 8px">最终结果</h4>
           <t-alert
             :theme="detailTask.status === 'success' ? 'success' : 'error'"
@@ -113,6 +144,33 @@
             :description="JSON.stringify(detailTask.result, null, 2)"
           />
         </div>
+        <div v-else-if="detailTask.result?.error && detailTask.task_type === 'slideshow_generate'" style="margin-top: 20px">
+          <t-alert theme="error" :message="'生成失败'" :description="detailTask.result.error" />
+        </div>
+      </div>
+    </t-drawer>
+
+    <!-- Slideshow preview iframe drawer -->
+    <t-drawer
+      v-model:visible="slideshowPreviewVisible"
+      header="演示文稿预览"
+      size="85%"
+      placement="right"
+      :footer="false"
+    >
+      <div style="height: calc(100vh - 80px); position: relative">
+        <t-loading v-if="previewLoading" style="position: absolute; inset: 0; display: flex; align-items: center; justify-content: center" />
+        <div v-if="previewError" style="padding: 60px; text-align: center">
+          <t-result theme="error" title="预览加载失败" :description="previewError" />
+          <t-button style="margin-top: 16px" @click="downloadVideoById(previewTask)">下载视频</t-button>
+        </div>
+        <iframe
+          v-else
+          :src="previewUrl"
+          style="width: 100%; height: 100%; border: none; border-radius: 8px"
+          @load="previewLoading = false"
+          @error="previewError = '演示文稿加载失败，请下载视频查看'; previewLoading = false"
+        />
       </div>
     </t-drawer>
   </div>
@@ -120,12 +178,13 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount } from 'vue';
-import { getTasks, batchRun } from '@/api';
+import { getTasks, batchRun, downloadSlideshowVideo, downloadSlideshowSubtitle, getSlideshowPreviewUrl } from '@/api';
 import { MessagePlugin } from 'tdesign-vue-next';
 
 const loading = ref(false);
 const tasks = ref<any[]>([]);
 const filterStatus = ref<string | undefined>();
+const filterType = ref<string | undefined>();
 const drawerVisible = ref(false);
 const detailTask = ref<any>(null);
 const detailSteps = ref<any[]>([]);
@@ -133,21 +192,42 @@ const llmStreamText = ref('');
 const isStreaming = ref(false);
 let eventSource: EventSource | null = null;
 
+// Slideshow preview state
+const slideshowPreviewVisible = ref(false);
+const previewUrl = ref('');
+const previewLoading = ref(false);
+const previewError = ref('');
+const previewTask = ref<any>(null);
+
 const stepNameMap: Record<string, string> = {
   rss_fetch: 'RSS 新闻抓取',
   llm_generate: 'AI 文章生成',
   image_generate: '封面图片生成',
   save_article: '保存文章',
+  llm_outline: 'AI 生成幻灯片大纲',
+  tts_generate: '合成语音旁白',
+  build_html: '构建演示文稿',
+  video_export: '录制视频',
 };
 
 const columns = [
   { colKey: 'id', title: 'ID', width: 60 },
-  { colKey: 'agent_id', title: 'Agent ID', width: 90 },
-  { colKey: 'task_type', title: '类型', width: 100 },
+  { colKey: 'task_type', title: '类型', width: 120 },
+  { colKey: 'agent_id', title: 'Agent', width: 80, cell: (_h: any, { row }: any) => row.agent_id || '-' },
   { colKey: 'status', title: '状态', width: 100 },
-  { colKey: 'result', title: '结果' },
+  { colKey: 'result_summary', title: '结果 / 操作' },
   { colKey: 'created_at', title: '创建时间', width: 180, cell: (_h: any, { row }: any) => new Date(row.created_at).toLocaleString() },
 ];
+
+const typeLabel = (t: string) => {
+  const map: Record<string, string> = {
+    generate: '文章生成',
+    slideshow_generate: '演示文稿',
+    batch_all: '批量执行',
+    batch_variants: '变体生成',
+  };
+  return map[t] || t;
+};
 
 const statusTheme = (s: string) => {
   if (s === 'success') return 'success';
@@ -161,10 +241,39 @@ const statusLabel = (s: string) => {
   return map[s] || s;
 };
 
+const resultSummary = (row: any) => {
+  const r = row.result || {};
+  if (row.task_type === 'generate' && r.article_id) return `文章 #${r.article_id} 已生成`;
+  if (r.error) return `失败: ${String(r.error).slice(0, 60)}`;
+  return JSON.stringify(r).slice(0, 60);
+};
+
 const stepDotClass = (status: string) => {
   if (status === 'success') return 'dot-success';
   if (status === 'failed') return 'dot-error';
   return 'dot-running';
+};
+
+const openSlideshowPreviewById = (task: any) => {
+  previewTask.value = task;
+  previewUrl.value = getSlideshowPreviewUrl(task.id);
+  previewLoading.value = true;
+  previewError.value = '';
+  slideshowPreviewVisible.value = true;
+};
+
+const downloadVideoById = (task: any) => {
+  if (!task) return;
+  if (/MicroMessenger/i.test(navigator.userAgent)) {
+    MessagePlugin.warning('微信内无法直接下载，请在外部浏览器打开');
+    return;
+  }
+  downloadSlideshowVideo(task.id);
+};
+
+const downloadSubtitleById = (task: any) => {
+  if (!task) return;
+  downloadSlideshowSubtitle(task.id);
 };
 
 const fetchData = async () => {
@@ -172,6 +281,7 @@ const fetchData = async () => {
   try {
     const params: any = {};
     if (filterStatus.value) params.status = filterStatus.value;
+    if (filterType.value) params.task_type = filterType.value;
     const res = await getTasks(params);
     tasks.value = res.data;
   } catch {} finally {
@@ -200,7 +310,6 @@ const openDetail = (task: any) => {
   isStreaming.value = false;
   drawerVisible.value = true;
 
-  // Connect SSE if task is still active
   if (task.status === 'running' || task.status === 'pending') {
     connectSSE(task.id);
   }
@@ -244,10 +353,7 @@ const connectSSE = (taskId: number) => {
 };
 
 const closeSSE = () => {
-  if (eventSource) {
-    eventSource.close();
-    eventSource = null;
-  }
+  if (eventSource) { eventSource.close(); eventSource = null; }
 };
 
 const closeDrawer = () => {
@@ -256,74 +362,18 @@ const closeDrawer = () => {
 };
 
 onMounted(fetchData);
-
-onBeforeUnmount(() => {
-  closeSSE();
-});
+onBeforeUnmount(() => closeSSE());
 </script>
 
 <style scoped>
-.step-timeline {
-  position: relative;
-  padding-left: 24px;
-}
-
-.step-item {
-  position: relative;
-  padding-bottom: 20px;
-}
-
-.step-dot {
-  position: absolute;
-  left: -24px;
-  top: 4px;
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  z-index: 1;
-}
-
-.dot-success {
-  background-color: var(--td-success-color);
-}
-
-.dot-error {
-  background-color: var(--td-error-color);
-}
-
-.dot-running {
-  background-color: var(--td-warning-color);
-  animation: pulse 1.5s infinite;
-}
-
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.4; }
-}
-
-.step-line {
-  position: absolute;
-  left: -19px;
-  top: 18px;
-  width: 2px;
-  bottom: 0;
-  background-color: var(--td-component-border);
-}
-
-.step-content {
-  padding-left: 4px;
-}
-
-.llm-output {
-  background: var(--td-bg-color-container);
-  border: 1px solid var(--td-component-border);
-  border-radius: 8px;
-  padding: 16px;
-  max-height: 400px;
-  overflow-y: auto;
-  font-size: 13px;
-  line-height: 1.8;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
+.step-timeline { position: relative; padding-left: 24px; }
+.step-item { position: relative; padding-bottom: 20px; }
+.step-dot { position: absolute; left: -24px; top: 4px; width: 12px; height: 12px; border-radius: 50%; z-index: 1; }
+.dot-success { background-color: var(--td-success-color); }
+.dot-error { background-color: var(--td-error-color); }
+.dot-running { background-color: var(--td-warning-color); animation: pulse 1.5s infinite; }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+.step-line { position: absolute; left: -19px; top: 18px; width: 2px; bottom: 0; background-color: var(--td-component-border); }
+.step-content { padding-left: 4px; }
+.llm-output { background: var(--td-bg-color-container); border: 1px solid var(--td-component-border); border-radius: 8px; padding: 16px; max-height: 400px; overflow-y: auto; font-size: 13px; line-height: 1.8; white-space: pre-wrap; word-break: break-word; }
 </style>

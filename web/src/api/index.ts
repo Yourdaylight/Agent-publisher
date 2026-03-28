@@ -109,7 +109,7 @@ export const getPublishStats = () => http.get('/publish-records/stats');
 export const getPublishRecord = (id: number) => http.get(`/publish-records/${id}`);
 
 // Tasks
-export const getTasks = (params?: { status?: string }) => http.get('/tasks', { params });
+export const getTasks = (params?: { status?: string; task_type?: string }) => http.get('/tasks', { params });
 export const getRunningTasks = () => http.get('/tasks', { params: { status: 'running' } });
 export const getPendingTasks = () => http.get('/tasks', { params: { status: 'pending' } });
 export const getTask = (id: number) => http.get(`/tasks/${id}`);

@@ -36,14 +36,59 @@ async def _get_task_with_ownership(
 @router.get("", response_model=list[TaskOut])
 async def list_tasks(
     status: str | None = None,
+    task_type: str | None = None,
     db: AsyncSession = Depends(get_db),
     user: UserContext = Depends(get_current_user),
 ):
     stmt = select(Task).order_by(Task.id.desc())
     if not user.is_admin:
-        stmt = stmt.join(Agent).join(Account).where(Account.owner_email == user.email)
+        # Slideshow tasks have agent_id=None — need a separate ownership check
+        # via task.result.article_id → article → agent → account.owner_email
+        # For simplicity: include tasks with agent_id via JOIN, plus slideshow tasks
+        # owned by current user (checked via result JSON in Python after fetch)
+        stmt_agent = select(Task).order_by(Task.id.desc()).join(Agent).join(Account).where(
+            Account.owner_email == user.email
+        )
+        if status:
+            stmt_agent = stmt_agent.where(Task.status == status)
+        if task_type:
+            stmt_agent = stmt_agent.where(Task.task_type == task_type)
+
+        # Also fetch slideshow tasks (agent_id is None) — we filter by ownership in Python
+        stmt_slideshow = select(Task).where(Task.agent_id.is_(None)).order_by(Task.id.desc())
+        if status:
+            stmt_slideshow = stmt_slideshow.where(Task.status == status)
+        if task_type:
+            stmt_slideshow = stmt_slideshow.where(Task.task_type == task_type)
+
+        agent_tasks = (await db.execute(stmt_agent)).scalars().all()
+        slideshow_tasks_all = (await db.execute(stmt_slideshow)).scalars().all()
+
+        # Filter slideshow tasks by ownership through result.article_id
+        from agent_publisher.models.article import Article
+        owned_slideshow = []
+        for t in slideshow_tasks_all:
+            article_id = (t.result or {}).get("article_id")
+            if article_id:
+                article = await db.get(Article, int(article_id))
+                if article:
+                    agent = await db.get(Agent, article.agent_id)
+                    if agent:
+                        account = await db.get(Account, agent.account_id)
+                        if account and account.owner_email == user.email:
+                            owned_slideshow.append(t)
+            else:
+                # In-progress slideshow task with no article_id yet — skip for now
+                pass
+
+        # Merge and sort by id desc
+        all_tasks = sorted(list(agent_tasks) + owned_slideshow, key=lambda t: t.id, reverse=True)
+        return all_tasks
+
     if status:
         stmt = stmt.where(Task.status == status)
+    if task_type:
+        stmt = stmt.where(Task.task_type == task_type)
     result = await db.execute(stmt)
     return result.scalars().all()
 
