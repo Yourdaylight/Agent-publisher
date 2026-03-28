@@ -1,6 +1,32 @@
 <template>
   <div>
-    <!-- Overview stat cards -->
+    <!-- Agent Connect Banner -->
+    <t-card :bordered="true" style="margin-bottom: 24px; background: linear-gradient(135deg, #f0f7ff 0%, #e8f4fd 100%); border-color: #91caff">
+      <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px">
+        <div>
+          <div style="font-weight: 600; font-size: 15px; margin-bottom: 4px">🤖 连接 AI Agent</div>
+          <div style="font-size: 13px; color: var(--td-text-color-secondary)">复制安装命令，让 AI Agent 一键接入本系统，自动管理公众号和生成文章</div>
+        </div>
+        <div style="display: flex; gap: 8px; flex-shrink: 0">
+          <t-button theme="primary" @click="onCopyInstallCommand">
+            <template #icon><t-icon name="file-copy" /></template>
+            一键复制安装命令
+          </t-button>
+          <t-tooltip content="下载 Skill 包到本地">
+            <t-button variant="outline" @click="onDownloadSkill">
+              <template #icon><t-icon name="download" /></template>
+            </t-button>
+          </t-tooltip>
+        </div>
+      </div>
+      <!-- Collapsible command preview -->
+      <div v-if="showCommand" style="margin-top: 12px; background: rgba(0,0,0,0.04); border-radius: 6px; padding: 12px; font-family: monospace; font-size: 12px; line-height: 1.6; word-break: break-all; color: #333">
+        {{ installCommand }}
+      </div>
+      <t-link style="margin-top: 8px; display: inline-block; font-size: 12px" @click="showCommand = !showCommand">
+        {{ showCommand ? '收起命令' : '查看命令内容' }}
+      </t-link>
+    </t-card>
     <div style="display: flex; gap: 16px; margin-bottom: 24px">
       <t-card v-for="card in statCards" :key="card.label" style="flex: 1" :bordered="true">
         <div style="text-align: center">
@@ -68,8 +94,34 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
-import { getStats, getArticles, getSourceModeStats, getTagStats } from '@/api';
+import { ref, computed, onMounted } from 'vue';
+import { getStats, getArticles, getSourceModeStats, getTagStats, getUserInfo } from '@/api';
+import { MessagePlugin } from 'tdesign-vue-next';
+
+// Agent connect
+const showCommand = ref(false);
+const userInfo = getUserInfo();
+const userEmail = computed(() => userInfo?.email && userInfo.email !== '__admin__' ? userInfo.email : '');
+const installCommand = computed(() => {
+  const origin = window.location.origin;
+  const emailPart = userEmail.value ? ` auth --email ${userEmail.value}` : ' auth --email YOUR_EMAIL';
+  return `curl -o /tmp/ap-skill.zip ${origin}/api/skill-package/download && unzip -o /tmp/ap-skill.zip -d ~/.ap-skill && uv run ~/.ap-skill/scripts/agent_publisher.py --url ${origin}${emailPart}`;
+});
+
+const onCopyInstallCommand = async () => {
+  try {
+    await navigator.clipboard.writeText(installCommand.value);
+    MessagePlugin.success('安装命令已复制到剪贴板');
+    showCommand.value = true;
+  } catch {
+    MessagePlugin.error('复制失败，请手动复制');
+    showCommand.value = true;
+  }
+};
+
+const onDownloadSkill = () => {
+  window.open(`${window.location.origin}/api/skill-package/download`, '_blank');
+};
 
 const stats = ref({ agents: 0, articles: 0, tasks: 0, accounts: 0 });
 const articles = ref<any[]>([]);
