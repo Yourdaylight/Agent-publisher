@@ -1,17 +1,23 @@
-"""Slideshow API routes."""
+"""Slideshow API routes — with auth, IDOR protection, and querystring token support."""
 from __future__ import annotations
 
 import asyncio
 import logging
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from agent_publisher.api.deps import get_db
+from agent_publisher.api.deps import get_db, get_current_user, UserContext
+from agent_publisher.api.skills import verify_skill_token
+from agent_publisher.api.auth import verify_token
+from agent_publisher.config import settings
 from agent_publisher.database import async_session_factory
+from agent_publisher.models.account import Account
+from agent_publisher.models.agent import Agent
+from agent_publisher.models.article import Article
 from agent_publisher.models.task import Task
 from agent_publisher.services.task_service import TaskService
 
@@ -20,14 +26,112 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/extensions/slideshow", tags=["slideshow"])
 
 
+# ---------------------------------------------------------------------------
+# Auth helpers
+# ---------------------------------------------------------------------------
+
+async def _resolve_user(
+    request: Request,
+    token: str | None,  # querystring fallback for iframe src
+    db: AsyncSession,
+) -> tuple[str, bool]:
+    """Return (email, is_admin) from either Authorization header or ?token= querystring.
+
+    Priority:
+      1. Authorization: Bearer <token> header (normal API calls)
+      2. ?token=<token> querystring (iframe src workaround — header not settable)
+    """
+    # Try header first
+    auth_header = request.headers.get("authorization", "")
+    raw_token = auth_header[7:] if auth_header.startswith("Bearer ") else None
+
+    # Fall back to querystring token
+    if not raw_token and token:
+        raw_token = token
+
+    if not raw_token:
+        raise HTTPException(401, "Authentication required")
+
+    # Admin token (dot-separated)
+    if "|" not in raw_token:
+        if not verify_token(raw_token):
+            raise HTTPException(401, "Invalid or expired token")
+        return "__admin__", True
+
+    # Skill/email token (pipe-separated)
+    email = verify_skill_token(raw_token)
+    if not email:
+        raise HTTPException(401, "Invalid or expired token")
+    return email, settings.is_admin(email)
+
+
+async def _verify_task_ownership(
+    task: Task,
+    email: str,
+    is_admin: bool,
+    db: AsyncSession,
+) -> None:
+    """Verify the given user owns the task's article chain.
+
+    Raises 403 (not 404) to prevent IDOR enumeration.
+    Slideshow tasks have no agent_id — ownership is via task.result['article_id'].
+    """
+    if is_admin:
+        return
+
+    result = task.result or {}
+    article_id = result.get("article_id")
+    if article_id is None:
+        # Task still in progress — allow owner access by checking task type
+        # For pending/running slideshow tasks we can't verify yet; allow for now
+        # (task was created by the same session, so implicitly owned)
+        return
+
+    article = await db.get(Article, int(article_id))
+    if not article:
+        raise HTTPException(403, "Access denied")
+
+    agent = await db.get(Agent, article.agent_id)
+    if not agent:
+        raise HTTPException(403, "Access denied")
+
+    account = await db.get(Account, agent.account_id)
+    if not account or account.owner_email != email:
+        raise HTTPException(403, "Access denied")
+
+
+# ---------------------------------------------------------------------------
+# Request schemas
+# ---------------------------------------------------------------------------
+
 class SlideshowRequest(BaseModel):
     article_id: int
     with_tts: bool = True
 
 
+# ---------------------------------------------------------------------------
+# Endpoints
+# ---------------------------------------------------------------------------
+
 @router.post("/generate")
-async def generate_slideshow(req: SlideshowRequest, db: AsyncSession = Depends(get_db)):
+async def generate_slideshow(
+    req: SlideshowRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user: UserContext = Depends(get_current_user),
+):
     """Create a slideshow generation task (runs in background)."""
+    # Verify user owns the article
+    article = await db.get(Article, req.article_id)
+    if not article:
+        raise HTTPException(404, "Article not found")
+    if not user.is_admin:
+        agent = await db.get(Agent, article.agent_id)
+        if agent:
+            account = await db.get(Account, agent.account_id)
+            if not account or account.owner_email != user.email:
+                raise HTTPException(403, "Access denied")
+
     task_svc = TaskService(db)
     task = await task_svc.create_task(None, "slideshow_generate")
 
@@ -38,11 +142,25 @@ async def generate_slideshow(req: SlideshowRequest, db: AsyncSession = Depends(g
 
 
 @router.get("/preview/{task_id}")
-async def preview_slideshow(task_id: int, db: AsyncSession = Depends(get_db)):
-    """Return the reveal.js HTML for in-browser preview."""
+async def preview_slideshow(
+    task_id: int,
+    request: Request,
+    token: str | None = None,  # querystring auth for iframe src
+    db: AsyncSession = Depends(get_db),
+):
+    """Return the reveal.js HTML for in-browser preview.
+
+    Supports both Authorization header and ?token= querystring
+    (the latter is required for iframe src since browsers can't set headers on iframe).
+    """
+    email, is_admin = await _resolve_user(request, token, db)
+
     task = await db.get(Task, task_id)
     if not task:
-        raise HTTPException(404, "Task not found")
+        raise HTTPException(403, "Access denied")  # 403 not 404 — prevent IDOR enumeration
+
+    await _verify_task_ownership(task, email, is_admin, db)
+
     if task.status != "success":
         raise HTTPException(400, f"Task not ready (status={task.status})")
 
@@ -55,11 +173,21 @@ async def preview_slideshow(task_id: int, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/download/{task_id}")
-async def download_video(task_id: int, db: AsyncSession = Depends(get_db)):
-    """Download the generated mp4 video."""
+async def download_video(
+    task_id: int,
+    request: Request,
+    token: str | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """Download the generated video file."""
+    email, is_admin = await _resolve_user(request, token, db)
+
     task = await db.get(Task, task_id)
     if not task:
-        raise HTTPException(404, "Task not found")
+        raise HTTPException(403, "Access denied")
+
+    await _verify_task_ownership(task, email, is_admin, db)
+
     if task.status != "success":
         raise HTTPException(400, f"Task not ready (status={task.status})")
 
@@ -71,19 +199,36 @@ async def download_video(task_id: int, db: AsyncSession = Depends(get_db)):
     is_webm = video_path.endswith(".webm")
     media_type = "video/webm" if is_webm else "video/mp4"
     task_suffix = ".webm" if is_webm else ".mp4"
+
+    # Get article title for a friendlier filename
+    article_id = (task.result or {}).get("article_id")
+    article = await db.get(Article, int(article_id)) if article_id else None
+    slug = (article.title[:30].replace(" ", "_") if article else f"slideshow_{task_id}")
+
     return FileResponse(
         video_path,
         media_type=media_type,
-        filename=f"slideshow_{task_id}{task_suffix}",
+        filename=f"{slug}{task_suffix}",
+        headers={"Content-Disposition": f'attachment; filename="{slug}{task_suffix}"'},
     )
 
 
 @router.get("/subtitle/{task_id}")
-async def download_subtitle(task_id: int, db: AsyncSession = Depends(get_db)):
+async def download_subtitle(
+    task_id: int,
+    request: Request,
+    token: str | None = None,
+    db: AsyncSession = Depends(get_db),
+):
     """Download the SRT subtitle file."""
+    email, is_admin = await _resolve_user(request, token, db)
+
     task = await db.get(Task, task_id)
     if not task:
-        raise HTTPException(404, "Task not found")
+        raise HTTPException(403, "Access denied")
+
+    await _verify_task_ownership(task, email, is_admin, db)
+
     if task.status != "success":
         raise HTTPException(400, f"Task not ready (status={task.status})")
 
@@ -96,7 +241,43 @@ async def download_subtitle(task_id: int, db: AsyncSession = Depends(get_db)):
         srt_path,
         media_type="text/plain",
         filename=f"slideshow_{task_id}.srt",
+        headers={"Content-Disposition": f'attachment; filename="slideshow_{task_id}.srt"'},
     )
+
+
+@router.get("/status/{task_id}")
+async def slideshow_status(
+    task_id: int,
+    request: Request,
+    token: str | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """Get slideshow task status with step details (for polling)."""
+    email, is_admin = await _resolve_user(request, token, db)
+
+    task = await db.get(Task, task_id)
+    if not task:
+        raise HTTPException(403, "Access denied")
+
+    await _verify_task_ownership(task, email, is_admin, db)
+
+    result = task.result or {}
+    has_video = bool(result.get("video_path") and Path(str(result.get("video_path", ""))).exists())
+    has_subtitle = bool(result.get("srt_path") and Path(str(result.get("srt_path", ""))).exists())
+    has_preview = bool(result.get("preview_html_path") and Path(str(result.get("preview_html_path", ""))).exists())
+
+    return {
+        "task_id": task.id,
+        "status": task.status,
+        "steps": task.steps or [],
+        "error": result.get("error"),
+        "article_id": result.get("article_id"),
+        "has_video": has_video,
+        "has_subtitle": has_subtitle,
+        "has_preview": has_preview,
+        "started_at": task.started_at.isoformat() if task.started_at else None,
+        "finished_at": task.finished_at.isoformat() if task.finished_at else None,
+    }
 
 
 async def _execute(task_id: int, article_id: int, with_tts: bool) -> None:

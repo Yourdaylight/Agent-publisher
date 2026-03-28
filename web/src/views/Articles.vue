@@ -148,6 +148,16 @@
               </t-button>
             </t-tooltip>
           </template>
+          <!-- slideshow status tag — shows when a task exists for this article -->
+          <t-tag
+            v-if="row.slideshowTaskId"
+            size="small"
+            :theme="row.slideshowStatus === 'success' ? 'success' : row.slideshowStatus === 'failed' ? 'danger' : 'warning'"
+            style="margin-left: 4px; cursor: pointer"
+            @click="openSlideshowDrawerForArticle(row)"
+          >
+            {{ row.slideshowStatus === 'success' ? '🎬 已生成' : row.slideshowStatus === 'failed' ? '❌ 失败' : '⏳ 生成中' }}
+          </t-tag>
         </div>
       </template>
     </t-table>
@@ -690,11 +700,133 @@
         >{{ selectedErrorRecord.error_message }}</pre>
       </div>
     </t-dialog>
+
+    <!-- ===== Slideshow Generation Drawer ===== -->
+    <t-drawer
+      v-model:visible="slideshowDrawerVisible"
+      :header="slideshowPhase === 'preview' ? `预览演示文稿 — ${slideshowArticle?.title || ''}` : `生成演示文稿 — ${slideshowArticle?.title || ''}`"
+      size="80%"
+      placement="right"
+      :close-on-esc-keydown="slideshowPhase === 'setup'"
+      :footer="false"
+      @close="onSlideshowDrawerClose"
+    >
+      <div style="padding: 8px 0">
+        <!-- Phase: Setup -->
+        <div v-if="slideshowPhase === 'setup'">
+          <t-card :bordered="true" style="margin-bottom: 20px">
+            <div style="font-size: 13px; color: var(--td-text-color-secondary); margin-bottom: 4px">文章</div>
+            <div style="font-weight: 600; font-size: 15px">{{ slideshowArticle?.title }}</div>
+          </t-card>
+          <div style="margin-bottom: 20px">
+            <div style="font-weight: 500; margin-bottom: 8px">配置选项</div>
+            <div style="display: flex; align-items: center; gap: 12px; padding: 12px; background: var(--td-bg-color-page); border-radius: 6px">
+              <t-switch v-model="slideshowWithTts" />
+              <div>
+                <div style="font-size: 14px">语音旁白（TTS）</div>
+                <div style="font-size: 12px; color: var(--td-text-color-secondary)">使用 AI 语音为每张幻灯片生成中文旁白，生成时间约增加 1 分钟</div>
+              </div>
+            </div>
+          </div>
+          <t-alert theme="info" style="margin-bottom: 20px">
+            <template #message>
+              生成流程：AI 生成大纲（约30秒）→ {{ slideshowWithTts ? '合成语音（约1分钟）→ ' : '' }}构建幻灯片 → 录制视频（约3-5分钟）
+            </template>
+          </t-alert>
+          <t-button theme="primary" size="large" block :loading="slideshowSubmitting" @click="startSlideshowGeneration">
+            开始生成
+          </t-button>
+        </div>
+
+        <!-- Phase: Progress -->
+        <div v-else-if="slideshowPhase === 'progress'">
+          <t-alert theme="info" style="margin-bottom: 20px">
+            <template #message>正在生成演示文稿，请耐心等待…</template>
+          </t-alert>
+          <t-steps layout="vertical" :current="slideshowCurrentStep" style="margin-bottom: 24px">
+            <t-step-item
+              v-for="(step, idx) in slideshowStepDefs"
+              :key="step.key"
+              :title="step.label"
+              :content="step.hint"
+              :status="getSlideshowStepStatus(idx)"
+            />
+          </t-steps>
+          <div v-if="slideshowPollError" style="margin-bottom: 16px">
+            <t-alert theme="warning">
+              <template #message>{{ slideshowPollError }}</template>
+            </t-alert>
+          </div>
+          <t-button variant="outline" block @click="onSlideshowRunInBackground">后台运行（可在任务管理中查看）</t-button>
+        </div>
+
+        <!-- Phase: Completed -->
+        <div v-else-if="slideshowPhase === 'completed'">
+          <t-result theme="success" title="演示文稿已生成" style="margin-bottom: 24px">
+            <template #description>
+              <div>已生成 {{ slideshowSlideCount }} 张幻灯片{{ slideshowHasSubtitle ? '，含语音字幕' : '' }}</div>
+            </template>
+          </t-result>
+          <div style="display: flex; gap: 12px; flex-direction: column">
+            <t-button theme="primary" size="large" block @click="openSlideshowPreview">
+              <t-icon name="browse" style="margin-right: 6px" />在线预览演示文稿
+            </t-button>
+            <t-button size="large" block @click="onDownloadVideo">
+              <t-icon name="download" style="margin-right: 6px" />下载视频{{ slideshowVideoExt }}
+            </t-button>
+            <t-button v-if="slideshowHasSubtitle" variant="text" size="large" block @click="onDownloadSubtitle">
+              <t-icon name="file" style="margin-right: 6px" />下载字幕（SRT）
+            </t-button>
+            <t-divider />
+            <t-button variant="outline" @click="onRegenerateSlideshow">重新生成</t-button>
+          </div>
+        </div>
+
+        <!-- Phase: Failed -->
+        <div v-else-if="slideshowPhase === 'failed'">
+          <t-result theme="error" title="生成失败" style="margin-bottom: 24px">
+            <template #description>{{ slideshowErrorMsg || '生成过程中发生错误，请重试' }}</template>
+          </t-result>
+          <t-steps layout="vertical" :current="slideshowCurrentStep" style="margin-bottom: 24px">
+            <t-step-item
+              v-for="(step, idx) in slideshowStepDefs"
+              :key="step.key"
+              :title="step.label"
+              :status="getSlideshowStepStatus(idx)"
+            />
+          </t-steps>
+          <t-button theme="primary" block @click="slideshowPhase = 'setup'">重新生成</t-button>
+        </div>
+
+        <!-- Phase: Preview (iframe) -->
+        <div v-else-if="slideshowPhase === 'preview'" style="height: calc(100vh - 120px); position: relative">
+          <t-loading v-if="slideshowPreviewLoading" style="position: absolute; inset: 0; display: flex; align-items: center; justify-content: center" />
+          <div v-if="slideshowPreviewError" style="padding: 40px; text-align: center">
+            <t-result theme="error" title="预览加载失败">
+              <template #description>{{ slideshowPreviewError }}</template>
+            </t-result>
+            <t-button style="margin-top: 16px" @click="onDownloadVideo">下载视频查看</t-button>
+          </div>
+          <iframe
+            v-else
+            :src="slideshowPreviewUrl"
+            style="width: 100%; height: 100%; border: none; border-radius: 8px; background: #000"
+            @load="slideshowPreviewLoading = false"
+            @error="onPreviewIframeError"
+          />
+          <div style="position: absolute; top: 8px; right: 8px; display: flex; gap: 8px">
+            <t-button size="small" theme="default" @click="slideshowPhase = 'completed'">← 返回</t-button>
+            <t-button size="small" @click="onDownloadVideo">下载视频</t-button>
+          </div>
+        </div>
+      </div>
+    </t-drawer>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue';
+import { onBeforeRouteLeave } from 'vue-router';
 import {
   getArticles,
   getArticle,
@@ -715,9 +847,14 @@ import {
   getTask,
   getExtensions,
   getGroups,
+  generateSlideshow,
+  getSlideshowStatus,
+  getSlideshowPreviewUrl,
+  downloadSlideshowVideo,
+  downloadSlideshowSubtitle,
 } from '@/api';
 import http from '@/api';
-import { MessagePlugin } from 'tdesign-vue-next';
+import { MessagePlugin, NotifyPlugin } from 'tdesign-vue-next';
 import { getUserInfo } from '@/api';
 
 const loading = ref(false);
@@ -1375,12 +1512,294 @@ const fetchRunningTasks = async () => {
 };
 
 // --- Extension action handler ---
-const onExtensionAction = async (action: any, article: any) => {
+// ============================================================
+// Slideshow Generation State & Logic
+// ============================================================
+
+// Step definitions (shown in the progress stepper)
+const slideshowStepDefs = [
+  { key: 'llm_outline',   label: 'AI 生成内容大纲',  hint: '约 20-40 秒' },
+  { key: 'tts_generate',  label: '合成语音旁白',       hint: '约 30-60 秒（跳过时自动跳过）' },
+  { key: 'build_html',    label: '构建演示文稿',       hint: '约 5 秒' },
+  { key: 'video_export',  label: '录制视频',           hint: '约 2-5 分钟' },
+] as const;
+
+const TERMINAL_STATES = ['success', 'failed', 'cancelled', 'expired'] as const;
+const MAX_POLL_RETRIES = 120;
+const POLL_INTERVAL_MS = 3000;
+const VIDEO_EXPORT_POLL_MS = 8000; // back off during slow step
+
+// Per-article slideshow task state
+type SlideshowState = {
+  taskId: number | null;
+  status: string;
+  phase: 'setup' | 'progress' | 'completed' | 'failed' | 'preview';
+};
+const slideshowStateMap = ref(new Map<number, SlideshowState>());
+
+// Active drawer state
+const slideshowDrawerVisible = ref(false);
+const slideshowArticle = ref<any>(null);
+const slideshowPhase = ref<'setup' | 'progress' | 'completed' | 'failed' | 'preview'>('setup');
+const slideshowWithTts = ref(true);
+const slideshowSubmitting = ref(false);
+const slideshowTaskId = ref<number | null>(null);
+const slideshowSteps = ref<any[]>([]);
+const slideshowPollError = ref('');
+const slideshowErrorMsg = ref('');
+const slideshowCurrentStep = ref(0);
+const slideshowHasSubtitle = ref(false);
+const slideshowHasVideo = ref(false);
+const slideshowVideoExt = ref('.webm');
+const slideshowSlideCount = ref(0);
+// Preview
+const slideshowPreviewUrl = ref('');
+const slideshowPreviewLoading = ref(false);
+const slideshowPreviewError = ref('');
+
+// Polling cleanup
+let slideshowPollTimer: ReturnType<typeof setTimeout> | null = null;
+let slideshowPollRetries = 0;
+let slideshowActivePollTaskId: number | null = null;
+
+function clearSlideshowPoll() {
+  if (slideshowPollTimer) {
+    clearTimeout(slideshowPollTimer);
+    slideshowPollTimer = null;
+  }
+  slideshowActivePollTaskId = null;
+}
+
+function getSlideshowStepStatus(idx: number): 'default' | 'process' | 'finish' | 'error' {
+  const steps = slideshowSteps.value;
+  // Find the step by key
+  const stepKey = slideshowStepDefs[idx]?.key;
+  const matchedStep = steps.find((s: any) => s.name === stepKey);
+  if (!matchedStep) {
+    // Not started yet
+    if (idx < slideshowCurrentStep.value) return 'finish';
+    if (idx === slideshowCurrentStep.value) return 'process';
+    return 'default';
+  }
+  if (matchedStep.status === 'success') return 'finish';
+  if (matchedStep.status === 'running') return 'process';
+  if (matchedStep.status === 'failed' || matchedStep.status === 'error') return 'error';
+  return 'default';
+}
+
+function computeCurrentStep(steps: any[]): number {
+  let current = 0;
+  for (let i = 0; i < slideshowStepDefs.length; i++) {
+    const matched = steps.find((s: any) => s.name === slideshowStepDefs[i].key);
+    if (matched && (matched.status === 'success' || matched.status === 'running')) {
+      current = i;
+    }
+  }
+  return current;
+}
+
+async function scheduleSlideshowPoll(taskId: number) {
+  if (slideshowActivePollTaskId !== taskId) return; // stale poll
+  if (slideshowPollRetries >= MAX_POLL_RETRIES) {
+    slideshowPollError.value = '生成超时，请前往任务中心查看状态';
+    return;
+  }
+
   try {
-    const { data } = await http.post(action.endpoint, { article_id: article.id });
-    MessagePlugin.success(`${action.label} 任务已创建 (ID: ${data.task_id})`);
+    const { data } = await getSlideshowStatus(taskId);
+    if (slideshowActivePollTaskId !== taskId) return; // navigated away
+
+    slideshowSteps.value = data.steps || [];
+    slideshowCurrentStep.value = computeCurrentStep(slideshowSteps.value);
+
+    if (data.status === 'success') {
+      slideshowPhase.value = 'completed';
+      slideshowHasSubtitle.value = data.has_subtitle;
+      slideshowHasVideo.value = data.has_video;
+      // detect .webm vs .mp4 from steps result (heuristic — backend always returns actual ext)
+      slideshowVideoExt.value = '.webm';
+
+      // Count slides from steps output
+      const outlineStep = (data.steps || []).find((s: any) => s.name === 'llm_outline');
+      slideshowSlideCount.value = outlineStep?.output?.slide_count || 0;
+
+      // Update per-article map
+      if (slideshowArticle.value?.id) {
+        const state = slideshowStateMap.value.get(slideshowArticle.value.id);
+        if (state) { state.status = 'success'; state.phase = 'completed'; }
+        // Update articles list tag
+        const art = articles.value.find(a => a.id === slideshowArticle.value.id);
+        if (art) { art.slideshowTaskId = taskId; art.slideshowStatus = 'success'; }
+      }
+      clearSlideshowPoll();
+      return;
+    }
+
+    if (data.status === 'failed') {
+      slideshowPhase.value = 'failed';
+      slideshowErrorMsg.value = data.error || '生成失败，请重试';
+      if (slideshowArticle.value?.id) {
+        const art = articles.value.find(a => a.id === slideshowArticle.value.id);
+        if (art) { art.slideshowStatus = 'failed'; }
+      }
+      clearSlideshowPoll();
+      return;
+    }
+
+    // Still running — schedule next poll with backoff for video_export step
+    slideshowPollRetries++;
+    const isVideoStep = (data.steps || []).some(
+      (s: any) => s.name === 'video_export' && s.status === 'running'
+    );
+    const delay = isVideoStep ? VIDEO_EXPORT_POLL_MS : POLL_INTERVAL_MS;
+    slideshowPollTimer = setTimeout(() => scheduleSlideshowPoll(taskId), delay);
+
   } catch (err: any) {
-    MessagePlugin.error(err?.response?.data?.detail || `${action.label} 失败`);
+    if (slideshowActivePollTaskId !== taskId) return;
+    if (err?.response?.status === 404) {
+      slideshowPhase.value = 'failed';
+      slideshowErrorMsg.value = '任务已过期，请重新生成';
+      clearSlideshowPoll();
+      return;
+    }
+    // Network error — retry with doubled delay
+    slideshowPollRetries++;
+    slideshowPollTimer = setTimeout(() => scheduleSlideshowPoll(taskId), POLL_INTERVAL_MS * 2);
+  }
+}
+
+function openSlideshowDrawerForArticle(article: any) {
+  slideshowArticle.value = article;
+  slideshowDrawerVisible.value = true;
+
+  // If there's an existing task, restore its phase
+  const existing = slideshowStateMap.value.get(article.id);
+  if (existing?.taskId) {
+    slideshowTaskId.value = existing.taskId;
+    slideshowPhase.value = existing.phase;
+    // If still in progress, resume polling
+    if (existing.phase === 'progress') {
+      slideshowActivePollTaskId = existing.taskId;
+      slideshowPollRetries = 0;
+      scheduleSlideshowPoll(existing.taskId);
+    }
+  } else if (article.slideshowTaskId && article.slideshowStatus === 'success') {
+    slideshowTaskId.value = article.slideshowTaskId;
+    slideshowPhase.value = 'completed';
+  } else {
+    slideshowPhase.value = 'setup';
+    slideshowTaskId.value = null;
+    slideshowPollError.value = '';
+    slideshowErrorMsg.value = '';
+    slideshowSteps.value = [];
+  }
+}
+
+async function startSlideshowGeneration() {
+  if (slideshowSubmitting.value || !slideshowArticle.value) return;
+  slideshowSubmitting.value = true;
+  slideshowPollError.value = '';
+  slideshowPollRetries = 0;
+
+  try {
+    const { data } = await generateSlideshow(slideshowArticle.value.id, slideshowWithTts.value);
+    const taskId = data.task_id;
+    slideshowTaskId.value = taskId;
+    slideshowPhase.value = 'progress';
+
+    // Update article row tag
+    const art = articles.value.find(a => a.id === slideshowArticle.value.id);
+    if (art) { art.slideshowTaskId = taskId; art.slideshowStatus = 'running'; }
+
+    // Store state
+    slideshowStateMap.value.set(slideshowArticle.value.id, {
+      taskId,
+      status: 'running',
+      phase: 'progress',
+    });
+
+    // Start polling
+    slideshowActivePollTaskId = taskId;
+    slideshowPollTimer = setTimeout(() => scheduleSlideshowPoll(taskId), POLL_INTERVAL_MS);
+
+  } catch (err: any) {
+    slideshowPhase.value = 'failed';
+    slideshowErrorMsg.value = err?.response?.data?.detail || '启动生成失败';
+  } finally {
+    slideshowSubmitting.value = false;
+  }
+}
+
+function onSlideshowRunInBackground() {
+  slideshowDrawerVisible.value = false;
+  NotifyPlugin.info({
+    title: '演示文稿生成中',
+    content: '完成后点击文章行的标签查看结果',
+    duration: 5000,
+  });
+}
+
+function onSlideshowDrawerClose() {
+  // Don't stop polling if still in progress — run in background
+  if (slideshowPhase.value === 'progress') {
+    // Keep polling, drawer just closes
+  } else {
+    clearSlideshowPoll();
+  }
+  // Clean up preview URL
+  slideshowPreviewUrl.value = '';
+  slideshowPreviewError.value = '';
+}
+
+function openSlideshowPreview() {
+  if (!slideshowTaskId.value) return;
+  slideshowPreviewUrl.value = getSlideshowPreviewUrl(slideshowTaskId.value);
+  slideshowPreviewLoading.value = true;
+  slideshowPreviewError.value = '';
+  slideshowPhase.value = 'preview';
+}
+
+function onPreviewIframeError() {
+  slideshowPreviewLoading.value = false;
+  slideshowPreviewError.value = '演示文稿预览加载失败，Reveal.js 资源可能无法访问，请直接下载查看';
+}
+
+function onDownloadVideo() {
+  if (!slideshowTaskId.value) return;
+  // Detect WeChat WebView
+  if (/MicroMessenger/i.test(navigator.userAgent)) {
+    MessagePlugin.warning('微信内无法直接下载，请复制链接到外部浏览器');
+    return;
+  }
+  downloadSlideshowVideo(slideshowTaskId.value);
+}
+
+function onDownloadSubtitle() {
+  if (!slideshowTaskId.value) return;
+  downloadSlideshowSubtitle(slideshowTaskId.value);
+}
+
+function onRegenerateSlideshow() {
+  clearSlideshowPoll();
+  slideshowPhase.value = 'setup';
+  slideshowTaskId.value = null;
+  slideshowSteps.value = [];
+  slideshowPollError.value = '';
+  slideshowErrorMsg.value = '';
+}
+
+const onExtensionAction = async (action: any, article: any) => {
+  if (action.key === 'slideshow_generate') {
+    openSlideshowDrawerForArticle(article);
+  } else {
+    // Generic extension action
+    try {
+      const { data } = await http.post(action.endpoint, { article_id: article.id });
+      MessagePlugin.success(`${action.label} 任务已创建`);
+      console.log('Extension action result:', data);
+    } catch (err: any) {
+      MessagePlugin.error(err?.response?.data?.detail || `${action.label} 失败`);
+    }
   }
 };
 
@@ -1424,6 +1843,17 @@ onBeforeUnmount(() => {
   if (variantPollTimer) {
     clearInterval(variantPollTimer);
     variantPollTimer = null;
+  }
+  clearSlideshowPoll();
+});
+
+// Route leave guard — warn if slideshow is generating
+onBeforeRouteLeave((_to, _from, next) => {
+  if (slideshowPhase.value === 'progress' && slideshowActivePollTaskId) {
+    // Allow navigation — poll continues in background until component unmounts
+    next();
+  } else {
+    next();
   }
 });
 </script>

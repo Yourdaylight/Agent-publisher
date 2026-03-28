@@ -146,6 +146,31 @@ async def auth_middleware(request: Request, call_next) -> Response:
     if path.startswith("/api/media/") and path.endswith("/download"):
         return await call_next(request)
 
+    # Slideshow preview/download/subtitle support ?token= querystring auth (for iframe src)
+    SLIDESHOW_TOKEN_PATHS = (
+        "/api/extensions/slideshow/preview/",
+        "/api/extensions/slideshow/download/",
+        "/api/extensions/slideshow/subtitle/",
+    )
+    if any(path.startswith(p) for p in SLIDESHOW_TOKEN_PATHS):
+        auth_header = request.headers.get("authorization", "")
+        query_token = request.query_params.get("token", "")
+        effective_token = (auth_header[7:] if auth_header.startswith("Bearer ") else None) or query_token
+        if effective_token:
+            # Validate and inject identity so route handler can use request.state
+            if "|" in effective_token:
+                email = verify_skill_token(effective_token)
+                if email:
+                    request.state.user_email = email
+                    request.state.is_admin = settings.is_admin(email)
+                    return await call_next(request)
+            else:
+                if verify_token(effective_token):
+                    request.state.user_email = "__admin__"
+                    request.state.is_admin = True
+                    return await call_next(request)
+        # Fall through to standard auth check below
+
     # Require Bearer token for all other API routes
     auth_header = request.headers.get("authorization", "")
     if not auth_header.startswith("Bearer "):
