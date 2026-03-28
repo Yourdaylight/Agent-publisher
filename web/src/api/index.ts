@@ -209,11 +209,20 @@ export const removeGroupMember = (groupId: number, email: string) =>
   http.delete(`/groups/${groupId}/members/${encodeURIComponent(email)}`);
 
 // Slideshow (PPT + Video generation)
-export const generateSlideshow = (articleId: number, withTts: boolean = true) =>
-  http.post('/extensions/slideshow/generate', { article_id: articleId, with_tts: withTts });
+export const generateSlideshow = (articleId: number, withTts: boolean = true, skipReview: boolean = false) =>
+  http.post('/extensions/slideshow/generate', { article_id: articleId, with_tts: withTts, skip_review: skipReview });
 
 export const getSlideshowStatus = (taskId: number) =>
   http.get(`/extensions/slideshow/status/${taskId}`);
+
+export const getSlideshowDraft = (taskId: number) =>
+  http.get(`/extensions/slideshow/draft/${taskId}`);
+
+export const confirmSlideshowDraft = (taskId: number, slides: any[], withTts: boolean = true) =>
+  http.post(`/extensions/slideshow/draft/${taskId}/confirm`, { slides, with_tts: withTts });
+
+export const skipSlideshowDraft = (taskId: number, withTts: boolean = true) =>
+  http.post(`/extensions/slideshow/draft/${taskId}/skip`, null, { params: { with_tts: withTts } });
 
 export const getSlideshowPreviewUrl = (taskId: number): string => {
   const token = localStorage.getItem('ap_token') || '';

@@ -730,12 +730,83 @@
           </div>
           <t-alert theme="info" style="margin-bottom: 20px">
             <template #message>
-              生成流程：AI 生成大纲（约30秒）→ {{ slideshowWithTts ? '合成语音（约1分钟）→ ' : '' }}构建幻灯片 → 录制视频（约3-5分钟）
+              生成流程：AI 生成大纲（约30秒）→ 你可以预览并编辑每张幻灯片 → {{ slideshowWithTts ? '合成语音 → ' : '' }}截图合成视频（约2-3分钟）
             </template>
           </t-alert>
           <t-button theme="primary" size="large" block :loading="slideshowSubmitting" @click="startSlideshowGeneration">
             开始生成
           </t-button>
+        </div>
+
+        <!-- Phase: Draft Review -->
+        <div v-else-if="slideshowPhase === 'draft_review'">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px">
+            <div>
+              <div style="font-weight: 600; font-size: 16px">📋 AI 已生成幻灯片大纲（{{ draftSlides.length }} 张）</div>
+              <div style="font-size: 13px; color: var(--td-text-color-secondary); margin-top: 4px">可以修改每张的标题和旁白，也可以直接生成</div>
+            </div>
+            <div style="display: flex; gap: 8px">
+              <t-button @click="onSkipDraftReview" :loading="slideshowSubmitting">直接生成视频</t-button>
+              <t-button theme="primary" @click="onConfirmDraft" :loading="slideshowSubmitting">确认大纲，生成视频</t-button>
+            </div>
+          </div>
+
+          <!-- Slide cards -->
+          <div style="display: flex; flex-direction: column; gap: 10px; max-height: calc(100vh - 280px); overflow-y: auto; padding-right: 8px">
+            <t-card
+              v-for="(slide, idx) in draftSlides"
+              :key="slide.slide_id || idx"
+              :bordered="true"
+              hover-shadow
+              style="transition: all 0.2s"
+            >
+              <div style="display: flex; gap: 12px; align-items: flex-start">
+                <!-- Slide number -->
+                <div style="flex-shrink: 0; width: 32px; height: 32px; border-radius: 50%; background: var(--td-brand-color); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 600">
+                  {{ idx + 1 }}
+                </div>
+                <div style="flex: 1; min-width: 0">
+                  <!-- Layout tag + title -->
+                  <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px">
+                    <t-tag size="small" variant="light" :theme="layoutTheme(slide.layout)">{{ layoutLabel(slide.layout) }}</t-tag>
+                    <span style="font-size: 12px; color: var(--td-text-color-placeholder)">{{ slide.duration || 6 }}秒</span>
+                  </div>
+                  <!-- Editable title -->
+                  <t-input
+                    v-if="editingSlideId === slide.slide_id"
+                    v-model="slide.title"
+                    size="small"
+                    style="font-weight: 600; margin-bottom: 8px"
+                    @blur="editingSlideId = null"
+                    autofocus
+                  />
+                  <div v-else style="font-weight: 600; font-size: 14px; margin-bottom: 8px; cursor: pointer" @click="editingSlideId = slide.slide_id" :title="'点击编辑标题'">
+                    {{ slide.title || '（无标题）' }} <t-icon name="edit" style="color: var(--td-text-color-placeholder); font-size: 12px" />
+                  </div>
+                  <!-- Editable notes -->
+                  <div style="font-size: 12px; color: var(--td-text-color-secondary)">
+                    <t-textarea
+                      v-if="editingNotesId === slide.slide_id"
+                      v-model="slide.notes"
+                      :autosize="{ minRows: 2, maxRows: 4 }"
+                      size="small"
+                      placeholder="旁白备注（TTS 将朗读此内容）"
+                      @blur="editingNotesId = null"
+                    />
+                    <div v-else style="cursor: pointer; line-height: 1.6; color: #718096" @click="editingNotesId = slide.slide_id" :title="'点击编辑旁白'">
+                      {{ slide.notes || '（无旁白）' }} <t-icon name="edit" style="color: var(--td-text-color-placeholder); font-size: 11px" />
+                    </div>
+                  </div>
+                </div>
+                <!-- Actions -->
+                <div style="flex-shrink: 0; display: flex; flex-direction: column; gap: 4px">
+                  <t-button size="small" variant="text" :disabled="idx === 0" @click="moveSlide(idx, -1)">↑</t-button>
+                  <t-button size="small" variant="text" :disabled="idx === draftSlides.length - 1" @click="moveSlide(idx, 1)">↓</t-button>
+                  <t-button size="small" variant="text" theme="danger" @click="removeSlide(idx)">×</t-button>
+                </div>
+              </div>
+            </t-card>
+          </div>
         </div>
 
         <!-- Phase: Progress -->
@@ -849,6 +920,9 @@ import {
   getGroups,
   generateSlideshow,
   getSlideshowStatus,
+  getSlideshowDraft,
+  confirmSlideshowDraft,
+  skipSlideshowDraft,
   getSlideshowPreviewUrl,
   downloadSlideshowVideo,
   downloadSlideshowSubtitle,
@@ -1518,10 +1592,10 @@ const fetchRunningTasks = async () => {
 
 // Step definitions (shown in the progress stepper)
 const slideshowStepDefs = [
-  { key: 'llm_outline',   label: 'AI 生成内容大纲',  hint: '约 20-40 秒' },
-  { key: 'tts_generate',  label: '合成语音旁白',       hint: '约 30-60 秒（跳过时自动跳过）' },
-  { key: 'build_html',    label: '构建演示文稿',       hint: '约 5 秒' },
-  { key: 'video_export',  label: '录制视频',           hint: '约 2-5 分钟' },
+  { key: 'llm_outline',        label: 'AI 生成内容大纲',  hint: '约 20-40 秒' },
+  { key: 'tts_generate',       label: '合成语音旁白',       hint: '约 30-60 秒（跳过时自动跳过）' },
+  { key: 'screenshot_slides',  label: '渲染幻灯片帧',       hint: '每帧高清截图' },
+  { key: 'video_export',       label: '合成最终视频',        hint: '约 1-3 分钟' },
 ] as const;
 
 const TERMINAL_STATES = ['success', 'failed', 'cancelled', 'expired'] as const;
@@ -1533,14 +1607,14 @@ const VIDEO_EXPORT_POLL_MS = 8000; // back off during slow step
 type SlideshowState = {
   taskId: number | null;
   status: string;
-  phase: 'setup' | 'progress' | 'completed' | 'failed' | 'preview';
+  phase: 'setup' | 'progress' | 'draft_review' | 'completed' | 'failed' | 'preview';
 };
 const slideshowStateMap = ref(new Map<number, SlideshowState>());
 
 // Active drawer state
 const slideshowDrawerVisible = ref(false);
 const slideshowArticle = ref<any>(null);
-const slideshowPhase = ref<'setup' | 'progress' | 'completed' | 'failed' | 'preview'>('setup');
+const slideshowPhase = ref<'setup' | 'progress' | 'draft_review' | 'completed' | 'failed' | 'preview'>('setup');
 const slideshowWithTts = ref(true);
 const slideshowSubmitting = ref(false);
 const slideshowTaskId = ref<number | null>(null);
@@ -1552,6 +1626,10 @@ const slideshowHasSubtitle = ref(false);
 const slideshowHasVideo = ref(false);
 const slideshowVideoExt = ref('.webm');
 const slideshowSlideCount = ref(0);
+// Draft review state
+const draftSlides = ref<any[]>([]);
+const editingSlideId = ref<string | null>(null);
+const editingNotesId = ref<string | null>(null);
 // Preview
 const slideshowPreviewUrl = ref('');
 const slideshowPreviewLoading = ref(false);
@@ -1611,6 +1689,19 @@ async function scheduleSlideshowPoll(taskId: number) {
 
     slideshowSteps.value = data.steps || [];
     slideshowCurrentStep.value = computeCurrentStep(slideshowSteps.value);
+
+    if (data.status === 'draft_ready') {
+      // Outline generated — fetch draft and show review UI
+      try {
+        const draftRes = await getSlideshowDraft(taskId);
+        draftSlides.value = JSON.parse(JSON.stringify(draftRes.data.slides || []));
+      } catch {
+        draftSlides.value = [];
+      }
+      slideshowPhase.value = 'draft_review';
+      clearSlideshowPoll();
+      return;
+    }
 
     if (data.status === 'success') {
       slideshowPhase.value = 'completed';
@@ -1702,7 +1793,8 @@ async function startSlideshowGeneration() {
   slideshowPollRetries = 0;
 
   try {
-    const { data } = await generateSlideshow(slideshowArticle.value.id, slideshowWithTts.value);
+    // Default: generate outline first, then pause at draft_review
+    const { data } = await generateSlideshow(slideshowArticle.value.id, slideshowWithTts.value, false);
     const taskId = data.task_id;
     slideshowTaskId.value = taskId;
     slideshowPhase.value = 'progress';
@@ -1711,20 +1803,79 @@ async function startSlideshowGeneration() {
     const art = articles.value.find(a => a.id === slideshowArticle.value.id);
     if (art) { art.slideshowTaskId = taskId; art.slideshowStatus = 'running'; }
 
-    // Store state
     slideshowStateMap.value.set(slideshowArticle.value.id, {
       taskId,
       status: 'running',
       phase: 'progress',
     });
 
-    // Start polling
     slideshowActivePollTaskId = taskId;
     slideshowPollTimer = setTimeout(() => scheduleSlideshowPoll(taskId), POLL_INTERVAL_MS);
 
   } catch (err: any) {
     slideshowPhase.value = 'failed';
     slideshowErrorMsg.value = err?.response?.data?.detail || '启动生成失败';
+  } finally {
+    slideshowSubmitting.value = false;
+  }
+}
+
+// Draft review helpers
+function layoutLabel(layout: string): string {
+  const map: Record<string, string> = {
+    title: '封面', bullets: '要点', chart: '图表',
+    chart_with_text: '图文', two_column: '双列', timeline: '时间轴', table: '表格',
+  };
+  return map[layout] || layout;
+}
+
+function layoutTheme(layout: string): string {
+  if (layout === 'title') return 'primary';
+  if (layout === 'chart' || layout === 'chart_with_text') return 'success';
+  return 'default';
+}
+
+function moveSlide(idx: number, dir: -1 | 1) {
+  const arr = [...draftSlides.value];
+  const newIdx = idx + dir;
+  if (newIdx < 0 || newIdx >= arr.length) return;
+  [arr[idx], arr[newIdx]] = [arr[newIdx], arr[idx]];
+  draftSlides.value = arr;
+}
+
+function removeSlide(idx: number) {
+  draftSlides.value = draftSlides.value.filter((_, i) => i !== idx);
+}
+
+async function onConfirmDraft() {
+  if (!slideshowTaskId.value || slideshowSubmitting.value) return;
+  slideshowSubmitting.value = true;
+  try {
+    await confirmSlideshowDraft(slideshowTaskId.value, draftSlides.value, slideshowWithTts.value);
+    slideshowPhase.value = 'progress';
+    slideshowPollRetries = 0;
+    const taskId = slideshowTaskId.value;
+    slideshowActivePollTaskId = taskId;
+    slideshowPollTimer = setTimeout(() => scheduleSlideshowPoll(taskId), POLL_INTERVAL_MS);
+  } catch (err: any) {
+    MessagePlugin.error(err?.response?.data?.detail || '提交大纲失败');
+  } finally {
+    slideshowSubmitting.value = false;
+  }
+}
+
+async function onSkipDraftReview() {
+  if (!slideshowTaskId.value || slideshowSubmitting.value) return;
+  slideshowSubmitting.value = true;
+  try {
+    await skipSlideshowDraft(slideshowTaskId.value, slideshowWithTts.value);
+    slideshowPhase.value = 'progress';
+    slideshowPollRetries = 0;
+    const taskId = slideshowTaskId.value;
+    slideshowActivePollTaskId = taskId;
+    slideshowPollTimer = setTimeout(() => scheduleSlideshowPoll(taskId), POLL_INTERVAL_MS);
+  } catch (err: any) {
+    MessagePlugin.error(err?.response?.data?.detail || '跳过审阅失败');
   } finally {
     slideshowSubmitting.value = false;
   }

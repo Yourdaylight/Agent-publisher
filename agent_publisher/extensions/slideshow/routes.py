@@ -107,6 +107,12 @@ async def _verify_task_ownership(
 class SlideshowRequest(BaseModel):
     article_id: int
     with_tts: bool = True
+    skip_review: bool = False  # True = skip draft review, generate immediately
+
+
+class DraftConfirmRequest(BaseModel):
+    slides: list[dict]  # Edited slides array from frontend
+    with_tts: bool = True
 
 
 # ---------------------------------------------------------------------------
@@ -120,8 +126,13 @@ async def generate_slideshow(
     db: AsyncSession = Depends(get_db),
     user: UserContext = Depends(get_current_user),
 ):
-    """Create a slideshow generation task (runs in background)."""
-    # Verify user owns the article
+    """Create a slideshow task.
+
+    If skip_review=False (default): generates outline and pauses at draft_ready,
+    waiting for user to review/edit before video generation.
+
+    If skip_review=True: generates outline + video in one shot (legacy behavior).
+    """
     article = await db.get(Article, req.article_id)
     if not article:
         raise HTTPException(404, "Article not found")
@@ -135,10 +146,12 @@ async def generate_slideshow(
     task_svc = TaskService(db)
     task = await task_svc.create_task(None, "slideshow_generate")
 
-    # Fire background pipeline
-    asyncio.create_task(_execute(task.id, req.article_id, req.with_tts))
+    if req.skip_review:
+        asyncio.create_task(_execute_full(task.id, req.article_id, req.with_tts))
+    else:
+        asyncio.create_task(_execute_outline_only(task.id, req.article_id))
 
-    return {"task_id": task.id}
+    return {"task_id": task.id, "mode": "skip_review" if req.skip_review else "draft_review"}
 
 
 @router.get("/preview/{task_id}")
@@ -281,8 +294,119 @@ async def slideshow_status(
 
 
 async def _execute(task_id: int, article_id: int, with_tts: bool) -> None:
-    """Background coroutine that runs the slideshow pipeline."""
+    """Legacy: full pipeline (skip review)."""
     async with async_session_factory() as session:
         from agent_publisher.extensions.slideshow.service import run_pipeline
-
         await run_pipeline(task_id, article_id, with_tts, session)
+
+
+async def _execute_full(task_id: int, article_id: int, with_tts: bool) -> None:
+    """Full pipeline without review stop."""
+    async with async_session_factory() as session:
+        from agent_publisher.extensions.slideshow.service import run_pipeline
+        await run_pipeline(task_id, article_id, with_tts, session)
+
+
+async def _execute_outline_only(task_id: int, article_id: int) -> None:
+    """Phase 1 only: generate outline, stop at draft_ready."""
+    async with async_session_factory() as session:
+        from agent_publisher.extensions.slideshow.service import run_generate_outline
+        await run_generate_outline(task_id, article_id, session)
+
+
+async def _execute_from_slides(task_id: int, article_id: int, slides: list[dict], with_tts: bool) -> None:
+    """Phase 2+: TTS → screenshots → video, using provided slides."""
+    async with async_session_factory() as session:
+        from agent_publisher.extensions.slideshow.service import run_pipeline_from_slides
+        await run_pipeline_from_slides(task_id, article_id, slides, with_tts, session)
+
+
+# ---------------------------------------------------------------------------
+# Draft review endpoints
+# ---------------------------------------------------------------------------
+
+@router.get("/draft/{task_id}")
+async def get_draft(
+    task_id: int,
+    request: Request,
+    token: str | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """Return the LLM-generated slide outline for user review/editing."""
+    email, is_admin = await _resolve_user(request, token, db)
+    task = await db.get(Task, task_id)
+    if not task:
+        raise HTTPException(403, "Access denied")
+    await _verify_task_ownership(task, email, is_admin, db)
+
+    if task.status not in ("draft_ready", "running", "success"):
+        raise HTTPException(400, f"No draft available (status={task.status})")
+
+    result = task.result or {}
+    slides = result.get("slides_draft")
+    if not slides:
+        raise HTTPException(404, "Draft not found — outline may still be generating")
+
+    return {
+        "task_id": task_id,
+        "status": task.status,
+        "slides": slides,
+        "slide_count": len(slides),
+    }
+
+
+@router.post("/draft/{task_id}/confirm")
+async def confirm_draft(
+    task_id: int,
+    body: DraftConfirmRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user: UserContext = Depends(get_current_user),
+):
+    """Accept (optionally edited) slides and start video generation."""
+    task = await db.get(Task, task_id)
+    if not task:
+        raise HTTPException(403, "Access denied")
+    await _verify_task_ownership(task, user.email, user.is_admin, db)
+
+    if task.status != "draft_ready":
+        raise HTTPException(400, f"Task is not in draft_ready state (status={task.status})")
+
+    result = task.result or {}
+    article_id = result.get("article_id")
+    if not article_id:
+        raise HTTPException(400, "Missing article_id in task result")
+
+    if not body.slides:
+        raise HTTPException(400, "slides array cannot be empty")
+
+    # Kick off video generation with user-edited slides
+    asyncio.create_task(_execute_from_slides(task_id, article_id, body.slides, body.with_tts))
+    return {"task_id": task_id, "status": "running", "slide_count": len(body.slides)}
+
+
+@router.post("/draft/{task_id}/skip")
+async def skip_draft(
+    task_id: int,
+    request: Request,
+    with_tts: bool = True,
+    db: AsyncSession = Depends(get_db),
+    user: UserContext = Depends(get_current_user),
+):
+    """Skip review and generate video using the original LLM outline."""
+    task = await db.get(Task, task_id)
+    if not task:
+        raise HTTPException(403, "Access denied")
+    await _verify_task_ownership(task, user.email, user.is_admin, db)
+
+    if task.status != "draft_ready":
+        raise HTTPException(400, f"Task is not in draft_ready state (status={task.status})")
+
+    result = task.result or {}
+    article_id = result.get("article_id")
+    slides = result.get("slides_draft")
+    if not article_id or not slides:
+        raise HTTPException(400, "Missing article_id or slides_draft in task")
+
+    asyncio.create_task(_execute_from_slides(task_id, article_id, slides, with_tts))
+    return {"task_id": task_id, "status": "running", "slide_count": len(slides)}

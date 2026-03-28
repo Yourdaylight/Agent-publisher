@@ -110,31 +110,36 @@ class TTSService:
     @staticmethod
     async def _concat_audio(segments: list[str], output: str) -> None:
         """Concatenate audio segments using ffmpeg."""
+        import shutil
+        import tempfile
+
         if not segments:
             return
         if len(segments) == 1:
-            import shutil
             shutil.copy2(segments[0], output)
             return
 
-        # Build ffmpeg concat filter
-        import tempfile
+        # Find ffmpeg binary
+        ffmpeg_bin = shutil.which("ffmpeg") or "ffmpeg"
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
             for seg in segments:
-                f.write(f"file '{seg}'\n")
+                # Use absolute paths to avoid CWD issues
+                f.write(f"file '{Path(seg).resolve()}'\n")
             list_path = f.name
 
         proc = await asyncio.create_subprocess_exec(
-            "ffmpeg", "-y", "-f", "concat", "-safe", "0",
+            ffmpeg_bin, "-y", "-f", "concat", "-safe", "0",
             "-i", list_path, "-c", "copy", output,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        await proc.wait()
-
-        # Clean up list file
+        _, stderr = await proc.communicate()
         Path(list_path).unlink(missing_ok=True)
+
+        if proc.returncode != 0:
+            logger.error("Audio concat failed (rc=%d): %s", proc.returncode, stderr.decode(errors="replace")[-300:])
+            raise RuntimeError(f"Audio concat failed (rc={proc.returncode})")
 
     @staticmethod
     def _write_srt(entries: list[dict], path: str) -> None:
