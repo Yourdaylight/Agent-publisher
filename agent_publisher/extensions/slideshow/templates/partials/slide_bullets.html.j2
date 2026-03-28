@@ -6,7 +6,7 @@
       <div class="group-heading">{{ group.heading }}</div>
       {% endif %}
       <ul>
-        {% for item in group.items | default([]) %}
+        {% for item in group['items'] | default([]) %}
         <li class="{{ 'level-2' if item.level is defined and item.level > 1 else '' }}">{{ item.text }}</li>
         {% endfor %}
       </ul>

@@ -4,7 +4,7 @@
     {% if slide.content and slide.content.left %}
     <h3>{{ slide.content.left.heading | default('') }}</h3>
     <ul>
-      {% for item in slide.content.left.items | default([]) %}
+      {% for item in slide.content.left['items'] | default([]) %}
       <li>{{ item.text if item.text is defined else item }}</li>
       {% endfor %}
     </ul>
@@ -14,7 +14,7 @@
     {% if slide.content and slide.content.right %}
     <h3>{{ slide.content.right.heading | default('') }}</h3>
     <ul>
-      {% for item in slide.content.right.items | default([]) %}
+      {% for item in slide.content.right['items'] | default([]) %}
       <li>{{ item.text if item.text is defined else item }}</li>
       {% endfor %}
     </ul>

@@ -11,12 +11,13 @@
     </thead>
     <tbody>
       {% for row in slide.content.table.rows | default([]) %}
+      {% set row_index = loop.index0 %}
       <tr>
         {% for cell in row %}
         {% set highlight = false %}
         {% if slide.content.table.highlight_rules %}
           {% for rule in slide.content.table.highlight_rules %}
-            {% if rule.row == loop.parent.index0 and rule.col == loop.index0 %}
+            {% if rule.row == row_index and rule.col == loop.index0 %}
               {% set highlight = true %}
             {% endif %}
           {% endfor %}

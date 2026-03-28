@@ -24,7 +24,11 @@ class ExtensionRegistry:
     # ------------------------------------------------------------------
 
     def discover_and_load(self) -> None:
-        """Scan ``extensions/*/extension.py`` and safely import each one."""
+        """Scan ``extensions/*/extension.py`` and safely import each one.
+
+        Safe to call multiple times — already-loaded extension names are skipped.
+        """
+        loaded_names = {e.name for e in self._extensions}
         ext_root = Path(__file__).parent
         for candidate in sorted(ext_root.iterdir()):
             if not candidate.is_dir() or candidate.name.startswith("_"):
@@ -55,6 +59,10 @@ class ExtensionRegistry:
 
             if ext_obj is None:
                 logger.warning("Extension module '%s' has no Extension instance", candidate.name)
+                continue
+
+            # Skip if already loaded (safe for multiple calls)
+            if ext_obj.name in loaded_names:
                 continue
 
             ok, reason = ext_obj.check_dependencies()
