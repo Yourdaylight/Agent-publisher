@@ -10,16 +10,36 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 
-def _find_ffmpeg() -> str:
-    """Return the path to a usable ffmpeg binary.
+def _check_libx264(ffmpeg_bin: str) -> bool:
+    """Return True if this ffmpeg binary supports libx264 encoding."""
+    import subprocess
+    try:
+        result = subprocess.run(
+            [ffmpeg_bin, "-codecs"],
+            capture_output=True, text=True, timeout=10,
+        )
+        return "libx264" in result.stdout
+    except Exception:
+        return False
+
+
+def _find_ffmpeg() -> tuple[str, bool]:
+    """Return (ffmpeg_path, supports_mp4).
 
     Preference order:
-      1. System ffmpeg (supports libx264 → mp4)
-      2. Playwright-bundled ffmpeg (webm only, limited codecs)
+      1. System ffmpeg — check if libx264 is available
+      2. Playwright-bundled ffmpeg — webm only
     """
     system = shutil.which("ffmpeg")
     if system:
-        return system
+        has_x264 = _check_libx264(system)
+        if not has_x264:
+            logger.info(
+                "System ffmpeg found (%s) but lacks libx264; output will be .webm. "
+                "Install ffmpeg with libx264 support for .mp4 output.",
+                system,
+            )
+        return system, has_x264
 
     import glob
     patterns = [
@@ -32,13 +52,14 @@ def _find_ffmpeg() -> str:
         if found:
             logger.warning(
                 "System ffmpeg not found; using Playwright-bundled ffmpeg (%s). "
-                "Output will be webm. Install system ffmpeg for mp4 support.",
+                "Output will be .webm. Install system ffmpeg for .mp4 support.",
                 found[0],
             )
-            return found[0]
+            return found[0], False
 
     raise RuntimeError(
-        "ffmpeg not found. Install it with: apt-get install ffmpeg"
+        "ffmpeg not found. Install it with: apt-get install ffmpeg  "
+        "(or brew install ffmpeg on macOS)"
     )
 
 
@@ -57,12 +78,12 @@ class VideoExporter:
         """
         from playwright.async_api import async_playwright
 
-        ffmpeg_bin = _find_ffmpeg()
-        # Playwright-bundled ffmpeg only supports webm; adjust output path if needed
+        ffmpeg_bin, supports_mp4 = _find_ffmpeg()
+        # Auto-downgrade to webm if ffmpeg lacks libx264
         output_path = output_mp4
-        if "ms-playwright" in ffmpeg_bin and output_mp4.endswith(".mp4"):
+        if not supports_mp4 and output_mp4.endswith(".mp4"):
             output_path = output_mp4[:-4] + ".webm"
-            logger.info("Using Playwright ffmpeg — output will be .webm: %s", output_path)
+            logger.info("ffmpeg lacks libx264 — output will be .webm: %s", output_path)
 
         temp_dir = tempfile.mkdtemp(prefix="slideshow_video_")
 

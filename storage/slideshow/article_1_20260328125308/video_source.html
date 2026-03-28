@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Slideshow</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5/dist/reveal.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5/dist/theme/white.css">
+  
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+  
+  <style>
+    /* Corporate theme for reveal.js slideshow */
+.reveal .slides section {
+  font-family: "PingFang SC", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+}
+.reveal .slides section h1,
+.reveal .slides section h2,
+.reveal .slides section h3 {
+  font-family: "PingFang SC", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+  font-weight: 700;
+}
+.reveal .slides section h1 { color: #1a365d; }
+.reveal .slides section h2 { color: #2a4365; }
+.reveal .slides section h3 { color: #2c5282; }
+
+.slide-layout--title {
+  background: linear-gradient(135deg, #1a365d 0%, #2a4365 50%, #2b6cb0 100%);
+}
+.slide-layout--title h1 { color: #fff; }
+.slide-layout--title .subtitle { color: #bee3f8; }
+.slide-layout--title .meta { color: #90cdf4; }
+
+
+    /* Base slide styles */
+    .reveal .slides section {
+      text-align: left;
+      padding: 40px 60px;
+      box-sizing: border-box;
+    }
+    .reveal .slides section h1,
+    .reveal .slides section h2,
+    .reveal .slides section h3 {
+      color: #2c3e50;
+    }
+    .reveal .slides section h1 { font-size: 2.2em; }
+    .reveal .slides section h2 { font-size: 1.6em; margin-bottom: 0.6em; }
+    .reveal .slides section h3 { font-size: 1.2em; margin-bottom: 0.4em; }
+
+    /* Layout: title */
+    .slide-layout--title {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      text-align: center;
+    }
+    .slide-layout--title h1 { font-size: 2.6em; margin-bottom: 0.3em; }
+    .slide-layout--title .subtitle { font-size: 1.3em; color: #7f8c8d; }
+    .slide-layout--title .meta { font-size: 0.9em; color: #95a5a6; margin-top: 1em; }
+
+    /* Layout: bullets */
+    .slide-layout--bullets ul { list-style: none; padding: 0; }
+    .slide-layout--bullets li {
+      padding: 6px 0 6px 20px;
+      position: relative;
+      font-size: 0.95em;
+      line-height: 1.6;
+    }
+    .slide-layout--bullets li::before {
+      content: "▸";
+      position: absolute;
+      left: 0;
+      color: #3498db;
+    }
+    .slide-layout--bullets li.level-2 { padding-left: 40px; font-size: 0.88em; color: #555; }
+    .slide-layout--bullets .group-heading {
+      font-weight: 600;
+      margin-top: 0.8em;
+      margin-bottom: 0.3em;
+      color: #2c3e50;
+    }
+
+    /* Layout: chart (full page) */
+    .slide-layout--chart { display: flex; flex-direction: column; }
+    .slide-layout--chart .chart-container { flex: 1; min-height: 400px; }
+
+    /* Layout: chart_with_text */
+    .slide-grid--chart-text {
+      display: grid;
+      grid-template-columns: 3fr 2fr;
+      gap: 32px;
+      align-items: start;
+      height: 100%;
+    }
+    .slide-grid--chart-text.chart-right {
+      grid-template-columns: 2fr 3fr;
+    }
+    .slide-grid--chart-text .chart-container { min-height: 350px; }
+    .slide-grid--chart-text ul { list-style: disc; padding-left: 1.2em; }
+    .slide-grid--chart-text li { padding: 4px 0; font-size: 0.9em; line-height: 1.5; }
+
+    /* Layout: two_column */
+    .slide-grid--two-col {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 40px;
+    }
+    .slide-grid--two-col h3 { border-bottom: 2px solid #3498db; padding-bottom: 8px; }
+    .slide-grid--two-col ul { list-style: disc; padding-left: 1.2em; }
+    .slide-grid--two-col li { padding: 4px 0; font-size: 0.9em; line-height: 1.5; }
+
+    /* Layout: image_text */
+    .slide-grid--image-text {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 32px;
+      align-items: center;
+    }
+    .slide-grid--image-text img {
+      max-width: 100%;
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    }
+
+    /* Layout: timeline */
+    .slide-layout--timeline .timeline {
+      position: relative;
+      padding-left: 30px;
+    }
+    .slide-layout--timeline .timeline::before {
+      content: "";
+      position: absolute;
+      left: 8px;
+      top: 0;
+      bottom: 0;
+      width: 3px;
+      background: #3498db;
+    }
+    .slide-layout--timeline .milestone {
+      position: relative;
+      margin-bottom: 18px;
+    }
+    .slide-layout--timeline .milestone::before {
+      content: "";
+      position: absolute;
+      left: -26px;
+      top: 6px;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: #3498db;
+      border: 2px solid #fff;
+      box-shadow: 0 0 0 2px #3498db;
+    }
+    .slide-layout--timeline .milestone.completed::before { background: #27ae60; box-shadow: 0 0 0 2px #27ae60; }
+    .slide-layout--timeline .milestone .date { font-weight: 600; color: #2c3e50; font-size: 0.95em; }
+    .slide-layout--timeline .milestone .label { font-weight: 500; }
+    .slide-layout--timeline .milestone .desc { font-size: 0.85em; color: #666; }
+
+    /* Layout: table */
+    .slide-layout--table table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.88em;
+    }
+    .slide-layout--table th {
+      background: #2c3e50;
+      color: #fff;
+      padding: 10px 14px;
+      text-align: left;
+    }
+    .slide-layout--table td {
+      padding: 8px 14px;
+      border-bottom: 1px solid #ecf0f1;
+    }
+    .slide-layout--table tr:nth-child(even) { background: #f9f9f9; }
+    .slide-layout--table .highlight { background: #fff3cd !important; font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="reveal">
+    <div class="slides">
+      
+      <section data-auto-animate data-timing="13.68">
+        
+        
+          <div class="slide-layout--title">
+  <h1>2025年AI大模型发展趋势</h1>
+  
+  <div class="subtitle">从多模态到自主Agent的技术跃迁</div>
+  
+  
+  <div class="meta">
+    AI Research Team
+     · 
+    2025年
+  </div>
+  
+</div>
+        
+      </section>
+      
+      <section data-auto-animate data-timing="17.448">
+        
+        
+          <div class="slide-layout--bullets">
+  <h2>核心趋势概览</h2>
+  
+    
+      
+      <div class="group-heading">2025年AI发展的四大支柱</div>
+      
+      <ul>
+        
+        <li class="">多模态能力全面爆发：从文本到图像、音频、视频的融合理解</li>
+        
+        <li class="">推理能力大幅提升：思维链技术推动复杂任务突破人类水平</li>
+        
+        <li class="">开源模型追平闭源：Llama、Qwen、DeepSeek等快速迭代缩小差距</li>
+        
+        <li class="">AI Agent落地加速：自主决策系统在企业流程中规模商用</li>
+        
+      </ul>
+    
+  
+</div>
+        
+      </section>
+      
+      <section data-auto-animate data-timing="16.896">
+        
+        
+          
+<h2>趋势一：多模态能力全面爆发</h2>
+<div class="slide-grid--image-text">
+  
+  <div>
+    
+    <img src="multimodal_ai.png" alt="多模态AI示意图">
+    
+  </div>
+  <div>
+    
+    <h3>从单一文本到全模态理解</h3>
+    <ul>
+      
+      <li>大模型从单一文本理解进化为全模态系统</li>
+      
+      <li>统一架构处理文本、图像、音频、视频</li>
+      
+      <li>实现跨模态内容生成与深度理解</li>
+      
+      <li>应用场景扩展至医疗影像、自动驾驶、智能客服</li>
+      
+    </ul>
+    
+  </div>
+  
+</div>
+        
+      </section>
+      
+      <section data-auto-animate data-timing="15.504">
+        
+        
+          <div class="slide-layout--chart">
+  <h2>趋势二：推理能力大幅提升</h2>
+  <div id="chart_slide_04" class="chart-container" style="width:100%; height:450px;"></div>
+</div>
+        
+      </section>
+      
+      <section data-auto-animate data-timing="17.28">
+        
+        
+          <h2>趋势三：开源模型追平闭源</h2>
+<div class="slide-grid--two-col">
+  <div>
+    
+    <h3>开源阵营崛起</h3>
+    <ul>
+      
+      <li>Meta Llama 3.1：405B参数，性能比肩GPT-4</li>
+      
+      <li>阿里Qwen 2.5：多语言支持，代码能力优异</li>
+      
+      <li>DeepSeek V3：性价比极高，推理成本降低80%</li>
+      
+      <li>社区生态活跃，支持私有化部署与定制</li>
+      
+    </ul>
+    
+  </div>
+  <div>
+    
+    <h3>闭源阵营优势</h3>
+    <ul>
+      
+      <li>OpenAI GPT-4o：多模态理解业界领先</li>
+      
+      <li>Anthropic Claude 3.5：安全对齐与长上下文</li>
+      
+      <li>Google Gemini：海量数据训练优势</li>
+      
+      <li>API服务稳定，持续迭代更新</li>
+      
+    </ul>
+    
+  </div>
+</div>
+        
+      </section>
+      
+      <section data-auto-animate data-timing="16.44">
+        
+        
+          <div class="slide-layout--chart">
+  <h2>开源模型市场份额增长</h2>
+  <div id="chart_slide_06" class="chart-container" style="width:100%; height:450px;"></div>
+</div>
+        
+      </section>
+      
+      <section data-auto-animate data-timing="17.736">
+        
+        
+          <div class="slide-layout--timeline">
+  <h2>趋势四：AI Agent落地进程</h2>
+  <div class="timeline">
+    
+      
+      <div class="milestone completed">
+        <div class="date">2023 Q4</div>
+        <div class="label">概念验证期</div>
+        <div class="desc">AutoGPT、BabyAGI等探索自主Agent可行性</div>
+      </div>
+      
+      <div class="milestone completed">
+        <div class="date">2024 Q2</div>
+        <div class="label">工具标准化</div>
+        <div class="desc">Function Calling成为行业标准，能力边界扩展</div>
+      </div>
+      
+      <div class="milestone completed">
+        <div class="date">2024 Q4</div>
+        <div class="label">多Agent协作</div>
+        <div class="desc">Multi-Agent系统在企业流程中试点应用</div>
+      </div>
+      
+      <div class="milestone ">
+        <div class="date">2025 Q1</div>
+        <div class="label">规模化落地</div>
+        <div class="desc">在客服、编程、数据分析场景规模商用</div>
+      </div>
+      
+      <div class="milestone ">
+        <div class="date">2025 Q4</div>
+        <div class="label">自主决策成熟</div>
+        <div class="desc">具备长期记忆与复杂规划的Agent全面普及</div>
+      </div>
+      
+    
+  </div>
+</div>
+        
+      </section>
+      
+      <section data-auto-animate data-timing="16.224">
+        
+        
+          
+<h2>AI Agent行业渗透率</h2>
+<div class="slide-grid--chart-text ">
+  
+  <div>
+    <div id="chart_slide_08" class="chart-container" style="width:100%; height:350px;"></div>
+  </div>
+  <div>
+    
+    <h3>从辅助工具到自主执行者</h3>
+    <ul>
+      
+      <li>Agent具备规划、记忆、工具调用三大核心能力</li>
+      
+      <li>从单一任务执行演进为复杂流程自动化</li>
+      
+      <li>2025年企业Agent部署率预计突破60%</li>
+      
+    </ul>
+    
+  </div>
+  
+</div>
+        
+      </section>
+      
+      <section data-auto-animate data-timing="16.488">
+        
+        
+          <div class="slide-layout--chart">
+  <h2>主流模型综合能力雷达图</h2>
+  <div id="chart_slide_09" class="chart-container" style="width:100%; height:450px;"></div>
+</div>
+        
+      </section>
+      
+      <section data-auto-animate data-timing="17.112">
+        
+        
+          <div class="slide-layout--bullets">
+  <h2>总结与展望</h2>
+  
+    
+      
+      <div class="group-heading">2025年AI发展展望</div>
+      
+      <ul>
+        
+        <li class="">技术融合：多模态感知与深度推理能力深度结合，向AGI迈进</li>
+        
+        <li class="">生态重构：开源模型在性能、成本、隐私保护上形成全面竞争力</li>
+        
+        <li class="">应用深化：AI Agent从辅助工具进化为自主决策的智能伙伴</li>
+        
+        <li class="">产业变革：大模型成为新型基础设施，重塑千行百业生产力</li>
+        
+      </ul>
+    
+  
+</div>
+        
+      </section>
+      
+      <section data-auto-animate data-timing="9.48">
+        
+        
+          <div class="slide-layout--title">
+  <h1>谢谢观看</h1>
+  
+  <div class="subtitle">Questions & Discussion</div>
+  
+  
+</div>
+        
+      </section>
+      
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/reveal.js@5/dist/reveal.js"></script>
+  <script>
+    Reveal.initialize({
+      hash: true,
+      autoSlide: 5000,
+      autoSlideStoppable: false,
+      loop: false,
+      controls: false,
+      progress: true,
+      transition: 'slide',
+      width: 1280,
+      height: 720,
+      margin: 0,
+    });
+
+    
+    // Initialize ECharts instances
+    
+    (function() {
+      var dom = document.getElementById('chart_slide_04');
+      if (dom) {
+        var c = echarts.init(dom);
+        c.setOption({"animation": true, "animationDuration": 1000, "legend": {"data": ["GPT-4", "o1-preview", "\u4eba\u7c7b\u57fa\u51c6"]}, "series": [{"data": [42, 67, 78, 85], "name": "GPT-4", "type": "bar"}, {"data": [83, 92, 89, 91], "name": "o1-preview", "type": "bar"}, {"data": [90, 85, 88, 92], "name": "\u4eba\u7c7b\u57fa\u51c6", "type": "bar"}], "title": {"left": "center", "text": "\u63a8\u7406\u6a21\u578b Benchmark \u5bf9\u6bd4\uff08\u51c6\u786e\u7387%\uff09"}, "tooltip": {"trigger": "axis"}, "xAxis": {"data": ["\u6570\u5b66\u7ade\u8d5b", "\u4ee3\u7801\u751f\u6210", "\u903b\u8f91\u63a8\u7406", "\u79d1\u5b66\u95ee\u7b54"], "type": "category"}, "yAxis": {"type": "value"}});
+      }
+    })();
+    
+    (function() {
+      var dom = document.getElementById('chart_slide_06');
+      if (dom) {
+        var c = echarts.init(dom);
+        c.setOption({"animation": true, "animationDuration": 1000, "legend": {"left": "left", "orient": "vertical"}, "series": [{"data": [{"name": "\u5f00\u6e90\u81ea\u6258\u7ba1", "value": 45}, {"name": "\u5f00\u6e90API\u670d\u52a1", "value": 25}, {"name": "\u95ed\u6e90\u5546\u4e1aAPI", "value": 25}, {"name": "\u6df7\u5408\u67b6\u6784", "value": 5}], "emphasis": {"itemStyle": {"shadowBlur": 10, "shadowColor": "rgba(0, 0, 0, 0.5)", "shadowOffsetX": 0}}, "name": "\u91c7\u7528\u6bd4\u4f8b", "radius": "55%", "type": "pie"}], "title": {"left": "center", "text": "2025\u5e74\u4f01\u4e1a\u5927\u6a21\u578b\u91c7\u7528\u5206\u5e03"}, "tooltip": {"trigger": "item"}});
+      }
+    })();
+    
+    (function() {
+      var dom = document.getElementById('chart_slide_08');
+      if (dom) {
+        var c = echarts.init(dom);
+        c.setOption({"animation": true, "animationDuration": 1000, "series": [{"data": [{"name": "\u667a\u80fd\u5ba2\u670d", "value": 85}, {"name": "\u4ee3\u7801\u7f16\u7a0b", "value": 70}, {"name": "\u6570\u636e\u5206\u6790", "value": 60}, {"name": "\u6d41\u7a0b\u81ea\u52a8\u5316", "value": 45}, {"name": "\u51b3\u7b56\u652f\u6301", "value": 30}], "left": "10%", "name": "\u4f01\u4e1a\u7ea7Agent\u573a\u666f\u6e17\u900f\u7387\uff08%\uff09", "type": "funnel", "width": "80%"}], "title": {"left": "center", "text": "\u4f01\u4e1a\u7ea7Agent\u573a\u666f\u6e17\u900f\u7387\uff08%\uff09"}, "tooltip": {"formatter": "{a} \u003cbr/\u003e{b} : {c}%", "trigger": "item"}});
+      }
+    })();
+    
+    (function() {
+      var dom = document.getElementById('chart_slide_09');
+      if (dom) {
+        var c = echarts.init(dom);
+        c.setOption({"animation": true, "animationDuration": 1000, "radar": {"indicator": [{"max": 100, "name": "\u8bed\u8a00\u7406\u89e3"}, {"max": 100, "name": "\u4ee3\u7801\u751f\u6210"}, {"max": 100, "name": "\u6570\u5b66\u63a8\u7406"}, {"max": 100, "name": "\u591a\u6a21\u6001"}, {"max": 100, "name": "\u5de5\u5177\u4f7f\u7528"}, {"max": 100, "name": "\u5b89\u5168\u6027"}]}, "series": [{"data": [{"name": "GPT-4o", "value": [95, 90, 85, 92, 88, 85]}, {"name": "Claude 3.5", "value": [93, 88, 82, 85, 85, 95]}, {"name": "Llama 3.1", "value": [90, 85, 80, 82, 82, 80]}], "type": "radar"}], "title": {"left": "center", "text": "\u4e3b\u6d41\u5927\u6a21\u578b\u516d\u7ef4\u80fd\u529b\u8bc4\u4f30"}, "tooltip": {}});
+      }
+    })();
+    
+    
+
+    // Ready signal for Playwright recording
+    window.__REVEAL_READY__ = false;
+    Reveal.on('ready', function() { window.__REVEAL_READY__ = true; });
+  </script>
+</body>
+</html>
