@@ -114,23 +114,27 @@ fi
 # ============================================================================
 if [[ "$DO_FRONTEND" == true ]]; then
     step "步骤 3: 构建前端"
-    cd "$INSTALL_DIR/web"
+    if command -v node &>/dev/null && command -v npm &>/dev/null; then
+        cd "$INSTALL_DIR/web"
 
-    if npm install; then
-        success "前端依赖安装完成"
+        if npm install; then
+            success "前端依赖安装完成"
+        else
+            error "npm install 失败"
+            exit 1
+        fi
+
+        if npm run build; then
+            success "前端构建完成"
+        else
+            error "前端构建失败"
+            exit 1
+        fi
+
+        cd "$INSTALL_DIR"
     else
-        error "npm install 失败"
-        exit 1
+        info "未检测到 Node.js / npm，使用 git 仓库中预构建的前端资源"
     fi
-
-    if npm run build; then
-        success "前端构建完成"
-    else
-        error "前端构建失败"
-        exit 1
-    fi
-
-    cd "$INSTALL_DIR"
 else
     step "步骤 3: 跳过前端构建 (--backend-only)"
 fi

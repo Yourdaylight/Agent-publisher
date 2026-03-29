@@ -132,9 +132,12 @@ check_node_version() {
 }
 
 MISSING=0
+HAS_NODE=true
 check_python_version || MISSING=1
-check_node_version || MISSING=1
-check_command npm "npm" "随 Node.js 一起安装" || MISSING=1
+check_node_version || { HAS_NODE=false; warn "无 Node.js — 将使用 git 仓库中预构建的前端资源"; }
+if [[ "$HAS_NODE" == true ]]; then
+    check_command npm "npm" "随 Node.js 一起安装" || { HAS_NODE=false; warn "无 npm — 将使用 git 仓库中预构建的前端资源"; }
+fi
 check_command uv "uv" "curl -LsSf https://astral.sh/uv/install.sh | sh" || MISSING=1
 check_command git "git" "sudo apt install git (Ubuntu) / brew install git (macOS)" || MISSING=1
 
@@ -277,28 +280,38 @@ else
 fi
 
 # ============================================================================
-# 步骤 4: 构建前端
+# 步骤 4: 构建前端（可跳过）
 # ============================================================================
 step "步骤 4/6: 构建前端"
-info "安装前端依赖并构建..."
 
-cd "$INSTALL_DIR/web"
-if npm install; then
-    success "前端依赖安装完成"
+if [[ "$HAS_NODE" == true ]]; then
+    info "安装前端依赖并构建..."
+
+    cd "$INSTALL_DIR/web"
+    if npm install; then
+        success "前端依赖安装完成"
+    else
+        error "npm install 失败"
+        warn "请检查 Node.js 版本和网络连接"
+        exit 1
+    fi
+
+    if npm run build; then
+        success "前端构建完成"
+    else
+        error "前端构建失败"
+        warn "请查看上方的错误信息，修复后重新运行 install.sh"
+        exit 1
+    fi
+    cd "$INSTALL_DIR"
+elif [[ -f "$INSTALL_DIR/agent_publisher/static/index.html" ]]; then
+    info "未检测到 Node.js / npm，使用 git 仓库中预构建的前端资源"
+    success "前端静态文件已就绪: agent_publisher/static/"
 else
-    error "npm install 失败"
-    warn "请检查 Node.js 版本和网络连接"
+    error "未检测到 Node.js 且 git 仓库中无预构建前端资源"
+    warn "请安装 Node.js >= 18 后重试，或确保 agent_publisher/static/ 目录存在"
     exit 1
 fi
-
-if npm run build; then
-    success "前端构建完成"
-else
-    error "前端构建失败"
-    warn "请查看上方的错误信息，修复后重新运行 install.sh"
-    exit 1
-fi
-cd "$INSTALL_DIR"
 
 # ============================================================================
 # 步骤 5: 生成并安装 systemd 服务
