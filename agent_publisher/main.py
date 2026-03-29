@@ -8,6 +8,8 @@ from pathlib import Path
 
 from fastapi import FastAPI, Depends, Request, Response
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+
+from agent_publisher.version import get_version_info
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -118,10 +120,10 @@ async def lifespan(app: FastAPI):
     logger.info("Scheduler stopped.")
 
 
-app = FastAPI(title="Agent Publisher", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="Agent Publisher", version=get_version_info()["version"], lifespan=lifespan)
 
 # Public routes (no auth required)
-PUBLIC_PREFIXES = ("/api/auth/", "/api/skills/auth", "/api/skills/setup-guide", "/api/skill-package/", "/assets/", "/favicon.ico")
+PUBLIC_PREFIXES = ("/api/auth/", "/api/version", "/api/skills/auth", "/api/skills/setup-guide", "/api/skill-package/", "/assets/", "/favicon.ico")
 
 
 @app.middleware("http")
@@ -215,6 +217,12 @@ app.include_router(extensions_router)
 # Discover and register extensions (graceful degradation: failures only logged)
 extension_registry.discover_and_load()
 extension_registry.register_all(app)
+
+
+@app.get("/api/version")
+async def version_info():
+    """Public endpoint returning application version and git commit."""
+    return get_version_info()
 
 
 @app.get("/api/stats")
@@ -320,7 +328,8 @@ if STATIC_DIR.is_dir():
 else:
     @app.get("/")
     async def root():
-        return {"name": "Agent Publisher", "version": "0.1.0"}
+        info = get_version_info()
+        return {"name": "Agent Publisher", "version": info["version"], "commit": info["commit"]}
 
 
 def start():

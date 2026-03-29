@@ -70,6 +70,9 @@
           <template #icon><t-icon name="poweroff" /></template>
           退出登录
         </t-button>
+        <div v-if="versionDisplay" style="padding: 6px 0 0; font-size: 11px; color: var(--td-text-color-placeholder); text-align: center">
+          {{ versionDisplay }}
+        </div>
       </div>
     </t-aside>
     <t-layout>
@@ -88,13 +91,24 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref, onMounted } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { MessagePlugin } from 'tdesign-vue-next';
-import { getUserInfo, clearAuth } from '@/api';
+import { getUserInfo, clearAuth, getVersion } from '@/api';
 
 const router = useRouter();
 const route = useRoute();
+
+const versionDisplay = ref('');
+
+onMounted(async () => {
+  try {
+    const res = await getVersion();
+    versionDisplay.value = res.data?.display || '';
+  } catch {
+    // ignore
+  }
+});
 
 const isLoginPage = computed(() => route.path === '/login');
 const activeMenu = computed(() => route.path);

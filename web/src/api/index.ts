@@ -56,6 +56,9 @@ export const clearAuth = () => {
   localStorage.removeItem('ap_user');
 };
 
+// Version
+export const getVersion = () => http.get('/version');
+
 // Settings
 export const getSettings = () => http.get('/settings');
 export const updateLLMSettings = (data: any) => http.put('/settings/llm', data);
