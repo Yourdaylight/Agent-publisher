@@ -90,7 +90,8 @@
         <p><strong>1.</strong> 在「基本配置」页面找到「IP白名单」，点击「查看」或「修改」</p>
         <p><strong>2.</strong> 将以下服务器公网 IP 添加到白名单中：</p>
         <t-card :bordered="true" style="background: var(--td-bg-color-container-hover); margin: 8px 0 16px">
-          <code style="font-size: 14px; user-select: all">43.132.178.232</code>
+          <code v-if="serverIp" style="font-size: 14px; user-select: all">{{ serverIp }}</code>
+          <t-loading v-else size="small" />
         </t-card>
         <div style="margin-top: 12px; border: 1px solid var(--td-border-level-2-color); border-radius: 8px; overflow: hidden">
           <img :src="'/guide-images/step3-appid-secret.png'" alt="IP白名单位置" style="width: 100%; display: block" />
@@ -189,7 +190,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { generateForAgent, getTask, getArticles } from '@/api'
 import AccountForm from '@/components/AccountForm.vue'
 import AgentForm from '@/components/AgentForm.vue'
@@ -200,6 +201,17 @@ const createdAgent = ref<any>(null)
 const generating = ref(false)
 const generateTask = ref<any>(null)
 const generatedArticle = ref<any>(null)
+const serverIp = ref('')
+
+onMounted(async () => {
+  try {
+    const res = await fetch('/api/server-info')
+    const data = await res.json()
+    serverIp.value = data.server_host || '（无法获取，请检查服务端配置）'
+  } catch {
+    serverIp.value = '（无法获取，请检查服务端配置）'
+  }
+})
 
 const accountTypes = [
   { type: '订阅号', frequency: '每天 1 次', auth: '个人/企业', api: '基础接口' },

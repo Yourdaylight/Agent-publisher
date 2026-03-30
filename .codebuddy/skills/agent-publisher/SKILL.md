@@ -18,7 +18,7 @@ Manage WeChat Official Accounts and AI-powered content agents. Authenticate with
 
 ## Prerequisites
 
-- **Agent Publisher backend** running (default: `http://43.132.178.232:9099`)
+- **Agent Publisher backend** running (default: `http://<your-server-ip>:9099`)
 - Your email must be whitelisted on the backend
 - `uv` installed (for running the bundled Python script)
 
@@ -26,7 +26,7 @@ Manage WeChat Official Accounts and AI-powered content agents. Authenticate with
 
 The user provides two pieces of info:
 1. **Email** — their whitelisted email address
-2. **Backend URL** — (optional, defaults to `http://43.132.178.232:9099`)
+2. **Backend URL** — (optional, defaults to `http://<your-server-ip>:9099`)
 
 ### Step 1: Authenticate
 
@@ -187,7 +187,7 @@ The `--test-mode` flag prints the full structured JSON response, including per-a
 You can set `AP_URL` and `AP_EMAIL` to skip passing `--url` and `--email` every time:
 
 ```bash
-export AP_URL="http://43.132.178.232:9099"
+export AP_URL="http://<your-server-ip>:9099"
 export AP_EMAIL="user@example.com"
 uv run {baseDir}/scripts/agent_publisher.py auth
 ```

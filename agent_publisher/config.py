@@ -37,8 +37,34 @@ class Settings(BaseSettings):
     port: int = 9099
     debug: bool = False
 
+    # Public-facing server host for display (WeChat IP whitelist, guide page, etc.)
+    # Can be a domain (e.g. "publisher.example.com") or IP (e.g. "1.2.3.4").
+    # If empty, auto-detected from outbound socket.
+    server_host: str = ""
+
     def get_jwt_secret(self) -> str:
         return self.jwt_secret or f"jwt-{self.access_key}-secret"
+
+    def get_server_host(self) -> str:
+        """Return the public-facing server host (domain or IP).
+
+        Priority:
+          1. Explicit ``server_host`` from .env / environment variable ``SERVER_HOST``
+          2. Legacy ``server_ip`` env var (backward compat)
+          3. Auto-detect outbound IP via UDP socket
+        """
+        if self.server_host:
+            return self.server_host
+        import socket
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.settimeout(2)
+            s.connect(("8.8.8.8", 80))
+            ip = s.getsockname()[0]
+            s.close()
+            return ip
+        except Exception:
+            return "127.0.0.1"
 
     def get_email_whitelist(self) -> set[str]:
         """Return the set of whitelisted emails (lowered)."""

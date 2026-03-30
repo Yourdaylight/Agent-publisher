@@ -211,9 +211,9 @@ export const addGroupMember = (groupId: number, data: { email: string }) =>
 export const removeGroupMember = (groupId: number, email: string) =>
   http.delete(`/groups/${groupId}/members/${encodeURIComponent(email)}`);
 
-// Slideshow (PPT + Video generation)
-export const generateSlideshow = (articleId: number, withTts: boolean = true, skipReview: boolean = false) =>
-  http.post('/extensions/slideshow/generate', { article_id: articleId, with_tts: withTts, skip_review: skipReview });
+// Slideshow (Chapter-parallel HTML generation)
+export const generateSlideshow = (articleId: number, skipReview: boolean = false) =>
+  http.post('/extensions/slideshow/generate', { article_id: articleId, skip_review: skipReview });
 
 export const getSlideshowStatus = (taskId: number) =>
   http.get(`/extensions/slideshow/status/${taskId}`);
@@ -221,37 +221,15 @@ export const getSlideshowStatus = (taskId: number) =>
 export const getSlideshowDraft = (taskId: number) =>
   http.get(`/extensions/slideshow/draft/${taskId}`);
 
-export const confirmSlideshowDraft = (taskId: number, slides: any[], withTts: boolean = true) =>
-  http.post(`/extensions/slideshow/draft/${taskId}/confirm`, { slides, with_tts: withTts });
+export const confirmSlideshowDraft = (taskId: number, orchestratorOutput?: any) =>
+  http.post(`/extensions/slideshow/draft/${taskId}/confirm`, orchestratorOutput ? { orchestrator_output: orchestratorOutput } : {});
 
-export const skipSlideshowDraft = (taskId: number, withTts: boolean = true) =>
-  http.post(`/extensions/slideshow/draft/${taskId}/skip`, null, { params: { with_tts: withTts } });
+export const skipSlideshowDraft = (taskId: number) =>
+  http.post(`/extensions/slideshow/draft/${taskId}/skip`);
 
 export const getSlideshowPreviewUrl = (taskId: number): string => {
   const token = localStorage.getItem('ap_token') || '';
   return `/api/extensions/slideshow/preview/${taskId}?token=${encodeURIComponent(token)}`;
-};
-
-export const downloadSlideshowVideo = (taskId: number): void => {
-  const token = localStorage.getItem('ap_token') || '';
-  const url = `/api/extensions/slideshow/download/${taskId}?token=${encodeURIComponent(token)}`;
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = '';
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-};
-
-export const downloadSlideshowSubtitle = (taskId: number): void => {
-  const token = localStorage.getItem('ap_token') || '';
-  const url = `/api/extensions/slideshow/subtitle/${taskId}?token=${encodeURIComponent(token)}`;
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = '';
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
 };
 
 export default http;

@@ -229,6 +229,11 @@ echo ""
 CFG_ADMIN_EMAILS=$(prompt_with_default "管理员邮箱 (多个用逗号分隔)" "admin@example.com" "ADMIN_EMAILS")
 CFG_EMAIL_WHITELIST=$(prompt_with_default "邮箱白名单 (多个用逗号分隔，可选)" "" "EMAIL_WHITELIST")
 
+# --- Server Host ---
+echo ""
+info "公网访问配置"
+CFG_SERVER_HOST=$(prompt_with_default "服务器公网域名或IP (用于微信白名单指引，留空自动检测)" "" "SERVER_HOST")
+
 # --- 生成 .env ---
 info "生成 .env 配置文件..."
 
@@ -256,6 +261,9 @@ JWT_SECRET=$CFG_JWT_SECRET
 HOST=$CFG_HOST
 PORT=$CFG_PORT
 DEBUG=false
+
+# Public-facing host (domain or IP, for WeChat whitelist guide)
+SERVER_HOST=$CFG_SERVER_HOST
 
 # User Authentication
 EMAIL_WHITELIST=$CFG_EMAIL_WHITELIST
@@ -311,6 +319,13 @@ else
     error "未检测到 Node.js 且 git 仓库中无预构建前端资源"
     warn "请安装 Node.js >= 18 后重试，或确保 agent_publisher/static/ 目录存在"
     exit 1
+fi
+
+# Copy guide images into static directory
+if [[ -d "$INSTALL_DIR/docs/images" ]]; then
+    mkdir -p "$INSTALL_DIR/agent_publisher/static/guide-images"
+    cp -f "$INSTALL_DIR/docs/images/"*.png "$INSTALL_DIR/agent_publisher/static/guide-images/" 2>/dev/null || true
+    success "引导图片已同步到 static/guide-images/"
 fi
 
 # ============================================================================

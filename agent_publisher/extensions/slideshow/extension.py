@@ -1,4 +1,8 @@
-"""Slideshow extension — generate reveal.js presentations from articles."""
+"""Slideshow extension — generate chapter-parallel HTML presentations from articles.
+
+v3: No Playwright, no ffmpeg, no TTS dependencies.
+Outputs independent chapter HTML files + browser player.
+"""
 from __future__ import annotations
 
 from agent_publisher.extensions._base import Extension
@@ -7,8 +11,8 @@ from agent_publisher.extensions._base import Extension
 class SlideshowExtension(Extension):
     name = "slideshow"
     label = "演示文稿"
-    description = "从文章内容自动生成 reveal.js 演示文稿，支持在线预览和视频导出"
-    version = "0.1.0"
+    description = "从文章内容自动生成章节化 HTML 演示文稿，支持在线预览和离线浏览"
+    version = "0.3.0"
 
     article_actions = [
         {
@@ -20,21 +24,15 @@ class SlideshowExtension(Extension):
     ]
 
     def check_dependencies(self) -> tuple[bool, str]:
-        """Check that playwright is importable."""
+        """No heavy dependencies required in v3."""
         try:
-            import playwright  # noqa: F401
+            import jinja2  # noqa: F401
         except ImportError:
-            return False, "Missing playwright (install with: uv pip install -e '.[slideshow]')"
-
-        try:
-            import edge_tts  # noqa: F401
-        except ImportError:
-            return False, "Missing edge-tts (install with: uv pip install -e '.[tts]')"
+            return False, "Missing jinja2 (install with: uv pip install jinja2)"
 
         return True, ""
 
     def register_routes(self, app) -> None:  # noqa: ANN001
-        # Lazy import to avoid pulling in heavy deps at startup
         from agent_publisher.extensions.slideshow.routes import router
 
         app.include_router(router)

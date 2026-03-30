@@ -17,6 +17,10 @@ export default defineConfig({
         target: 'http://localhost:9099',
         changeOrigin: true,
       },
+      '/guide-images': {
+        target: 'http://localhost:9099',
+        changeOrigin: true,
+      },
     },
   },
   build: {

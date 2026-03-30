@@ -52,7 +52,6 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).parent / "static"
-GUIDE_IMAGES_DIR = Path(__file__).parent.parent / "docs" / "images"
 SKILLS_DIR = Path(__file__).parent.parent / "skills"
 
 
@@ -123,7 +122,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Agent Publisher", version=get_version_info()["version"], lifespan=lifespan)
 
 # Public routes (no auth required)
-PUBLIC_PREFIXES = ("/api/auth/", "/api/version", "/api/skills/auth", "/api/skills/setup-guide", "/api/skill-package/", "/assets/", "/favicon.ico")
+PUBLIC_PREFIXES = ("/api/auth/", "/api/version", "/api/skills/auth", "/api/skills/setup-guide", "/api/skill-package/", "/api/server-info", "/assets/", "/favicon.ico")
 
 
 @app.middleware("http")
@@ -151,8 +150,9 @@ async def auth_middleware(request: Request, call_next) -> Response:
     # Slideshow preview/download/subtitle support ?token= querystring auth (for iframe src)
     SLIDESHOW_TOKEN_PATHS = (
         "/api/extensions/slideshow/preview/",
-        "/api/extensions/slideshow/download/",
-        "/api/extensions/slideshow/subtitle/",
+        "/api/extensions/slideshow/chapter/",
+        "/api/extensions/slideshow/timeline/",
+        "/api/extensions/slideshow/status/",
     )
     if any(path.startswith(p) for p in SLIDESHOW_TOKEN_PATHS):
         auth_header = request.headers.get("authorization", "")
@@ -223,6 +223,23 @@ extension_registry.register_all(app)
 async def version_info():
     """Public endpoint returning application version and git commit."""
     return get_version_info()
+
+
+@app.get("/api/server-info")
+async def server_info(request: Request):
+    """Public endpoint returning server host for client-side display.
+
+    Uses the configured server_host (domain or IP), or auto-detects.
+    Falls back to the request's Host header if auto-detection returns loopback.
+    """
+    host = settings.get_server_host()
+    # If auto-detect returned loopback, try to extract from the Host header
+    if host in ("127.0.0.1", "0.0.0.0", "localhost", "::1"):
+        host_header = request.headers.get("host", "")
+        host_part = host_header.split(":")[0] if host_header else ""
+        if host_part and host_part not in ("localhost", "127.0.0.1", "0.0.0.0"):
+            host = host_part
+    return {"server_host": host, "port": settings.port}
 
 
 @app.get("/api/stats")
@@ -309,10 +326,6 @@ async def download_skill_package():
         headers={"Content-Disposition": "attachment; filename=agent-publisher-skill.zip"},
     )
 
-
-# Serve guide images (setup screenshots) from docs/images/
-if GUIDE_IMAGES_DIR.is_dir():
-    app.mount("/guide-images", StaticFiles(directory=GUIDE_IMAGES_DIR), name="guide-images")
 
 # Serve static files (Vue build output) if the directory exists
 if STATIC_DIR.is_dir():

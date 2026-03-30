@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>2025年AI大模型发展趋势</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #0a0a0a; font-family: system-ui, sans-serif; }
+
+    /* ---- Player container ---- */
+    .player {
+      position: relative; width: 100%; height: 100%;
+      display: flex; flex-direction: column;
+    }
+
+    /* ---- Stage: scaled 1920x1080 iframe ---- */
+    .stage {
+      flex: 1; position: relative; overflow: hidden;
+      display: flex; align-items: center; justify-content: center;
+      background: #000;
+    }
+    .stage iframe {
+      border: none;
+      width: 1920px; height: 1080px;
+      transform-origin: center center;
+    }
+
+    /* ---- Controls bar ---- */
+    .controls {
+      height: 56px; background: #1a1a1a;
+      display: flex; align-items: center; gap: 16px;
+      padding: 0 20px; color: #fff; font-size: 14px;
+      user-select: none;
+    }
+    .controls button {
+      background: none; border: none; color: #fff;
+      font-size: 20px; cursor: pointer; padding: 4px 8px;
+      border-radius: 4px; transition: background 0.2s;
+    }
+    .controls button:hover { background: rgba(255,255,255,0.15); }
+    .controls button:disabled { opacity: 0.3; cursor: default; }
+
+    /* ---- Progress bar ---- */
+    .progress-bar {
+      flex: 1; height: 6px; background: rgba(255,255,255,0.15);
+      border-radius: 3px; cursor: pointer; position: relative;
+    }
+    .progress-fill {
+      height: 100%; background: #3182ce; border-radius: 3px;
+      transition: width 0.3s ease;
+    }
+    .progress-chapters {
+      position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+      display: flex;
+    }
+    .progress-chapter {
+      height: 100%; border-right: 2px solid rgba(255,255,255,0.3);
+    }
+    .progress-chapter:last-child { border-right: none; }
+
+    /* ---- Chapter list ---- */
+    .chapter-info { white-space: nowrap; }
+
+    /* ---- Fullscreen ---- */
+    .player:-webkit-full-screen .controls { position: fixed; bottom: 0; left: 0; right: 0; z-index: 100; }
+    .player:fullscreen .controls { position: fixed; bottom: 0; left: 0; right: 0; z-index: 100; }
+
+    /* ---- Speaker notes panel (hidden by default) ---- */
+    .notes-panel {
+      display: none; position: fixed; bottom: 56px; left: 0; right: 0;
+      background: rgba(0,0,0,0.9); color: #ccc; padding: 16px 24px;
+      font-size: 16px; line-height: 1.6; max-height: 200px; overflow-y: auto;
+      z-index: 50;
+    }
+    .notes-panel.visible { display: block; }
+  </style>
+</head>
+<body>
+  <div class="player" id="player">
+    <div class="stage" id="stage">
+      <!-- iframe is injected by JS -->
+    </div>
+
+    <div class="controls">
+      <button id="btn-prev" title="上一章">&laquo;</button>
+      <button id="btn-play" title="播放/暂停">&#9654;</button>
+      <button id="btn-next" title="下一章">&raquo;</button>
+
+      <div class="progress-bar" id="progress-bar">
+        <div class="progress-fill" id="progress-fill" style="width:0%"></div>
+        <div class="progress-chapters" id="progress-chapters"></div>
+      </div>
+
+      <span class="chapter-info" id="chapter-info">1 / 6</span>
+
+      <button id="btn-notes" title="口播脚本">&#128196;</button>
+      <button id="btn-fullscreen" title="全屏">&#x26F6;</button>
+    </div>
+
+    <div class="notes-panel" id="notes-panel"></div>
+  </div>
+
+  <script>
+    (function() {
+      var chapters = [{"chapter_id": "ch_01", "title": "2025：AI大模型的奇点时刻", "slide_count": 1, "html_file": "chapters/ch_01.html", "notes": "2025年，AI大模型迎来奇点时刻。四大技术趋势将重塑产业，从技术突破走向生态变革。"}, {"chapter_id": "ch_02", "title": "背景：从理解到创造的范式转移", "slide_count": 2, "html_file": "chapters/ch_02.html", "notes": "承接上文，大模型正从理解走向创造，这不仅是技术升级，更是根本性的范式转移。 我们具体来看这次转移的两个维度：左边是能力边界的突破，大模型不再局限于文本，而是能同时处理图像、音频、视频；右边是生态变革，技术越来越普惠，商业应用也在全面爆发。"}, {"chapter_id": "ch_03", "title": "技术突破：多模态与深度推理", "slide_count": 3, "html_file": "chapters/ch_03.html", "notes": "我们进入第三章。如果说前两章讲的是背景铺垫，那么这一章要讲的是真正的技术拐点。2025年最引人注目的两大突破就摆在我们面前：多模态能力的全面爆发，以及深度推理能力的质的飞跃。 数据显示，推理模型在复杂数学任务上准确率达到92%，首次超越人类。与此同时，多模态能力全面爆发，AI开始具备真正的全感官理解能力。 这种深度推理到底意味着什么？思维链技术让AI学会分步思考，过程透明可追溯。在科学计算等严肃场景，AI已开始展现超越人类的潜力。"}, {"chapter_id": "ch_04", "title": "生态重构：开源崛起与Agent落地", "slide_count": 3, "html_file": "chapters/ch_04.html", "notes": "我们进入第四章。如果说前面的技术突破是底层能力的积累，那么接下来要讲的生态重构，正在彻底改写AI产业的竞争规则。 值得注意的是，开源模型仅用两年就将性能差距从35分缩小到几乎为零。Llama、Qwen、DeepSeek们正在打破闭源垄断。 开源打破了技术垄断，Agent则改变了应用形态。左边是三大模型的集体突围，右边是数字员工正在企业流程中规模化落地，实现真正的自动化。"}, {"chapter_id": "ch_05", "title": "关键洞察：技术民主化时代来临", "slide_count": 2, "html_file": "chapters/ch_05.html", "notes": "我们来看关键转折。过去顶尖AI被少数巨头垄断，但2025年，Meta的Llama、阿里Qwen、DeepSeek等开源模型，性能已快速追赶上闭源大模型。这意味着技术门槛被抹平，创新不再需要天价投入，技术民主化时代真正来临。 第二个洞察更重要。Agent正在从被动工具，升级为企业数字化的新入口。过去是人找软件，现在Agent能主动思考、自主决策，完成复杂业务流程。这标志着AI正式从工具变为数字员工，企业数字化转型的底层逻辑将被彻底重构。"}, {"chapter_id": "ch_06", "title": "立即行动：拥抱AI新纪元", "slide_count": 1, "html_file": "chapters/ch_06.html", "notes": "好，今天最后一个章节。不要只停留在认知层面，现在就要行动。建议你做三件事：梳理多模态应用场景、部署Agent自动化流程、构建AI竞争壁垒。2025年的AI转型窗口期不等人，谁先落地谁就能领跑行业。感谢观看，我们下期再见！"}];
+      var currentIdx = 0;
+      var isPlaying = true;
+      var iframe = null;
+
+      var stage = document.getElementById('stage');
+      var btnPrev = document.getElementById('btn-prev');
+      var btnPlay = document.getElementById('btn-play');
+      var btnNext = document.getElementById('btn-next');
+      var btnFS = document.getElementById('btn-fullscreen');
+      var btnNotes = document.getElementById('btn-notes');
+      var progressFill = document.getElementById('progress-fill');
+      var progressBar = document.getElementById('progress-bar');
+      var progressChapters = document.getElementById('progress-chapters');
+      var chapterInfo = document.getElementById('chapter-info');
+      var notesPanel = document.getElementById('notes-panel');
+
+      // Build progress chapter dividers
+      var totalSlides = chapters.reduce(function(s, c) { return s + c.slide_count; }, 0);
+      chapters.forEach(function(ch) {
+        var div = document.createElement('div');
+        div.className = 'progress-chapter';
+        div.style.width = (ch.slide_count / totalSlides * 100) + '%';
+        progressChapters.appendChild(div);
+      });
+
+      function scaleIframe() {
+        if (!iframe) return;
+        var sw = stage.clientWidth;
+        var sh = stage.clientHeight;
+        var scale = Math.min(sw / 1920, sh / 1080);
+        iframe.style.transform = 'scale(' + scale + ')';
+      }
+
+      function loadChapter(idx) {
+        if (idx < 0 || idx >= chapters.length) return;
+        currentIdx = idx;
+
+        // Remove old iframe
+        if (iframe) { stage.removeChild(iframe); }
+
+        iframe = document.createElement('iframe');
+        iframe.src = chapters[idx].html_file;
+        iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin');
+        stage.appendChild(iframe);
+
+        scaleIframe();
+        updateUI();
+
+        // Send play command after load
+        iframe.addEventListener('load', function() {
+          if (isPlaying) {
+            iframe.contentWindow.postMessage({type: 'play'}, '*');
+          } else {
+            iframe.contentWindow.postMessage({type: 'pause'}, '*');
+          }
+        });
+      }
+
+      function updateUI() {
+        chapterInfo.textContent = (currentIdx + 1) + ' / ' + chapters.length;
+        btnPrev.disabled = currentIdx === 0;
+        btnNext.disabled = currentIdx === chapters.length - 1;
+        btnPlay.innerHTML = isPlaying ? '&#10074;&#10074;' : '&#9654;';
+
+        // Update progress
+        var completed = 0;
+        for (var i = 0; i < currentIdx; i++) completed += chapters[i].slide_count;
+        progressFill.style.width = (completed / totalSlides * 100) + '%';
+
+        // Update notes
+        var ch = chapters[currentIdx];
+        notesPanel.textContent = ch.notes || '';
+      }
+
+      // Listen for chapter-complete from iframe
+      window.addEventListener('message', function(e) {
+        if (e.data && e.data.type === 'chapter-complete') {
+          if (currentIdx < chapters.length - 1) {
+            loadChapter(currentIdx + 1);
+          } else {
+            // All done — update progress to 100%
+            progressFill.style.width = '100%';
+            isPlaying = false;
+            updateUI();
+          }
+        }
+      });
+
+      btnPrev.addEventListener('click', function() { loadChapter(currentIdx - 1); });
+      btnNext.addEventListener('click', function() { loadChapter(currentIdx + 1); });
+
+      btnPlay.addEventListener('click', function() {
+        isPlaying = !isPlaying;
+        if (iframe && iframe.contentWindow) {
+          iframe.contentWindow.postMessage({type: isPlaying ? 'play' : 'pause'}, '*');
+        }
+        updateUI();
+      });
+
+      btnFS.addEventListener('click', function() {
+        var el = document.getElementById('player');
+        if (el.requestFullscreen) el.requestFullscreen();
+        else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+      });
+
+      btnNotes.addEventListener('click', function() {
+        notesPanel.classList.toggle('visible');
+      });
+
+      // Click on progress bar to jump to chapter
+      progressBar.addEventListener('click', function(e) {
+        var rect = progressBar.getBoundingClientRect();
+        var pct = (e.clientX - rect.left) / rect.width;
+        var cumSlides = 0;
+        for (var i = 0; i < chapters.length; i++) {
+          cumSlides += chapters[i].slide_count;
+          if (cumSlides / totalSlides >= pct) {
+            loadChapter(i);
+            return;
+          }
+        }
+      });
+
+      // Keyboard
+      document.addEventListener('keydown', function(e) {
+        if (e.key === 'ArrowRight') { loadChapter(currentIdx + 1); }
+        if (e.key === 'ArrowLeft') { loadChapter(currentIdx - 1); }
+        if (e.key === ' ') { btnPlay.click(); e.preventDefault(); }
+        if (e.key === 'f' || e.key === 'F') { btnFS.click(); }
+        if (e.key === 'n' || e.key === 'N') { btnNotes.click(); }
+      });
+
+      window.addEventListener('resize', scaleIframe);
+
+      // Start
+      loadChapter(0);
+    })();
+  </script>
+</body>
+</html>

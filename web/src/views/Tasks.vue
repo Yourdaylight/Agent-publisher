@@ -44,9 +44,6 @@
           <t-button size="small" theme="primary" @click="openSlideshowPreviewById(row)">
             🎬 在线预览
           </t-button>
-          <t-button size="small" @click="downloadVideoById(row)">
-            ⬇️ 下载视频
-          </t-button>
         </div>
         <span v-else-if="row.result" style="font-size: 12px; color: var(--td-text-color-secondary)">
           {{ resultSummary(row) }}
@@ -84,12 +81,6 @@
             <t-button theme="primary" @click="openSlideshowPreviewById(detailTask)">
               在线预览演示文稿
             </t-button>
-            <t-button @click="downloadVideoById(detailTask)">
-              下载视频
-            </t-button>
-            <t-button v-if="detailTask.result?.srt_path" variant="text" @click="downloadSubtitleById(detailTask)">
-              下载字幕（SRT）
-            </t-button>
           </div>
         </div>
 
@@ -101,7 +92,7 @@
             <div class="step-line" v-if="idx < detailSteps.length - 1" />
             <div class="step-content">
               <div style="display: flex; align-items: center; gap: 8px">
-                <strong>{{ stepNameMap[step.name] || step.name }}</strong>
+                <strong>{{ formatStepName(step.name) }}</strong>
                 <t-tag size="small" :theme="step.status === 'success' ? 'success' : step.status === 'failed' ? 'danger' : 'warning'" variant="light">
                   {{ step.status === 'success' ? '完成' : step.status === 'failed' ? '失败' : '进行中' }}
                 </t-tag>
@@ -115,9 +106,11 @@
                 <template v-else-if="step.name === 'image_generate'">{{ step.output.has_image ? '封面图已生成' : '封面图生成失败' }}</template>
                 <template v-else-if="step.name === 'save_article'">文章已保存，ID: {{ step.output.article_id }}</template>
                 <template v-else-if="step.name === 'llm_outline'">生成了 {{ step.output.slide_count }} 张幻灯片大纲</template>
+                <template v-else-if="step.name === 'orchestrator'">拆分为 {{ step.output.chapter_count }} 个章节，共 {{ step.output.total_slides }} 张幻灯片</template>
+                <template v-else-if="step.name && step.name.startsWith('chapter_')">生成了 {{ step.output.slide_count }} 张幻灯片</template>
+                <template v-else-if="step.name === 'assembly'">组装了 {{ step.output.chapter_count }} 个章节的 HTML 演示文稿</template>
                 <template v-else-if="step.name === 'tts_generate'">语音时长: {{ Math.round((step.output.duration_ms || 0) / 1000) }} 秒</template>
                 <template v-else-if="step.name === 'build_html'">演示文稿 HTML 构建完成</template>
-                <template v-else-if="step.name === 'video_export'">视频录制完成</template>
                 <template v-else>{{ JSON.stringify(step.output).slice(0, 200) }}</template>
               </div>
             </div>
@@ -162,14 +155,13 @@
         <t-loading v-if="previewLoading" style="position: absolute; inset: 0; display: flex; align-items: center; justify-content: center" />
         <div v-if="previewError" style="padding: 60px; text-align: center">
           <t-result theme="error" title="预览加载失败" :description="previewError" />
-          <t-button style="margin-top: 16px" @click="downloadVideoById(previewTask)">下载视频</t-button>
         </div>
         <iframe
           v-else
           :src="previewUrl"
           style="width: 100%; height: 100%; border: none; border-radius: 8px"
           @load="previewLoading = false"
-          @error="previewError = '演示文稿加载失败，请下载视频查看'; previewLoading = false"
+          @error="previewError = '演示文稿加载失败'; previewLoading = false"
         />
       </div>
     </t-drawer>
@@ -178,7 +170,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount } from 'vue';
-import { getTasks, batchRun, downloadSlideshowVideo, downloadSlideshowSubtitle, getSlideshowPreviewUrl } from '@/api';
+import { getTasks, batchRun, getSlideshowPreviewUrl } from '@/api';
 import { MessagePlugin } from 'tdesign-vue-next';
 
 const loading = ref(false);
@@ -205,10 +197,20 @@ const stepNameMap: Record<string, string> = {
   image_generate: '封面图片生成',
   save_article: '保存文章',
   llm_outline: 'AI 生成幻灯片大纲',
+  orchestrator: '拆分章节大纲',
+  assembly: '组装演示文稿',
   tts_generate: '合成语音旁白',
   build_html: '构建演示文稿',
-  video_export: '录制视频',
 };
+
+function formatStepName(name: string): string {
+  if (stepNameMap[name]) return stepNameMap[name];
+  if (name && name.startsWith('chapter_')) {
+    const chId = name.replace('chapter_', '').toUpperCase().replace('_', ' ');
+    return `生成章节 ${chId}`;
+  }
+  return name;
+}
 
 const columns = [
   { colKey: 'id', title: 'ID', width: 60 },
@@ -260,20 +262,6 @@ const openSlideshowPreviewById = (task: any) => {
   previewLoading.value = true;
   previewError.value = '';
   slideshowPreviewVisible.value = true;
-};
-
-const downloadVideoById = (task: any) => {
-  if (!task) return;
-  if (/MicroMessenger/i.test(navigator.userAgent)) {
-    MessagePlugin.warning('微信内无法直接下载，请在外部浏览器打开');
-    return;
-  }
-  downloadSlideshowVideo(task.id);
-};
-
-const downloadSubtitleById = (task: any) => {
-  if (!task) return;
-  downloadSlideshowSubtitle(task.id);
 };
 
 const fetchData = async () => {

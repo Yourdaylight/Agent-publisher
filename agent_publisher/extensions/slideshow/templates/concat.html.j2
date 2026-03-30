@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ title }}</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #0a0a0a; font-family: system-ui, sans-serif; }
+
+    /* ---- Player container ---- */
+    .player {
+      position: relative; width: 100%; height: 100%;
+      display: flex; flex-direction: column;
+    }
+
+    /* ---- Stage: scaled 1920x1080 iframe ---- */
+    .stage {
+      flex: 1; position: relative; overflow: hidden;
+      display: flex; align-items: center; justify-content: center;
+      background: #000;
+    }
+    .stage iframe {
+      border: none;
+      width: 1920px; height: 1080px;
+      transform-origin: center center;
+    }
+
+    /* ---- Controls bar ---- */
+    .controls {
+      height: 56px; background: #1a1a1a;
+      display: flex; align-items: center; gap: 16px;
+      padding: 0 20px; color: #fff; font-size: 14px;
+      user-select: none;
+    }
+    .controls button {
+      background: none; border: none; color: #fff;
+      font-size: 20px; cursor: pointer; padding: 4px 8px;
+      border-radius: 4px; transition: background 0.2s;
+    }
+    .controls button:hover { background: rgba(255,255,255,0.15); }
+    .controls button:disabled { opacity: 0.3; cursor: default; }
+
+    /* ---- Progress bar ---- */
+    .progress-bar {
+      flex: 1; height: 6px; background: rgba(255,255,255,0.15);
+      border-radius: 3px; cursor: pointer; position: relative;
+    }
+    .progress-fill {
+      height: 100%; background: #3182ce; border-radius: 3px;
+      transition: width 0.3s ease;
+    }
+    .progress-chapters {
+      position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+      display: flex;
+    }
+    .progress-chapter {
+      height: 100%; border-right: 2px solid rgba(255,255,255,0.3);
+    }
+    .progress-chapter:last-child { border-right: none; }
+
+    /* ---- Chapter list ---- */
+    .chapter-info { white-space: nowrap; }
+
+    /* ---- Fullscreen ---- */
+    .player:-webkit-full-screen .controls { position: fixed; bottom: 0; left: 0; right: 0; z-index: 100; }
+    .player:fullscreen .controls { position: fixed; bottom: 0; left: 0; right: 0; z-index: 100; }
+
+    /* ---- Speaker notes panel (hidden by default) ---- */
+    .notes-panel {
+      display: none; position: fixed; bottom: 56px; left: 0; right: 0;
+      background: rgba(0,0,0,0.9); color: #ccc; padding: 16px 24px;
+      font-size: 16px; line-height: 1.6; max-height: 200px; overflow-y: auto;
+      z-index: 50;
+    }
+    .notes-panel.visible { display: block; }
+  </style>
+</head>
+<body>
+  <div class="player" id="player">
+    <div class="stage" id="stage">
+      <!-- iframe is injected by JS -->
+    </div>
+
+    <div class="controls">
+      <button id="btn-prev" title="上一章">&laquo;</button>
+      <button id="btn-play" title="播放/暂停">&#9654;</button>
+      <button id="btn-next" title="下一章">&raquo;</button>
+
+      <div class="progress-bar" id="progress-bar">
+        <div class="progress-fill" id="progress-fill" style="width:0%"></div>
+        <div class="progress-chapters" id="progress-chapters"></div>
+      </div>
+
+      <span class="chapter-info" id="chapter-info">1 / {{ chapters | length }}</span>
+
+      <button id="btn-notes" title="口播脚本">&#128196;</button>
+      <button id="btn-fullscreen" title="全屏">&#x26F6;</button>
+    </div>
+
+    <div class="notes-panel" id="notes-panel"></div>
+  </div>
+
+  <script>
+    (function() {
+      var chapters = {{ chapters_json }};
+      var currentIdx = 0;
+      var isPlaying = true;
+      var iframe = null;
+
+      var stage = document.getElementById('stage');
+      var btnPrev = document.getElementById('btn-prev');
+      var btnPlay = document.getElementById('btn-play');
+      var btnNext = document.getElementById('btn-next');
+      var btnFS = document.getElementById('btn-fullscreen');
+      var btnNotes = document.getElementById('btn-notes');
+      var progressFill = document.getElementById('progress-fill');
+      var progressBar = document.getElementById('progress-bar');
+      var progressChapters = document.getElementById('progress-chapters');
+      var chapterInfo = document.getElementById('chapter-info');
+      var notesPanel = document.getElementById('notes-panel');
+
+      // Build progress chapter dividers
+      var totalSlides = chapters.reduce(function(s, c) { return s + c.slide_count; }, 0);
+      chapters.forEach(function(ch) {
+        var div = document.createElement('div');
+        div.className = 'progress-chapter';
+        div.style.width = (ch.slide_count / totalSlides * 100) + '%';
+        progressChapters.appendChild(div);
+      });
+
+      function scaleIframe() {
+        if (!iframe) return;
+        var sw = stage.clientWidth;
+        var sh = stage.clientHeight;
+        var scale = Math.min(sw / 1920, sh / 1080);
+        iframe.style.transform = 'scale(' + scale + ')';
+      }
+
+      function loadChapter(idx) {
+        if (idx < 0 || idx >= chapters.length) return;
+        currentIdx = idx;
+
+        // Remove old iframe
+        if (iframe) { stage.removeChild(iframe); }
+
+        iframe = document.createElement('iframe');
+        iframe.src = chapters[idx].html_file;
+        iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin');
+        stage.appendChild(iframe);
+
+        scaleIframe();
+        updateUI();
+
+        // Send play command after load
+        iframe.addEventListener('load', function() {
+          if (isPlaying) {
+            iframe.contentWindow.postMessage({type: 'play'}, '*');
+          } else {
+            iframe.contentWindow.postMessage({type: 'pause'}, '*');
+          }
+        });
+      }
+
+      function updateUI() {
+        chapterInfo.textContent = (currentIdx + 1) + ' / ' + chapters.length;
+        btnPrev.disabled = currentIdx === 0;
+        btnNext.disabled = currentIdx === chapters.length - 1;
+        btnPlay.innerHTML = isPlaying ? '&#10074;&#10074;' : '&#9654;';
+
+        // Update progress
+        var completed = 0;
+        for (var i = 0; i < currentIdx; i++) completed += chapters[i].slide_count;
+        progressFill.style.width = (completed / totalSlides * 100) + '%';
+
+        // Update notes
+        var ch = chapters[currentIdx];
+        notesPanel.textContent = ch.notes || '';
+      }
+
+      // Listen for chapter-complete from iframe
+      window.addEventListener('message', function(e) {
+        if (e.data && e.data.type === 'chapter-complete') {
+          if (currentIdx < chapters.length - 1) {
+            loadChapter(currentIdx + 1);
+          } else {
+            // All done — update progress to 100%
+            progressFill.style.width = '100%';
+            isPlaying = false;
+            updateUI();
+          }
+        }
+      });
+
+      btnPrev.addEventListener('click', function() { loadChapter(currentIdx - 1); });
+      btnNext.addEventListener('click', function() { loadChapter(currentIdx + 1); });
+
+      btnPlay.addEventListener('click', function() {
+        isPlaying = !isPlaying;
+        if (iframe && iframe.contentWindow) {
+          iframe.contentWindow.postMessage({type: isPlaying ? 'play' : 'pause'}, '*');
+        }
+        updateUI();
+      });
+
+      btnFS.addEventListener('click', function() {
+        var el = document.getElementById('player');
+        if (el.requestFullscreen) el.requestFullscreen();
+        else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+      });
+
+      btnNotes.addEventListener('click', function() {
+        notesPanel.classList.toggle('visible');
+      });
+
+      // Click on progress bar to jump to chapter
+      progressBar.addEventListener('click', function(e) {
+        var rect = progressBar.getBoundingClientRect();
+        var pct = (e.clientX - rect.left) / rect.width;
+        var cumSlides = 0;
+        for (var i = 0; i < chapters.length; i++) {
+          cumSlides += chapters[i].slide_count;
+          if (cumSlides / totalSlides >= pct) {
+            loadChapter(i);
+            return;
+          }
+        }
+      });
+
+      // Keyboard
+      document.addEventListener('keydown', function(e) {
+        if (e.key === 'ArrowRight') { loadChapter(currentIdx + 1); }
+        if (e.key === 'ArrowLeft') { loadChapter(currentIdx - 1); }
+        if (e.key === ' ') { btnPlay.click(); e.preventDefault(); }
+        if (e.key === 'f' || e.key === 'F') { btnFS.click(); }
+        if (e.key === 'n' || e.key === 'N') { btnNotes.click(); }
+      });
+
+      window.addEventListener('resize', scaleIframe);
+
+      // Start
+      loadChapter(0);
+    })();
+  </script>
+</body>
+</html>

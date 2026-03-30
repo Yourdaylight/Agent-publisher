@@ -718,19 +718,9 @@
             <div style="font-size: 13px; color: var(--td-text-color-secondary); margin-bottom: 4px">文章</div>
             <div style="font-weight: 600; font-size: 15px">{{ slideshowArticle?.title }}</div>
           </t-card>
-          <div style="margin-bottom: 20px">
-            <div style="font-weight: 500; margin-bottom: 8px">配置选项</div>
-            <div style="display: flex; align-items: center; gap: 12px; padding: 12px; background: var(--td-bg-color-page); border-radius: 6px">
-              <t-switch v-model="slideshowWithTts" />
-              <div>
-                <div style="font-size: 14px">语音旁白（TTS）</div>
-                <div style="font-size: 12px; color: var(--td-text-color-secondary)">使用 AI 语音为每张幻灯片生成中文旁白，生成时间约增加 1 分钟</div>
-              </div>
-            </div>
-          </div>
           <t-alert theme="info" style="margin-bottom: 20px">
             <template #message>
-              生成流程：AI 生成大纲（约30秒）→ 你可以预览并编辑每张幻灯片 → {{ slideshowWithTts ? '合成语音 → ' : '' }}截图合成视频（约2-3分钟）
+              生成流程：AI 拆分章节（约15秒）→ 并行生成各章节内容（约15-30秒）→ 组装 HTML 演示文稿
             </template>
           </t-alert>
           <t-button theme="primary" size="large" block :loading="slideshowSubmitting" @click="startSlideshowGeneration">
@@ -742,12 +732,12 @@
         <div v-else-if="slideshowPhase === 'draft_review'">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px">
             <div>
-              <div style="font-weight: 600; font-size: 16px">📋 AI 已生成幻灯片大纲（{{ draftSlides.length }} 张）</div>
-              <div style="font-size: 13px; color: var(--td-text-color-secondary); margin-top: 4px">可以修改每张的标题和旁白，也可以直接生成</div>
+              <div style="font-weight: 600; font-size: 16px">📋 AI 已生成章节大纲（{{ draftSlides.length }} 章）</div>
+              <div style="font-size: 13px; color: var(--td-text-color-secondary); margin-top: 4px">可以查看各章节规划，也可以直接生成</div>
             </div>
             <div style="display: flex; gap: 8px">
-              <t-button @click="onSkipDraftReview" :loading="slideshowSubmitting">直接生成视频</t-button>
-              <t-button theme="primary" @click="onConfirmDraft" :loading="slideshowSubmitting">确认大纲，生成视频</t-button>
+              <t-button @click="onSkipDraftReview" :loading="slideshowSubmitting">直接生成</t-button>
+              <t-button theme="primary" @click="onConfirmDraft" :loading="slideshowSubmitting">确认大纲，开始生成</t-button>
             </div>
           </div>
 
@@ -814,15 +804,60 @@
           <t-alert theme="info" style="margin-bottom: 20px">
             <template #message>正在生成演示文稿，请耐心等待…</template>
           </t-alert>
-          <t-steps layout="vertical" :current="slideshowCurrentStep" style="margin-bottom: 24px">
-            <t-step-item
-              v-for="(step, idx) in slideshowStepDefs"
-              :key="step.key"
-              :title="step.label"
-              :content="step.hint"
-              :status="getSlideshowStepStatus(idx)"
-            />
-          </t-steps>
+
+          <!-- Dynamic step list from backend -->
+          <div class="step-timeline" style="margin-bottom: 24px">
+            <div v-for="(step, idx) in slideshowSteps" :key="idx" style="display: flex; gap: 12px; align-items: flex-start; padding: 10px 0; border-bottom: 1px solid var(--td-border-level-1-color)">
+              <t-tag
+                size="small"
+                :theme="step.status === 'success' ? 'success' : step.status === 'failed' ? 'danger' : 'warning'"
+                variant="light"
+                style="min-width: 48px; text-align: center"
+              >
+                {{ step.status === 'success' ? '完成' : step.status === 'failed' ? '失败' : '运行中' }}
+              </t-tag>
+              <div style="flex: 1">
+                <div style="font-size: 14px; font-weight: 500">{{ formatStepName(step.name) }}</div>
+                <div v-if="step.output && Object.keys(step.output).length" style="font-size: 12px; color: var(--td-text-color-secondary); margin-top: 4px">
+                  <template v-if="step.name === 'orchestrator'">
+                    拆分为 {{ step.output.chapter_count }} 个章节，共 {{ step.output.total_slides }} 张幻灯片
+                  </template>
+                  <template v-else-if="step.name && step.name.startsWith('chapter_')">
+                    生成了 {{ step.output.slide_count }} 张幻灯片
+                  </template>
+                  <template v-else-if="step.name === 'assembly'">
+                    {{ step.output.chapter_count }} 个章节已组装
+                  </template>
+                  <template v-else-if="step.output.error">
+                    {{ step.output.error }}
+                  </template>
+                </div>
+              </div>
+              <div style="font-size: 12px; color: var(--td-text-color-placeholder)">
+                {{ step.finished_at ? new Date(step.finished_at).toLocaleTimeString() : '' }}
+              </div>
+            </div>
+          </div>
+
+          <!-- Show orchestrator outline summary when available -->
+          <div v-if="slideshowOrchestrator" style="margin-bottom: 20px">
+            <t-card :bordered="true">
+              <template #header>
+                <div style="font-weight: 600">📋 章节大纲（{{ slideshowOrchestrator.chapters?.length || 0 }} 章）</div>
+              </template>
+              <div v-for="(ch, ci) in (slideshowOrchestrator.chapters || [])" :key="ci" style="padding: 8px 0; border-bottom: 1px solid var(--td-border-level-1-color)">
+                <div style="display: flex; gap: 8px; align-items: center">
+                  <t-tag size="small" variant="light">{{ ch.chapter_id }}</t-tag>
+                  <span style="font-weight: 500">{{ ch.title }}</span>
+                  <t-tag size="small" theme="default" variant="outline">{{ ch.slide_count }} 张</t-tag>
+                </div>
+                <div v-if="ch.key_points && ch.key_points.length" style="font-size: 12px; color: var(--td-text-color-secondary); margin-top: 4px; padding-left: 8px">
+                  {{ ch.key_points.join('、') }}
+                </div>
+              </div>
+            </t-card>
+          </div>
+
           <div v-if="slideshowPollError" style="margin-bottom: 16px">
             <t-alert theme="warning">
               <template #message>{{ slideshowPollError }}</template>
@@ -835,18 +870,12 @@
         <div v-else-if="slideshowPhase === 'completed'">
           <t-result theme="success" title="演示文稿已生成" style="margin-bottom: 24px">
             <template #description>
-              <div>已生成 {{ slideshowSlideCount }} 张幻灯片{{ slideshowHasSubtitle ? '，含语音字幕' : '' }}</div>
+              <div>已生成 {{ slideshowChapterCount }} 个章节的 HTML 演示文稿</div>
             </template>
           </t-result>
           <div style="display: flex; gap: 12px; flex-direction: column">
             <t-button theme="primary" size="large" block @click="openSlideshowPreview">
               <t-icon name="browse" style="margin-right: 6px" />在线预览演示文稿
-            </t-button>
-            <t-button size="large" block @click="onDownloadVideo">
-              <t-icon name="download" style="margin-right: 6px" />下载视频{{ slideshowVideoExt }}
-            </t-button>
-            <t-button v-if="slideshowHasSubtitle" variant="text" size="large" block @click="onDownloadSubtitle">
-              <t-icon name="file" style="margin-right: 6px" />下载字幕（SRT）
             </t-button>
             <t-divider />
             <t-button variant="outline" @click="onRegenerateSlideshow">重新生成</t-button>
@@ -876,7 +905,6 @@
             <t-result theme="error" title="预览加载失败">
               <template #description>{{ slideshowPreviewError }}</template>
             </t-result>
-            <t-button style="margin-top: 16px" @click="onDownloadVideo">下载视频查看</t-button>
           </div>
           <iframe
             v-else
@@ -887,7 +915,6 @@
           />
           <div style="position: absolute; top: 8px; right: 8px; display: flex; gap: 8px">
             <t-button size="small" theme="default" @click="slideshowPhase = 'completed'">← 返回</t-button>
-            <t-button size="small" @click="onDownloadVideo">下载视频</t-button>
           </div>
         </div>
       </div>
@@ -924,8 +951,6 @@ import {
   confirmSlideshowDraft,
   skipSlideshowDraft,
   getSlideshowPreviewUrl,
-  downloadSlideshowVideo,
-  downloadSlideshowSubtitle,
 } from '@/api';
 import http from '@/api';
 import { MessagePlugin, NotifyPlugin } from 'tdesign-vue-next';
@@ -1214,11 +1239,17 @@ const onSave = async (): Promise<boolean> => {
     if (editForm.value.digest !== undefined) {
       data.digest = editForm.value.digest;
     }
-    if (editForm.value.content !== undefined) {
-      data.content = editForm.value.content;
-    }
-    if (editForm.value.html_content !== undefined) {
-      data.html_content = editForm.value.html_content;
+    // Only send the field matching the active edit tab to avoid
+    // the backend auto-render overwriting user's HTML edits.
+    if (editTab.value === 'markdown') {
+      if (editForm.value.content !== undefined) {
+        data.content = editForm.value.content;
+      }
+    } else {
+      // HTML mode: only send html_content, don't send content
+      if (editForm.value.html_content !== undefined) {
+        data.html_content = editForm.value.html_content;
+      }
     }
     if (editForm.value.cover_image_url !== undefined) {
       data.cover_image_url = editForm.value.cover_image_url;
@@ -1592,16 +1623,24 @@ const fetchRunningTasks = async () => {
 
 // Step definitions (shown in the progress stepper)
 const slideshowStepDefs = [
-  { key: 'llm_outline',        label: 'AI 生成内容大纲',  hint: '约 20-40 秒' },
-  { key: 'tts_generate',       label: '合成语音旁白',       hint: '约 30-60 秒（跳过时自动跳过）' },
-  { key: 'screenshot_slides',  label: '渲染幻灯片帧',       hint: '每帧高清截图' },
-  { key: 'video_export',       label: '合成最终视频',        hint: '约 1-3 分钟' },
+  { key: 'orchestrator',  label: '拆分章节大纲',     hint: '约 15-30 秒' },
+  { key: 'chapter_ch_01', label: '生成章节内容',     hint: '并行生成中…' },
+  { key: 'assembly',      label: '组装演示文稿',     hint: '约 2-5 秒' },
 ] as const;
 
 const TERMINAL_STATES = ['success', 'failed', 'cancelled', 'expired'] as const;
 const MAX_POLL_RETRIES = 120;
 const POLL_INTERVAL_MS = 3000;
-const VIDEO_EXPORT_POLL_MS = 8000; // back off during slow step
+
+function formatStepName(name: string): string {
+  if (name === 'orchestrator') return '拆分章节大纲';
+  if (name === 'assembly') return '组装演示文稿';
+  if (name && name.startsWith('chapter_')) {
+    const chId = name.replace('chapter_', '').toUpperCase().replace('_', ' ');
+    return `生成章节 ${chId}`;
+  }
+  return name;
+}
 
 // Per-article slideshow task state
 type SlideshowState = {
@@ -1615,17 +1654,16 @@ const slideshowStateMap = ref(new Map<number, SlideshowState>());
 const slideshowDrawerVisible = ref(false);
 const slideshowArticle = ref<any>(null);
 const slideshowPhase = ref<'setup' | 'progress' | 'draft_review' | 'completed' | 'failed' | 'preview'>('setup');
-const slideshowWithTts = ref(true);
 const slideshowSubmitting = ref(false);
 const slideshowTaskId = ref<number | null>(null);
 const slideshowSteps = ref<any[]>([]);
 const slideshowPollError = ref('');
 const slideshowErrorMsg = ref('');
 const slideshowCurrentStep = ref(0);
-const slideshowHasSubtitle = ref(false);
-const slideshowHasVideo = ref(false);
-const slideshowVideoExt = ref('.webm');
+const slideshowHasPlayer = ref(false);
+const slideshowChapterCount = ref(0);
 const slideshowSlideCount = ref(0);
+const slideshowOrchestrator = ref<any>(null);
 // Draft review state
 const draftSlides = ref<any[]>([]);
 const editingSlideId = ref<string | null>(null);
@@ -1690,6 +1728,17 @@ async function scheduleSlideshowPoll(taskId: number) {
     slideshowSteps.value = data.steps || [];
     slideshowCurrentStep.value = computeCurrentStep(slideshowSteps.value);
 
+    // Capture orchestrator output (chapter outline) for display during progress
+    if (!slideshowOrchestrator.value) {
+      const orchStep = (data.steps || []).find((s: any) => s.name === 'orchestrator' && s.status === 'success');
+      if (orchStep) {
+        try {
+          const draftRes = await getSlideshowDraft(taskId);
+          slideshowOrchestrator.value = draftRes.data.orchestrator_output || null;
+        } catch { /* ignore — draft may not be available in skip_review mode */ }
+      }
+    }
+
     if (data.status === 'draft_ready') {
       // Outline generated — fetch draft and show review UI
       try {
@@ -1705,14 +1754,12 @@ async function scheduleSlideshowPoll(taskId: number) {
 
     if (data.status === 'success') {
       slideshowPhase.value = 'completed';
-      slideshowHasSubtitle.value = data.has_subtitle;
-      slideshowHasVideo.value = data.has_video;
-      // detect .webm vs .mp4 from steps result (heuristic — backend always returns actual ext)
-      slideshowVideoExt.value = '.webm';
+      slideshowHasPlayer.value = data.has_player;
+      slideshowChapterCount.value = data.chapter_count || 0;
 
-      // Count slides from steps output
-      const outlineStep = (data.steps || []).find((s: any) => s.name === 'llm_outline');
-      slideshowSlideCount.value = outlineStep?.output?.slide_count || 0;
+      // Count slides from assembly step output
+      const assemblyStep = (data.steps || []).find((s: any) => s.name === 'assembly');
+      slideshowSlideCount.value = assemblyStep?.output?.chapter_count || data.chapter_count || 0;
 
       // Update per-article map
       if (slideshowArticle.value?.id) {
@@ -1737,13 +1784,9 @@ async function scheduleSlideshowPoll(taskId: number) {
       return;
     }
 
-    // Still running — schedule next poll with backoff for video_export step
+    // Still running — schedule next poll
     slideshowPollRetries++;
-    const isVideoStep = (data.steps || []).some(
-      (s: any) => s.name === 'video_export' && s.status === 'running'
-    );
-    const delay = isVideoStep ? VIDEO_EXPORT_POLL_MS : POLL_INTERVAL_MS;
-    slideshowPollTimer = setTimeout(() => scheduleSlideshowPoll(taskId), delay);
+    slideshowPollTimer = setTimeout(() => scheduleSlideshowPoll(taskId), POLL_INTERVAL_MS);
 
   } catch (err: any) {
     if (slideshowActivePollTaskId !== taskId) return;
@@ -1793,8 +1836,8 @@ async function startSlideshowGeneration() {
   slideshowPollRetries = 0;
 
   try {
-    // Default: generate outline first, then pause at draft_review
-    const { data } = await generateSlideshow(slideshowArticle.value.id, slideshowWithTts.value, false);
+    // Skip draft review — run full pipeline (orchestrator + chapters + assembly)
+    const { data } = await generateSlideshow(slideshowArticle.value.id, true);
     const taskId = data.task_id;
     slideshowTaskId.value = taskId;
     slideshowPhase.value = 'progress';
@@ -1851,7 +1894,7 @@ async function onConfirmDraft() {
   if (!slideshowTaskId.value || slideshowSubmitting.value) return;
   slideshowSubmitting.value = true;
   try {
-    await confirmSlideshowDraft(slideshowTaskId.value, draftSlides.value, slideshowWithTts.value);
+    await confirmSlideshowDraft(slideshowTaskId.value);
     slideshowPhase.value = 'progress';
     slideshowPollRetries = 0;
     const taskId = slideshowTaskId.value;
@@ -1868,7 +1911,7 @@ async function onSkipDraftReview() {
   if (!slideshowTaskId.value || slideshowSubmitting.value) return;
   slideshowSubmitting.value = true;
   try {
-    await skipSlideshowDraft(slideshowTaskId.value, slideshowWithTts.value);
+    await skipSlideshowDraft(slideshowTaskId.value);
     slideshowPhase.value = 'progress';
     slideshowPollRetries = 0;
     const taskId = slideshowTaskId.value;
@@ -1915,21 +1958,6 @@ function onPreviewIframeError() {
   slideshowPreviewError.value = '演示文稿预览加载失败，Reveal.js 资源可能无法访问，请直接下载查看';
 }
 
-function onDownloadVideo() {
-  if (!slideshowTaskId.value) return;
-  // Detect WeChat WebView
-  if (/MicroMessenger/i.test(navigator.userAgent)) {
-    MessagePlugin.warning('微信内无法直接下载，请复制链接到外部浏览器');
-    return;
-  }
-  downloadSlideshowVideo(slideshowTaskId.value);
-}
-
-function onDownloadSubtitle() {
-  if (!slideshowTaskId.value) return;
-  downloadSlideshowSubtitle(slideshowTaskId.value);
-}
-
 function onRegenerateSlideshow() {
   clearSlideshowPoll();
   slideshowPhase.value = 'setup';
@@ -1937,6 +1965,7 @@ function onRegenerateSlideshow() {
   slideshowSteps.value = [];
   slideshowPollError.value = '';
   slideshowErrorMsg.value = '';
+  slideshowOrchestrator.value = null;
 }
 
 const onExtensionAction = async (action: any, article: any) => {

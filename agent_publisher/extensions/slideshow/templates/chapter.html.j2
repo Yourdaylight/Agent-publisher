@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=1920">
+  <title>{{ presentation_title }} - {{ chapter_title }}</title>
+  {% if has_charts %}
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+  {% endif %}
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 1920px; height: 1080px; overflow: hidden;
+      font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", "Helvetica Neue", Arial, sans-serif;
+      background: #fff;
+    }
+
+    /* ---- Slide container ---- */
+    .slide {
+      width: 1920px; height: 1080px; overflow: hidden;
+      position: absolute; top: 0; left: 0;
+      display: none; flex-direction: column;
+      opacity: 0; transition: opacity 0.5s ease-in-out;
+      padding: 60px 100px;
+      background: var(--slide-bg, #fff);
+    }
+    .slide.active {
+      display: flex; opacity: 1;
+    }
+    /* Title layout overrides slide padding/background */
+    .slide:has(.slide-layout--title) {
+      padding: 0;
+    }
+
+    /* ---- Slide navigation dots ---- */
+    .slide-nav {
+      position: fixed; bottom: 24px; left: 50%;
+      transform: translateX(-50%);
+      display: flex; gap: 12px; z-index: 100;
+    }
+    .slide-nav .dot {
+      width: 12px; height: 12px; border-radius: 50%;
+      background: rgba(0,0,0,0.2); cursor: pointer;
+      transition: background 0.3s;
+    }
+    .slide-nav .dot.active { background: var(--accent, #3182ce); }
+
+    {{ theme_css }}
+
+    /* ---- Title layout ---- */
+    .slide-layout--title {
+      width: 100%; height: 100%;
+      display: flex; flex-direction: column;
+      justify-content: center; align-items: center;
+      text-align: center; padding: 80px 140px;
+      background: var(--title-bg, linear-gradient(135deg, #1a365d 0%, #2b6cb0 100%));
+    }
+    .slide-layout--title h1 {
+      font-size: 72px; font-weight: 800; color: #fff;
+      line-height: 1.2; margin-bottom: 24px; letter-spacing: -1px;
+    }
+    .slide-layout--title .subtitle {
+      font-size: 36px; color: rgba(255,255,255,0.85); margin-bottom: 20px; font-weight: 400;
+    }
+    .slide-layout--title .meta {
+      font-size: 28px; color: rgba(255,255,255,0.6);
+    }
+
+    /* ---- Content layouts (shared base) ---- */
+    .slide-layout--bullets, .slide-layout--chart, .slide-layout--timeline, .slide-layout--table {
+      width: 100%; height: 100%;
+      padding: 60px 100px 60px;
+      display: flex; flex-direction: column;
+      background: var(--slide-bg, #fff);
+    }
+    .slide-layout--bullets h2, .slide-layout--chart h2,
+    .slide-layout--timeline h2, .slide-layout--table h2,
+    .slide > h2 {
+      font-size: 52px; font-weight: 700;
+      color: var(--title-color, #1a365d);
+      margin-bottom: 40px; line-height: 1.2;
+      border-bottom: 5px solid var(--accent, #3182ce);
+      padding-bottom: 20px;
+    }
+    /* chart_with_text, two_column, image_text use top-level h2 + grid div */
+    .slide-grid--chart-text, .slide-grid--two-col, .slide-grid--image-text {
+      flex: 1;
+    }
+
+    /* ---- Bullets ---- */
+    .slide-layout--bullets ul { list-style: none; padding: 0; }
+    .slide-layout--bullets li {
+      padding: 6px 0 6px 20px; position: relative;
+      font-size: 38px; line-height: 1.5; color: #2d3748;
+    }
+    .slide-layout--bullets li::before {
+      content: "\25B8";
+      position: absolute; left: 0;
+      color: var(--accent, #3182ce); font-size: 32px;
+    }
+    .slide-layout--bullets li.level-2 { padding-left: 40px; font-size: 32px; color: #4a5568; }
+    .slide-layout--bullets .group-heading {
+      font-weight: 600; margin-top: 0.8em; margin-bottom: 0.3em;
+      font-size: 34px; color: var(--accent, #2b6cb0);
+    }
+
+    /* ---- Chart ---- */
+    .slide-layout--chart { display: flex; flex-direction: column; }
+    .slide-layout--chart .chart-container,
+    .chart-container { flex: 1; min-height: 400px; width: 100%; height: 450px; }
+
+    /* ---- Chart + Text ---- */
+    .slide-grid--chart-text {
+      display: grid;
+      grid-template-columns: 3fr 2fr;
+      gap: 32px; align-items: start; height: 100%;
+    }
+    .slide-grid--chart-text.chart-right { grid-template-columns: 2fr 3fr; }
+    .slide-grid--chart-text .chart-container { min-height: 350px; }
+    .slide-grid--chart-text ul { list-style: disc; padding-left: 1.2em; }
+    .slide-grid--chart-text li { padding: 4px 0; font-size: 34px; line-height: 1.5; }
+    .slide-grid--chart-text h3 {
+      font-size: 34px; font-weight: 600; color: var(--accent, #2b6cb0);
+      margin-bottom: 12px;
+    }
+
+    /* ---- Two column ---- */
+    .slide-grid--two-col {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 40px;
+    }
+    .slide-grid--two-col h3 {
+      font-size: 38px; font-weight: 700; color: var(--accent, #2b6cb0);
+      border-bottom: 2px solid var(--accent, #3182ce); padding-bottom: 8px;
+      margin-bottom: 16px;
+    }
+    .slide-grid--two-col ul { list-style: disc; padding-left: 1.2em; }
+    .slide-grid--two-col li { padding: 4px 0; font-size: 32px; line-height: 1.5; }
+
+    /* ---- Image + Text ---- */
+    .slide-grid--image-text {
+      display: grid; grid-template-columns: 1fr 1fr;
+      gap: 32px; align-items: center;
+    }
+    .slide-grid--image-text img {
+      max-width: 100%; border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    }
+
+    /* ---- Timeline ---- */
+    .slide-layout--timeline .timeline {
+      position: relative; padding-left: 30px; flex: 1;
+      display: flex; flex-direction: column; justify-content: center; gap: 24px;
+    }
+    .slide-layout--timeline .timeline::before {
+      content: ""; position: absolute; left: 8px; top: 0; bottom: 0;
+      width: 3px; background: var(--accent, #3182ce);
+    }
+    .slide-layout--timeline .milestone {
+      position: relative; margin-bottom: 18px;
+    }
+    .slide-layout--timeline .milestone::before {
+      content: ""; position: absolute; left: -26px; top: 6px;
+      width: 12px; height: 12px; border-radius: 50%;
+      background: var(--accent, #3182ce); border: 2px solid #fff;
+      box-shadow: 0 0 0 2px var(--accent, #3182ce);
+    }
+    .slide-layout--timeline .milestone.completed::before { background: #27ae60; box-shadow: 0 0 0 2px #27ae60; }
+    .slide-layout--timeline .milestone .date { font-weight: 600; color: #2c3e50; font-size: 28px; }
+    .slide-layout--timeline .milestone .label { font-weight: 500; font-size: 36px; }
+    .slide-layout--timeline .milestone .desc { font-size: 28px; color: #666; }
+
+    /* ---- Table ---- */
+    .slide-layout--table table {
+      width: 100%; border-collapse: collapse; font-size: 32px;
+    }
+    .slide-layout--table th {
+      background: var(--title-color, #1a365d); color: #fff;
+      padding: 20px 28px; text-align: left; font-size: 30px;
+    }
+    .slide-layout--table td {
+      padding: 18px 28px; border-bottom: 1px solid #e2e8f0;
+    }
+    .slide-layout--table tr:nth-child(even) { background: #f7fafc; }
+    .slide-layout--table .highlight { background: #fff3cd !important; font-weight: 600; }
+  </style>
+</head>
+<body>
+  {% for slide in slides %}
+  <div class="slide {{ 'active' if loop.first else '' }}"
+       data-index="{{ loop.index0 }}"
+       data-duration="{{ slide.duration | default(6) }}"
+       data-notes="{{ slide.notes | default('') | e }}">
+
+    {% set layout = slide.layout | default('bullets') %}
+    {% if layout == 'title' %}
+      {% include "partials/slide_title.html.j2" %}
+    {% elif layout == 'bullets' %}
+      {% include "partials/slide_bullets.html.j2" %}
+    {% elif layout == 'chart' %}
+      {% include "partials/slide_chart.html.j2" %}
+    {% elif layout == 'chart_with_text' %}
+      {% include "partials/slide_chart_text.html.j2" %}
+    {% elif layout == 'two_column' %}
+      {% include "partials/slide_two_column.html.j2" %}
+    {% elif layout == 'image_text' %}
+      {% include "partials/slide_image_text.html.j2" %}
+    {% elif layout == 'timeline' %}
+      {% include "partials/slide_timeline.html.j2" %}
+    {% elif layout == 'table' %}
+      {% include "partials/slide_table.html.j2" %}
+    {% else %}
+      {% include "partials/slide_bullets.html.j2" %}
+    {% endif %}
+  </div>
+  {% endfor %}
+
+  {% if slides | length > 1 %}
+  <div class="slide-nav">
+    {% for slide in slides %}
+    <div class="dot {{ 'active' if loop.first else '' }}" data-index="{{ loop.index0 }}"></div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <script>
+    (function() {
+      var slides = document.querySelectorAll('.slide');
+      var dots = document.querySelectorAll('.dot');
+      var current = 0;
+      var autoTimer = null;
+      var isInIframe = window.parent !== window;
+
+      function show(idx) {
+        slides.forEach(function(s, i) {
+          s.classList.toggle('active', i === idx);
+        });
+        dots.forEach(function(d, i) {
+          d.classList.toggle('active', i === idx);
+        });
+        current = idx;
+      }
+
+      function next() {
+        if (current < slides.length - 1) {
+          show(current + 1);
+          scheduleAuto();
+        } else {
+          // Chapter complete
+          clearTimeout(autoTimer);
+          if (isInIframe) {
+            window.parent.postMessage({type: 'chapter-complete'}, '*');
+          }
+        }
+      }
+
+      function scheduleAuto() {
+        clearTimeout(autoTimer);
+        var dur = parseFloat(slides[current].getAttribute('data-duration') || '6');
+        autoTimer = setTimeout(next, dur * 1000);
+      }
+
+      // Click to advance
+      document.body.addEventListener('click', function(e) {
+        if (e.target.classList.contains('dot')) {
+          show(parseInt(e.target.getAttribute('data-index')));
+          scheduleAuto();
+        } else {
+          next();
+        }
+      });
+
+      // Keyboard navigation
+      document.addEventListener('keydown', function(e) {
+        if (e.key === 'ArrowRight' || e.key === ' ') { next(); }
+        if (e.key === 'ArrowLeft' && current > 0) { show(current - 1); scheduleAuto(); }
+      });
+
+      // Listen for play/pause commands from parent
+      window.addEventListener('message', function(e) {
+        if (e.data && e.data.type === 'play') { scheduleAuto(); }
+        if (e.data && e.data.type === 'pause') { clearTimeout(autoTimer); }
+        if (e.data && e.data.type === 'reset') { show(0); scheduleAuto(); }
+      });
+
+      // Auto-start if in iframe (parent controls playback)
+      // Otherwise start immediately for standalone viewing
+      scheduleAuto();
+    })();
+  </script>
+
+  {% if has_charts %}
+  <script>
+    // Initialize ECharts
+    {% for chart in charts %}
+    (function() {
+      var dom = document.getElementById('{{ chart.id }}');
+      if (!dom) return;
+      var chart = echarts.init(dom, null, {renderer: 'canvas', width: dom.offsetWidth || 800, height: dom.offsetHeight || 500});
+      chart.setOption({{ chart.option_json | safe }});
+    })();
+    {% endfor %}
+  </script>
+  {% endif %}
+</body>
+</html>

@@ -135,6 +135,13 @@ if [[ "$DO_FRONTEND" == true ]]; then
     else
         info "未检测到 Node.js / npm，使用 git 仓库中预构建的前端资源"
     fi
+
+    # Copy guide images into static directory (always, regardless of node availability)
+    if [[ -d "$INSTALL_DIR/docs/images" ]]; then
+        mkdir -p "$INSTALL_DIR/agent_publisher/static/guide-images"
+        cp -f "$INSTALL_DIR/docs/images/"*.png "$INSTALL_DIR/agent_publisher/static/guide-images/" 2>/dev/null || true
+        success "引导图片已同步到 static/guide-images/"
+    fi
 else
     step "步骤 3: 跳过前端构建 (--backend-only)"
 fi

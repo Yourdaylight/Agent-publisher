@@ -597,11 +597,11 @@ class ArticleService:
             setattr(article, key, value)
             updated_fields.append(key)
 
-        # Auto re-render html when markdown content changes
-        if 'content' in updated_fields:
+        # Auto re-render html when markdown content changes,
+        # but NOT when html_content was also explicitly provided (user's HTML wins).
+        if 'content' in updated_fields and 'html_content' not in updated_fields:
             article.html_content = self._markdown_to_html(article.content)
-            if 'html_content' not in updated_fields:
-                updated_fields.append('html_content')
+            updated_fields.append('html_content')
 
         await self._sync_article_body_media_assets(article)
 

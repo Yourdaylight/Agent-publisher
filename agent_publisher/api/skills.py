@@ -195,9 +195,9 @@ SETUP_GUIDE = {
             "title": "配置 IP 白名单",
             "instructions": [
                 "在「基础信息」页面找到「API IP白名单」，点击「编辑」",
-                "将服务器公网 IP `43.132.178.232` 添加到白名单中",
+                "将服务器公网 IP `{host}` 添加到白名单中".format(host=settings.get_server_host()),
             ],
-            "note": "如果你使用的是默认托管后端，IP 为 43.132.178.232；如果是自建服务器，请添加你自己服务器的公网 IP",
+            "note": "此地址 (`{host}`) 是当前服务端配置值；如配置了域名请填对应服务器的公网 IP".format(host=settings.get_server_host()),
         },
         {
             "step": 4,
@@ -852,10 +852,12 @@ async def skill_create_article(
         except (ValueError, IndexError):
             raise HTTPException(status_code=400, detail="Invalid media reference. Use media:<id>")
 
-    # Convert Markdown to HTML if content is provided
+    # Convert Markdown to HTML if content is provided (always render via wenyan)
     html_content = data.html_content
     content = data.content
-    if content and not html_content:
+    if content:
+        # When Markdown content is provided, always render it via wenyan,
+        # even if html_content is also provided (Markdown takes precedence)
         html_content = ArticleService._markdown_to_html(content)
 
     article = Article(
@@ -1032,7 +1034,6 @@ async def skill_sync_article(
 # ---------------------------------------------------------------------------
 
 class SkillSlideshowRequest(BaseModel):
-    with_tts: bool = True
     skip_review: bool = False
 
 
@@ -1046,7 +1047,6 @@ async def skill_generate_slideshow(
     """Create a slideshow task for an article (ownership check).
 
     Parameters:
-    - with_tts: whether to generate TTS audio (default true)
     - skip_review: skip draft review and generate immediately (default false)
     """
     import asyncio
@@ -1068,16 +1068,15 @@ async def skill_generate_slideshow(
             if not account or account.owner_email != email:
                 raise HTTPException(status_code=403, detail="Access denied")
 
-    with_tts = data.with_tts if data else True
     skip_review = data.skip_review if data else False
 
     task_svc = TaskService(db)
     task = await task_svc.create_task(None, "slideshow_generate")
 
-    async def _bg_execute_full(task_id: int, art_id: int, tts: bool) -> None:
+    async def _bg_execute_full(task_id: int, art_id: int) -> None:
         async with async_session_factory() as session:
-            from agent_publisher.extensions.slideshow.service import run_pipeline
-            await run_pipeline(task_id, art_id, tts, session)
+            from agent_publisher.extensions.slideshow.service import run_chapter_pipeline
+            await run_chapter_pipeline(task_id, art_id, session)
 
     async def _bg_execute_outline(task_id: int, art_id: int) -> None:
         async with async_session_factory() as session:
@@ -1085,7 +1084,7 @@ async def skill_generate_slideshow(
             await run_generate_outline(task_id, art_id, session)
 
     if skip_review:
-        asyncio.create_task(_bg_execute_full(task.id, article_id, with_tts))
+        asyncio.create_task(_bg_execute_full(task.id, article_id))
     else:
         asyncio.create_task(_bg_execute_outline(task.id, article_id))
 
@@ -1128,8 +1127,8 @@ async def skill_slideshow_status(
         raise HTTPException(status_code=404, detail="Task not found")
 
     result = task.result or {}
-    has_video = bool(result.get("video_path") and Path(str(result.get("video_path", ""))).exists())
-    has_preview = bool(result.get("preview_html_path") and Path(str(result.get("preview_html_path", ""))).exists())
+    has_player = bool(result.get("concat_path") and Path(str(result.get("concat_path", ""))).exists())
+    has_timeline = bool(result.get("timeline_path") and Path(str(result.get("timeline_path", ""))).exists())
 
     response = {
         "task_id": task.id,
@@ -1137,14 +1136,19 @@ async def skill_slideshow_status(
         "status": task.status,
         "steps": task.steps or [],
         "error": result.get("error"),
-        "has_video": has_video,
-        "has_preview": has_preview,
+        "chapter_count": result.get("chapter_count", 0),
+        "has_player": has_player,
+        "has_timeline": has_timeline,
+        "chapters": result.get("chapters", []),
         "started_at": task.started_at.isoformat() if task.started_at else None,
         "finished_at": task.finished_at.isoformat() if task.finished_at else None,
     }
 
-    # Include draft slides if available
+    # Include draft data if available
     if task.status in ("draft_ready", "success"):
+        orchestrator_output = result.get("orchestrator_output")
+        if orchestrator_output:
+            response["orchestrator_output"] = orchestrator_output
         slides_draft = result.get("slides_draft")
         if slides_draft:
             response["slides_draft"] = slides_draft

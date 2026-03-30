@@ -1,0 +1,159 @@
+{
+  "title": "2025年AI大模型发展趋势",
+  "theme": "corporate",
+  "narrative_arc": "从技术突破到生态变革，揭示AI大模型如何重塑2025年产业格局",
+  "total_chapters": 6,
+  "total_duration": 170,
+  "chapters": [
+    {
+      "chapter_id": "ch_01",
+      "title": "2025：AI大模型的奇点时刻",
+      "purpose": "cover",
+      "slide_count": 1,
+      "duration": 8,
+      "html_file": "chapters/ch_01.html",
+      "notes_combined": "2025年，AI大模型迎来奇点时刻。四大技术趋势将重塑产业，从技术突破走向生态变革。",
+      "slides": [
+        {
+          "slide_id": "slide_01",
+          "title": "2025年AI大模型发展趋势",
+          "layout": "title",
+          "duration": 8,
+          "notes": "2025年，AI大模型迎来奇点时刻。四大技术趋势将重塑产业，从技术突破走向生态变革。"
+        }
+      ]
+    },
+    {
+      "chapter_id": "ch_02",
+      "title": "背景：从理解到创造的范式转移",
+      "purpose": "background",
+      "slide_count": 2,
+      "duration": 27,
+      "html_file": "chapters/ch_02.html",
+      "notes_combined": "承接上文，大模型正从理解走向创造，这不仅是技术升级，更是根本性的范式转移。 我们具体来看这次转移的两个维度：左边是能力边界的突破，大模型不再局限于文本，而是能同时处理图像、音频、视频；右边是生态变革，技术越来越普惠，商业应用也在全面爆发。",
+      "slides": [
+        {
+          "slide_id": "slide_01",
+          "title": "从理解到创造的范式转移",
+          "layout": "title",
+          "duration": 8,
+          "notes": "承接上文，大模型正从理解走向创造，这不仅是技术升级，更是根本性的范式转移。"
+        },
+        {
+          "slide_id": "slide_02",
+          "title": "范式转移的双重维度",
+          "layout": "two_column",
+          "duration": 19,
+          "notes": "我们具体来看这次转移的两个维度：左边是能力边界的突破，大模型不再局限于文本，而是能同时处理图像、音频、视频；右边是生态变革，技术越来越普惠，商业应用也在全面爆发。"
+        }
+      ]
+    },
+    {
+      "chapter_id": "ch_03",
+      "title": "技术突破：多模态与深度推理",
+      "purpose": "core",
+      "slide_count": 3,
+      "duration": 31,
+      "html_file": "chapters/ch_03.html",
+      "notes_combined": "我们进入第三章。如果说前两章讲的是背景铺垫，那么这一章要讲的是真正的技术拐点。2025年最引人注目的两大突破就摆在我们面前：多模态能力的全面爆发，以及深度推理能力的质的飞跃。 数据显示，推理模型在复杂数学任务上准确率达到92%，首次超越人类。与此同时，多模态能力全面爆发，AI开始具备真正的全感官理解能力。 这种深度推理到底意味着什么？思维链技术让AI学会分步思考，过程透明可追溯。在科学计算等严肃场景，AI已开始展现超越人类的潜力。",
+      "slides": [
+        {
+          "slide_id": "slide_01",
+          "title": "技术突破：多模态与深度推理",
+          "layout": "title",
+          "duration": 6,
+          "notes": "我们进入第三章。如果说前两章讲的是背景铺垫，那么这一章要讲的是真正的技术拐点。2025年最引人注目的两大突破就摆在我们面前：多模态能力的全面爆发，以及深度推理能力的质的飞跃。"
+        },
+        {
+          "slide_id": "slide_02",
+          "title": "推理能力实现历史性超越",
+          "layout": "chart_with_text",
+          "duration": 10,
+          "notes": "数据显示，推理模型在复杂数学任务上准确率达到92%，首次超越人类。与此同时，多模态能力全面爆发，AI开始具备真正的全感官理解能力。"
+        },
+        {
+          "slide_id": "slide_03",
+          "title": "深度推理的技术本质",
+          "layout": "bullets",
+          "duration": 15,
+          "notes": "这种深度推理到底意味着什么？思维链技术让AI学会分步思考，过程透明可追溯。在科学计算等严肃场景，AI已开始展现超越人类的潜力。"
+        }
+      ]
+    },
+    {
+      "chapter_id": "ch_04",
+      "title": "生态重构：开源崛起与Agent落地",
+      "purpose": "core",
+      "slide_count": 3,
+      "duration": 33,
+      "html_file": "chapters/ch_04.html",
+      "notes_combined": "我们进入第四章。如果说前面的技术突破是底层能力的积累，那么接下来要讲的生态重构，正在彻底改写AI产业的竞争规则。 值得注意的是，开源模型仅用两年就将性能差距从35分缩小到几乎为零。Llama、Qwen、DeepSeek们正在打破闭源垄断。 开源打破了技术垄断，Agent则改变了应用形态。左边是三大模型的集体突围，右边是数字员工正在企业流程中规模化落地，实现真正的自动化。",
+      "slides": [
+        {
+          "slide_id": "slide_01",
+          "title": "生态重构：开源崛起与Agent落地",
+          "layout": "title",
+          "duration": 6,
+          "notes": "我们进入第四章。如果说前面的技术突破是底层能力的积累，那么接下来要讲的生态重构，正在彻底改写AI产业的竞争规则。"
+        },
+        {
+          "slide_id": "slide_02",
+          "title": "开源模型性能两年内追平闭源巨头",
+          "layout": "chart",
+          "duration": 12,
+          "notes": "值得注意的是，开源模型仅用两年就将性能差距从35分缩小到几乎为零。Llama、Qwen、DeepSeek们正在打破闭源垄断。"
+        },
+        {
+          "slide_id": "slide_03",
+          "title": "双重变革重塑产业格局",
+          "layout": "two_column",
+          "duration": 15,
+          "notes": "开源打破了技术垄断，Agent则改变了应用形态。左边是三大模型的集体突围，右边是数字员工正在企业流程中规模化落地，实现真正的自动化。"
+        }
+      ]
+    },
+    {
+      "chapter_id": "ch_05",
+      "title": "关键洞察：技术民主化时代来临",
+      "purpose": "insight",
+      "slide_count": 2,
+      "duration": 48,
+      "html_file": "chapters/ch_05.html",
+      "notes_combined": "我们来看关键转折。过去顶尖AI被少数巨头垄断，但2025年，Meta的Llama、阿里Qwen、DeepSeek等开源模型，性能已快速追赶上闭源大模型。这意味着技术门槛被抹平，创新不再需要天价投入，技术民主化时代真正来临。 第二个洞察更重要。Agent正在从被动工具，升级为企业数字化的新入口。过去是人找软件，现在Agent能主动思考、自主决策，完成复杂业务流程。这标志着AI正式从工具变为数字员工，企业数字化转型的底层逻辑将被彻底重构。",
+      "slides": [
+        {
+          "slide_id": "slide_05_01",
+          "title": "开源闭源差距消失：技术民主化到来",
+          "layout": "two_column",
+          "duration": 24,
+          "notes": "我们来看关键转折。过去顶尖AI被少数巨头垄断，但2025年，Meta的Llama、阿里Qwen、DeepSeek等开源模型，性能已快速追赶上闭源大模型。这意味着技术门槛被抹平，创新不再需要天价投入，技术民主化时代真正来临。"
+        },
+        {
+          "slide_id": "slide_05_02",
+          "title": "Agent成为企业数字化新入口",
+          "layout": "bullets",
+          "duration": 24,
+          "notes": "第二个洞察更重要。Agent正在从被动工具，升级为企业数字化的新入口。过去是人找软件，现在Agent能主动思考、自主决策，完成复杂业务流程。这标志着AI正式从工具变为数字员工，企业数字化转型的底层逻辑将被彻底重构。"
+        }
+      ]
+    },
+    {
+      "chapter_id": "ch_06",
+      "title": "立即行动：拥抱AI新纪元",
+      "purpose": "cta",
+      "slide_count": 1,
+      "duration": 23,
+      "html_file": "chapters/ch_06.html",
+      "notes_combined": "好，今天最后一个章节。不要只停留在认知层面，现在就要行动。建议你做三件事：梳理多模态应用场景、部署Agent自动化流程、构建AI竞争壁垒。2025年的AI转型窗口期不等人，谁先落地谁就能领跑行业。感谢观看，我们下期再见！",
+      "slides": [
+        {
+          "slide_id": "slide_01",
+          "title": "立即行动：抢占AI转型先机",
+          "layout": "bullets",
+          "duration": 23,
+          "notes": "好，今天最后一个章节。不要只停留在认知层面，现在就要行动。建议你做三件事：梳理多模态应用场景、部署Agent自动化流程、构建AI竞争壁垒。2025年的AI转型窗口期不等人，谁先落地谁就能领跑行业。感谢观看，我们下期再见！"
+        }
+      ]
+    }
+  ]
+}
