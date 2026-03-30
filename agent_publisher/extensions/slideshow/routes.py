@@ -25,6 +25,26 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/extensions/slideshow", tags=["slideshow"])
 
+# Allowed base directory for slideshow output files (defense-in-depth)
+_SLIDESHOW_STORAGE_ROOT = Path("storage/slideshow").resolve()
+
+
+def _validate_file_path(file_path: str | None, must_exist: bool = True) -> Path | None:
+    """Validate that a file path from task.result stays within the slideshow storage root.
+
+    Returns resolved Path if valid, None otherwise. Prevents LFI even if task.result
+    is somehow tampered with.
+    """
+    if not file_path:
+        return None
+    resolved = Path(file_path).resolve()
+    if not resolved.is_relative_to(_SLIDESHOW_STORAGE_ROOT):
+        logger.warning("Path traversal blocked: %s is outside %s", file_path, _SLIDESHOW_STORAGE_ROOT)
+        return None
+    if must_exist and not resolved.exists():
+        return None
+    return resolved
+
 
 # ---------------------------------------------------------------------------
 # Auth helpers
@@ -178,8 +198,8 @@ async def preview_slideshow(
         raise HTTPException(400, f"Task not ready (status={task.status})")
 
     result = task.result or {}
-    html_path = result.get("preview_html_path")
-    if not html_path or not Path(html_path).exists():
+    html_path = _validate_file_path(result.get("preview_html_path"))
+    if not html_path:
         raise HTTPException(404, "Preview HTML not found")
 
     return FileResponse(html_path, media_type="text/html")
@@ -205,11 +225,12 @@ async def download_video(
         raise HTTPException(400, f"Task not ready (status={task.status})")
 
     result = task.result or {}
-    video_path = result.get("video_path")
-    if not video_path or not Path(video_path).exists():
+    video_path_str = result.get("video_path")
+    video_resolved = _validate_file_path(video_path_str)
+    if not video_resolved:
         raise HTTPException(404, "Video file not found")
 
-    is_webm = video_path.endswith(".webm")
+    is_webm = video_resolved.suffix == ".webm"
     media_type = "video/webm" if is_webm else "video/mp4"
     task_suffix = ".webm" if is_webm else ".mp4"
 
@@ -219,7 +240,7 @@ async def download_video(
     slug = (article.title[:30].replace(" ", "_") if article else f"slideshow_{task_id}")
 
     return FileResponse(
-        video_path,
+        video_resolved,
         media_type=media_type,
         filename=f"{slug}{task_suffix}",
         headers={"Content-Disposition": f'attachment; filename="{slug}{task_suffix}"'},
@@ -246,12 +267,12 @@ async def download_subtitle(
         raise HTTPException(400, f"Task not ready (status={task.status})")
 
     result = task.result or {}
-    srt_path = result.get("srt_path")
-    if not srt_path or not Path(srt_path).exists():
+    srt_resolved = _validate_file_path(result.get("srt_path"))
+    if not srt_resolved:
         raise HTTPException(404, "Subtitle file not found")
 
     return FileResponse(
-        srt_path,
+        srt_resolved,
         media_type="text/plain",
         filename=f"slideshow_{task_id}.srt",
         headers={"Content-Disposition": f'attachment; filename="slideshow_{task_id}.srt"'},
@@ -275,9 +296,9 @@ async def slideshow_status(
     await _verify_task_ownership(task, email, is_admin, db)
 
     result = task.result or {}
-    has_video = bool(result.get("video_path") and Path(str(result.get("video_path", ""))).exists())
-    has_subtitle = bool(result.get("srt_path") and Path(str(result.get("srt_path", ""))).exists())
-    has_preview = bool(result.get("preview_html_path") and Path(str(result.get("preview_html_path", ""))).exists())
+    has_video = _validate_file_path(result.get("video_path")) is not None
+    has_subtitle = _validate_file_path(result.get("srt_path")) is not None
+    has_preview = _validate_file_path(result.get("preview_html_path")) is not None
 
     return {
         "task_id": task.id,

@@ -22,6 +22,7 @@ from agent_publisher.models.agent import Agent
 from agent_publisher.models.media import MediaAsset
 from agent_publisher.services.article_service import ArticleService
 from agent_publisher.services.candidate_material_service import CandidateMaterialService
+from agent_publisher.services.source_registry_service import SourceRegistryService
 from agent_publisher.services.wechat_service import WeChatService
 from agent_publisher.schemas.candidate_material import CandidateMaterialCreate
 
@@ -668,6 +669,81 @@ async def skill_generate(
 
 
 # ---------------------------------------------------------------------------
+# Collect (trending / RSS / search — no LLM required)
+# ---------------------------------------------------------------------------
+
+@router.post("/agents/{agent_id}/collect")
+async def skill_collect(
+    agent_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Trigger material collection for an agent (ownership check).
+
+    This is a pure algorithmic operation — no LLM configuration is required
+    on the remote server. The collected materials are returned directly so
+    the caller (e.g. a local Claude instance) can process them.
+    """
+    email = _get_skill_email(request)
+    is_admin = settings.is_admin(email)
+
+    agent = await db.get(Agent, agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    if not is_admin:
+        account = await db.get(Account, agent.account_id)
+        if not account or account.owner_email != email:
+            raise HTTPException(status_code=403, detail="You do not own this agent's account")
+
+    # Run collection (pure algorithm, no LLM)
+    registry_svc = SourceRegistryService(db)
+    collect_result = await registry_svc.collect_for_agent(agent)
+    total_collected = sum(len(ids) for ids in collect_result.values())
+
+    # Fetch newly collected materials for this agent
+    mat_svc = CandidateMaterialService(db)
+    from agent_publisher.schemas.candidate_material import CandidateMaterialListParams
+    materials, _total = await mat_svc.list_materials(
+        CandidateMaterialListParams(agent_id=agent_id, page=1, page_size=200)
+    )
+
+    # Only return materials that were just collected (by IDs from collect_result)
+    collected_ids = set()
+    for ids in collect_result.values():
+        collected_ids.update(ids)
+
+    new_materials = [m for m in materials if m.id in collected_ids] if collected_ids else []
+
+    logger.info(
+        "Skill collect for agent %d (%s): %d materials by email=%s",
+        agent_id, agent.name, total_collected, email,
+    )
+
+    return {
+        "agent_id": agent_id,
+        "agent_name": agent.name,
+        "total_collected": total_collected,
+        "collect_summary": {k: len(v) for k, v in collect_result.items()},
+        "materials": [
+            {
+                "id": m.id,
+                "title": m.title,
+                "summary": m.summary,
+                "original_url": m.original_url,
+                "quality_score": m.quality_score,
+                "source_type": m.source_type,
+                "tags": m.tags or [],
+                "metadata": m.extra_metadata or {},
+                "is_duplicate": m.is_duplicate,
+                "created_at": m.created_at.isoformat() if m.created_at else None,
+            }
+            for m in new_materials
+        ],
+    }
+
+
+# ---------------------------------------------------------------------------
 # Task status
 # ---------------------------------------------------------------------------
 
@@ -949,6 +1025,132 @@ async def skill_sync_article(
         raise HTTPException(status_code=404, detail=str(e))
     except RuntimeError as e:
         raise HTTPException(status_code=502, detail=f"WeChat sync failed: {e}")
+
+
+# ---------------------------------------------------------------------------
+# Slideshow generation (Skills)
+# ---------------------------------------------------------------------------
+
+class SkillSlideshowRequest(BaseModel):
+    with_tts: bool = True
+    skip_review: bool = False
+
+
+@router.post("/articles/{article_id}/slideshow")
+async def skill_generate_slideshow(
+    article_id: int,
+    data: SkillSlideshowRequest | None = None,
+    request: Request = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """Create a slideshow task for an article (ownership check).
+
+    Parameters:
+    - with_tts: whether to generate TTS audio (default true)
+    - skip_review: skip draft review and generate immediately (default false)
+    """
+    import asyncio
+    from agent_publisher.services.task_service import TaskService
+    from agent_publisher.database import async_session_factory
+
+    email = _get_skill_email(request)
+    is_admin = settings.is_admin(email)
+
+    article = await db.get(Article, article_id)
+    if not article:
+        raise HTTPException(status_code=404, detail="Article not found")
+
+    # Ownership check
+    if not is_admin:
+        agent = await db.get(Agent, article.agent_id)
+        if agent:
+            account = await db.get(Account, agent.account_id)
+            if not account or account.owner_email != email:
+                raise HTTPException(status_code=403, detail="Access denied")
+
+    with_tts = data.with_tts if data else True
+    skip_review = data.skip_review if data else False
+
+    task_svc = TaskService(db)
+    task = await task_svc.create_task(None, "slideshow_generate")
+
+    async def _bg_execute_full(task_id: int, art_id: int, tts: bool) -> None:
+        async with async_session_factory() as session:
+            from agent_publisher.extensions.slideshow.service import run_pipeline
+            await run_pipeline(task_id, art_id, tts, session)
+
+    async def _bg_execute_outline(task_id: int, art_id: int) -> None:
+        async with async_session_factory() as session:
+            from agent_publisher.extensions.slideshow.service import run_generate_outline
+            await run_generate_outline(task_id, art_id, session)
+
+    if skip_review:
+        asyncio.create_task(_bg_execute_full(task.id, article_id, with_tts))
+    else:
+        asyncio.create_task(_bg_execute_outline(task.id, article_id))
+
+    mode = "skip_review" if skip_review else "draft_review"
+    logger.info(
+        "Skill slideshow for article %d: task=%d mode=%s by email=%s",
+        article_id, task.id, mode, email,
+    )
+    return {"task_id": task.id, "mode": mode}
+
+
+@router.get("/articles/{article_id}/slideshow/{task_id}")
+async def skill_slideshow_status(
+    article_id: int,
+    task_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Get slideshow task status and draft content."""
+    from pathlib import Path
+    from agent_publisher.models.task import Task
+
+    email = _get_skill_email(request)
+    is_admin = settings.is_admin(email)
+
+    article = await db.get(Article, article_id)
+    if not article:
+        raise HTTPException(status_code=404, detail="Article not found")
+
+    # Ownership check
+    if not is_admin:
+        agent = await db.get(Agent, article.agent_id)
+        if agent:
+            account = await db.get(Account, agent.account_id)
+            if not account or account.owner_email != email:
+                raise HTTPException(status_code=403, detail="Access denied")
+
+    task = await db.get(Task, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    result = task.result or {}
+    has_video = bool(result.get("video_path") and Path(str(result.get("video_path", ""))).exists())
+    has_preview = bool(result.get("preview_html_path") and Path(str(result.get("preview_html_path", ""))).exists())
+
+    response = {
+        "task_id": task.id,
+        "article_id": article_id,
+        "status": task.status,
+        "steps": task.steps or [],
+        "error": result.get("error"),
+        "has_video": has_video,
+        "has_preview": has_preview,
+        "started_at": task.started_at.isoformat() if task.started_at else None,
+        "finished_at": task.finished_at.isoformat() if task.finished_at else None,
+    }
+
+    # Include draft slides if available
+    if task.status in ("draft_ready", "success"):
+        slides_draft = result.get("slides_draft")
+        if slides_draft:
+            response["slides_draft"] = slides_draft
+            response["slide_count"] = len(slides_draft)
+
+    return response
 
 
 # ---------------------------------------------------------------------------

@@ -587,5 +587,66 @@ def image_generate(prompt: str = typer.Argument(..., help="Image description")):
     _run(_gen())
 
 
+# ==================== Collect ====================
+
+@app.command("collect")
+def collect(
+    agent_id: Optional[int] = typer.Option(None, "--agent-id", help="Agent ID to collect for"),
+    all_agents: bool = typer.Option(False, "--all", help="Collect for all active agents"),
+):
+    """Collect trending/RSS/search materials for agents (no LLM required)."""
+
+    async def _collect():
+        from sqlalchemy import select
+
+        from agent_publisher.models.agent import Agent
+        from agent_publisher.services.source_registry_service import SourceRegistryService
+
+        async with await _get_session() as session:
+            registry_svc = SourceRegistryService(session)
+
+            if all_agents:
+                result = await session.execute(
+                    select(Agent).where(Agent.is_active.is_(True)).order_by(Agent.id)
+                )
+                agents = result.scalars().all()
+                if not agents:
+                    console.print("[yellow]No active agents found[/yellow]")
+                    raise typer.Exit(0)
+
+                console.print(f"[yellow]Collecting for {len(agents)} active agent(s)...[/yellow]")
+                grand_total = 0
+                for agent in agents:
+                    console.print(f"  [yellow]Agent {agent.id} ({agent.name})...[/yellow]", end="")
+                    try:
+                        collect_result = await registry_svc.collect_for_agent(agent)
+                        total = sum(len(ids) for ids in collect_result.values())
+                        grand_total += total
+                        summary = ", ".join(f"{k}={len(v)}" for k, v in collect_result.items()) or "none"
+                        console.print(f" [green]{total} materials ({summary})[/green]")
+                    except Exception as e:
+                        console.print(f" [red]failed: {e}[/red]")
+
+                console.print(f"[green]Total collected: {grand_total} materials[/green]")
+
+            elif agent_id is not None:
+                agent = await session.get(Agent, agent_id)
+                if not agent:
+                    console.print(f"[red]Agent {agent_id} not found[/red]")
+                    raise typer.Exit(1)
+
+                console.print(f"[yellow]Collecting for agent '{agent.name}' (id={agent.id})...[/yellow]")
+                collect_result = await registry_svc.collect_for_agent(agent)
+                total = sum(len(ids) for ids in collect_result.values())
+                summary = ", ".join(f"{k}={len(v)}" for k, v in collect_result.items()) or "none"
+                console.print(f"[green]Collected {total} materials ({summary})[/green]")
+
+            else:
+                console.print("[red]Specify --agent-id or --all[/red]")
+                raise typer.Exit(1)
+
+    _run(_collect())
+
+
 if __name__ == "__main__":
     app()

@@ -229,7 +229,10 @@ async def download_media(
     if not asset:
         raise HTTPException(status_code=404, detail="Media asset not found")
 
-    file_path = UPLOAD_DIR / asset.stored_filename
+    file_path = (UPLOAD_DIR / asset.stored_filename).resolve()
+    # Defense-in-depth: ensure resolved path stays within upload directory
+    if not file_path.is_relative_to(UPLOAD_DIR.resolve()):
+        raise HTTPException(status_code=403, detail="Access denied")
     if not file_path.is_file():
         raise HTTPException(status_code=404, detail="File not found on disk")
 

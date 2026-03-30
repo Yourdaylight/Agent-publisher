@@ -320,9 +320,19 @@ if STATIC_DIR.is_dir():
 
     @app.get("/{full_path:path}")
     async def serve_spa(full_path: str):
-        """Serve Vue SPA – return index.html for any non-API, non-asset path."""
-        file = STATIC_DIR / full_path
-        if file.is_file():
+        """Serve Vue SPA – return index.html for any non-API, non-asset path.
+
+        Security: resolve() + is_relative_to() prevents path traversal (LFI).
+        """
+        # Reject obvious traversal attempts early
+        if ".." in full_path or full_path.startswith("/"):
+            return FileResponse(STATIC_DIR / "index.html")
+
+        file = (STATIC_DIR / full_path).resolve()
+        static_root = STATIC_DIR.resolve()
+
+        # Ensure resolved path stays within the static directory
+        if file.is_relative_to(static_root) and file.is_file():
             return FileResponse(file)
         return FileResponse(STATIC_DIR / "index.html")
 else:
