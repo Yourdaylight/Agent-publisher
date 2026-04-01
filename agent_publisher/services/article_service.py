@@ -839,6 +839,30 @@ class ArticleService:
         # 7. Render Markdown to HTML
         html_content = self._markdown_to_html(parsed["content"])
 
+        # 7b. If the source article has custom html_content with inline styles,
+        # prefer it as the base: extract images from source html and inject into
+        # variant html so body images are preserved.
+        source_html = source.html_content or ""
+        if source_html:
+            # Extract all <img src="..."> from source html
+            img_pattern = re.compile(
+                r'<img\b[^>]*\bsrc=["\']([^"\']+)["\']',
+                flags=re.IGNORECASE,
+            )
+            source_imgs = img_pattern.findall(source_html)
+            variant_img_count = len(img_pattern.findall(html_content))
+            # If source has images but variant html has none, append them at end
+            if source_imgs and variant_img_count == 0:
+                img_tags = "".join(
+                    f'<img src="{src}" style="max-width:100%;border-radius:8px;margin:16px 0;display:block;" />'
+                    for src in source_imgs
+                )
+                html_content = html_content + img_tags
+                logger.info(
+                    "Variant %s: injected %d images from source article %d",
+                    parsed["title"][:30], len(source_imgs), source_article_id,
+                )
+
         # 8. Create variant article
         variant = Article(
             agent_id=target_agent_id,
@@ -959,16 +983,22 @@ class ArticleService:
 
     async def _get_publish_html(self, article: Article) -> str:
         publish_html = article.html_content
-        if article.content and 'data-provider="WenYan"' not in (publish_html or ''):
+
+        # Only fall back to wenyan re-render when:
+        # 1. There is no html_content at all, AND
+        # 2. There is markdown content to render from
+        # Do NOT re-render if html_content exists — user-provided HTML (e.g. from
+        # skill API with inline styles) must be preserved as-is.
+        if not publish_html and article.content:
             logger.info(
-                'Article %d html not wenyan-rendered, re-rendering markdown',
+                'Article %d has no html_content, rendering markdown',
                 article.id,
             )
             rendered = self._markdown_to_html(article.content)
-            if 'data-provider="WenYan"' in rendered:
-                publish_html = rendered
-                article.html_content = rendered
-                await self.session.flush()
+            publish_html = rendered
+            article.html_content = rendered
+            await self.session.flush()
+
         return publish_html
 
     async def _get_or_create_relation(
