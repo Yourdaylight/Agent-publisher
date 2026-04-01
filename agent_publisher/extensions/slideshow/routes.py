@@ -119,6 +119,7 @@ async def _verify_task_ownership(
 class SlideshowRequest(BaseModel):
     article_id: int
     skip_review: bool = False
+    mode: str = "slideshow"  # "slideshow" | "video"
 
 
 class DraftConfirmRequest(BaseModel):
@@ -156,11 +157,11 @@ async def generate_slideshow(
     task = await task_svc.create_task(None, "slideshow_generate")
 
     if req.skip_review:
-        asyncio.create_task(_execute_full_pipeline(task.id, req.article_id))
+        asyncio.create_task(_execute_full_pipeline(task.id, req.article_id, mode=req.mode))
     else:
         asyncio.create_task(_execute_outline_only(task.id, req.article_id))
 
-    return {"task_id": task.id, "mode": "skip_review" if req.skip_review else "draft_review"}
+    return {"task_id": task.id, "mode": req.mode, "review": "skip_review" if req.skip_review else "draft_review"}
 
 
 @router.get("/status/{task_id}")
@@ -186,13 +187,16 @@ async def slideshow_status(
     return {
         "task_id": task.id,
         "status": task.status,
+        "mode": result.get("mode", "slideshow"),
         "steps": task.steps or [],
         "error": result.get("error"),
         "article_id": result.get("article_id"),
         "chapter_count": result.get("chapter_count", 0),
+        "scene_count": result.get("scene_count", 0),
         "has_player": has_player,
         "has_timeline": has_timeline,
         "chapters": result.get("chapters", []),
+        "scenes": result.get("scenes", []),
         "started_at": task.started_at.isoformat() if task.started_at else None,
         "finished_at": task.finished_at.isoformat() if task.finished_at else None,
     }
@@ -259,6 +263,42 @@ async def get_chapter_html(
         raise HTTPException(404, f"Chapter {chapter_id} not found")
 
     return FileResponse(chapter_path, media_type="text/html")
+
+
+@router.get("/scene/{task_id}/{scene_id}")
+async def get_scene_html(
+    task_id: int,
+    scene_id: str,
+    request: Request,
+    token: str | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """Serve a single scene's HTML file (vertical video mode)."""
+    email, is_admin = await _resolve_user(request, token, db)
+
+    task = await db.get(Task, task_id)
+    if not task:
+        raise HTTPException(403, "Access denied")
+
+    await _verify_task_ownership(task, email, is_admin, db)
+
+    if task.status != "success":
+        raise HTTPException(400, f"Task not ready (status={task.status})")
+
+    result = task.result or {}
+    output_dir = result.get("output_dir")
+    if not output_dir:
+        raise HTTPException(404, "Output directory not found")
+
+    # Validate scene_id to prevent path traversal
+    if not scene_id.replace("_", "").replace("-", "").isalnum():
+        raise HTTPException(400, "Invalid scene_id")
+
+    scene_path = _validate_file_path(f"{output_dir}/scenes/{scene_id}.html")
+    if not scene_path:
+        raise HTTPException(404, f"Scene {scene_id} not found")
+
+    return FileResponse(scene_path, media_type="text/html")
 
 
 @router.get("/timeline/{task_id}")
@@ -406,11 +446,11 @@ async def skip_draft(
 # Background task executors
 # ---------------------------------------------------------------------------
 
-async def _execute_full_pipeline(task_id: int, article_id: int) -> None:
-    """Full pipeline: orchestrator + parallel chapters + assembly."""
+async def _execute_full_pipeline(task_id: int, article_id: int, *, mode: str = "slideshow") -> None:
+    """Full pipeline: orchestrator + parallel chapters/scenes + assembly."""
     async with async_session_factory() as session:
         from agent_publisher.extensions.slideshow.service import run_chapter_pipeline
-        await run_chapter_pipeline(task_id, article_id, session)
+        await run_chapter_pipeline(task_id, article_id, session, mode=mode)
 
 
 async def _execute_outline_only(task_id: int, article_id: int) -> None:

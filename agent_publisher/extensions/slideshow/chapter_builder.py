@@ -196,3 +196,98 @@ def build_timeline_json(
         "total_duration": total_duration,
         "chapters": chapter_entries,
     }
+
+
+# ---------------------------------------------------------------------------
+# Video mode (vertical 1080×1920) builders
+# ---------------------------------------------------------------------------
+
+def build_vertical_scene_html(
+    scenes: list[dict],
+    *,
+    theme: str = "dark_video",
+    video_title: str = "",
+    scene_title: str = "",
+) -> str:
+    """Render a self-contained vertical scene HTML file (1080×1920).
+
+    Each scene contains three zones: top_text, visual, bottom_text
+    with CSS entrance animations selected by the LLM.
+    """
+    env = _make_env()
+    theme_css = _load_theme_css(theme)
+
+    template = env.get_template("vertical_scene.html.j2")
+    html = template.render(
+        scenes=scenes,
+        theme_css=theme_css,
+        video_title=video_title,
+        scene_title=scene_title,
+    )
+    return html
+
+
+def build_vertical_concat_html(timeline: dict) -> str:
+    """Render the vertical video concat.html player.
+
+    Loads scene HTML files via iframes in 9:16 portrait ratio.
+    """
+    env = _make_env()
+
+    scenes_for_js = []
+    for sc in timeline.get("scenes", []):
+        scenes_for_js.append({
+            "scene_id": sc["scene_id"],
+            "title": sc.get("title", ""),
+            "html_file": sc["html_file"],
+            "notes": sc.get("notes", ""),
+        })
+
+    template = env.get_template("vertical_concat.html.j2")
+    html = template.render(
+        title=timeline.get("title", "Video"),
+        scenes=timeline.get("scenes", []),
+        scenes_json=json.dumps(scenes_for_js, ensure_ascii=False),
+    )
+    return html
+
+
+def build_video_timeline_json(
+    title: str,
+    theme: str,
+    narrative_arc: str,
+    scenes: list[dict],
+) -> dict:
+    """Build timeline.json for the vertical video mode.
+
+    Parameters
+    ----------
+    title: video title
+    theme: CSS theme name
+    narrative_arc: one-line narrative description
+    scenes: list of dicts, each with:
+        scene_id, title, duration, html_file, notes, etc.
+    """
+    scene_entries = []
+    total_duration = 0
+
+    for sc in scenes:
+        dur = sc.get("duration", 8)
+        total_duration += dur
+        scene_entries.append({
+            "scene_id": sc["scene_id"],
+            "title": sc.get("title", ""),
+            "duration": dur,
+            "html_file": sc["html_file"],
+            "notes": sc.get("notes", ""),
+        })
+
+    return {
+        "title": title,
+        "theme": theme,
+        "mode": "video",
+        "narrative_arc": narrative_arc,
+        "total_scenes": len(scene_entries),
+        "total_duration": total_duration,
+        "scenes": scene_entries,
+    }
