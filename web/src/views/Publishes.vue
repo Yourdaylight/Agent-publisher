@@ -179,8 +179,8 @@ const fetchStats = async () => {
     const res = await getPublishStats();
     stats.value = res.data;
     pagination.value.total = res.data.total || 0;
-  } catch {
-    // ignore
+  } catch (err) {
+    console.warn('加载发布统计失败', err);
   }
 };
 
@@ -190,13 +190,13 @@ const onPageChange = (pageInfo: any) => {
   fetchRecords();
 };
 
-const onReset = () => {
+const onReset = async () => {
   filterArticleId.value = '';
   filterAction.value = undefined;
   filterStatus.value = undefined;
   pagination.value.current = 1;
-  fetchRecords();
-  fetchStats();
+  await fetchStats();
+  await fetchRecords();
 };
 
 const showError = (row: any) => {

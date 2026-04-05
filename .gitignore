@@ -12,3 +12,4 @@ web/dist/
 .venv/
 deploy.sh
 .gstack/
+竞品/

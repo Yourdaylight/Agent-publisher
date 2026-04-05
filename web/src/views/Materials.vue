@@ -302,6 +302,7 @@
       <template #op="{ row }">
         <t-space>
           <t-link theme="primary" @click="openDetail(row)">详情</t-link>
+          <t-link v-if="libraryMode !== 'media'" theme="primary" @click="goWorkbenchWithMaterial(row)">一键二创</t-link>
           <t-link v-if="libraryMode === 'candidate'" theme="primary" @click="openTagEditor(row)">标签</t-link>
           <t-link v-if="libraryMode === 'media'" theme="primary" :href="row.url" target="_blank">查看</t-link>
           <t-link v-if="libraryMode === 'media'" theme="danger" @click="confirmDeleteMedia(row)">删除</t-link>
@@ -589,6 +590,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
+import { useRouter } from 'vue-router';
 import {
   getAccounts,
   getAgents,
@@ -605,6 +607,7 @@ import {
 } from '@/api';
 import { MessagePlugin } from 'tdesign-vue-next';
 
+const router = useRouter();
 const loading = ref(false);
 const materials = ref<any[]>([]);
 const agents = ref<any[]>([]);
@@ -1297,6 +1300,13 @@ const removeTag = async (tag: string) => {
   } catch {
     MessagePlugin.error('移除标签失败');
   }
+};
+
+const goWorkbenchWithMaterial = (row: any) => {
+  router.push({
+    path: '/workbench',
+    query: { materialId: String(row.id) },
+  });
 };
 
 // ── Init ──

@@ -10,8 +10,7 @@
       <t-button theme="primary" @click="openCreateDialog">新建权限组</t-button>
     </div>
 
-    <t-loading v-if="loading" />
-    <div v-else>
+    <t-loading :loading="loading">
       <t-card
         v-for="group in groups"
         :key="group.id"
@@ -49,8 +48,8 @@
         </div>
       </t-card>
 
-      <t-empty v-if="groups.length === 0" description="暂无权限组，点击右上角创建" />
-    </div>
+      <t-empty v-if="!loading && groups.length === 0" description="暂无权限组，点击右上角创建" />
+    </t-loading>
 
     <!-- Create Group Dialog -->
     <t-dialog

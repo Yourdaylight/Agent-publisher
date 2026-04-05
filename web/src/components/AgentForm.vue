@@ -10,9 +10,12 @@
       </t-select>
     </t-form-item>
     <t-form-item label="关联公众号" name="account_id">
-      <t-select v-model="formData.account_id" placeholder="选择公众号">
+      <t-select v-model="formData.account_id" placeholder="可选，稍后绑定也行" clearable>
         <t-option v-for="a in accounts" :key="a.id" :label="a.name" :value="a.id" />
       </t-select>
+      <div style="margin-top: 4px; font-size: 12px; color: var(--td-text-color-placeholder)">
+        不绑定公众号也能创作，发布时再选择目标公众号
+      </div>
     </t-form-item>
 
     <!-- ===== 高级配置（可折叠） ===== -->
@@ -130,6 +133,7 @@
 <script setup lang="ts">
 import { ref, reactive, watch, onMounted } from 'vue';
 import { createAgent, updateAgent, getAccounts, getStylePresets, getLLMProfiles } from '@/api';
+import { MessagePlugin } from 'tdesign-vue-next';
 
 const topicPresets = ['AI与科技', '金融投资', '健康养生', '教育成长', '娱乐文化', '体育竞技', '汽车出行', '美食烹饪'];
 
@@ -173,7 +177,7 @@ const formData = reactive({
 const rules = {
   name: [{ required: true, message: '请输入 Agent 名称' }],
   topic: [{ required: true, message: '请选择主题' }],
-  account_id: [{ required: true, message: '请选择关联公众号' }],
+  // account_id is optional — agents can exist without a WeChat account
 };
 
 watch(() => props.initialData, (val) => {
@@ -198,7 +202,9 @@ onMounted(async () => {
     accounts.value = accRes.data;
     stylePresets.value = styleRes.data;
     llmProfiles.value = profilesRes.data;
-  } catch {}
+  } catch (err) {
+    console.warn('加载 AgentForm 初始数据失败', err);
+  }
 });
 
 const onSubmit = async ({ validateResult }: any) => {

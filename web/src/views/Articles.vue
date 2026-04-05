@@ -100,12 +100,12 @@
               👁
             </t-button>
           </t-tooltip>
-          <t-tooltip content="编辑文章">
+          <t-tooltip content="在线编辑文章">
             <t-button
               theme="primary"
               variant="text"
               size="small"
-              @click="openEditor(row)"
+              @click="openFullEditor(row)"
             >
               ✏️
             </t-button>
@@ -924,7 +924,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue';
-import { onBeforeRouteLeave } from 'vue-router';
+import { onBeforeRouteLeave, useRouter } from 'vue-router';
 import {
   getArticles,
   getArticle,
@@ -956,6 +956,7 @@ import http from '@/api';
 import { MessagePlugin, NotifyPlugin } from 'tdesign-vue-next';
 import { getUserInfo } from '@/api';
 
+const router = useRouter();
 const loading = ref(false);
 const articles = ref<any[]>([]);
 const agentOptions = ref<any[]>([]);
@@ -1079,7 +1080,7 @@ const columns = [
   { colKey: 'variant_count', title: '变体', width: 70 },
   { colKey: 'publish_count', title: '发布次数', width: 90 },
   { colKey: 'created_at', title: '创建时间', width: 180, cell: (_h: any, { row }: any) => new Date(row.created_at).toLocaleString() },
-  { colKey: 'op', title: '操作', width: 160 },
+  { colKey: 'op', title: '操作', width: 280 },
 ];
 
 const variantColumns = [
@@ -1167,8 +1168,8 @@ const fetchData = async () => {
     }
     const res = await getArticles(params);
     articles.value = res.data;
-  } catch {
-    // ignore
+  } catch (err) {
+    console.warn('加载文章列表失败', err);
   } finally {
     loading.value = false;
   }
@@ -1193,25 +1194,8 @@ const openPreview = async (row: any) => {
   }
 };
 
-const openEditor = async (row: any) => {
-  try {
-    const res = await getArticle(row.id);
-    const article = res.data;
-    editForm.value = {
-      id: article.id,
-      title: article.title || '',
-      digest: article.digest || '',
-      content: article.content || '',
-      html_content: article.html_content || '',
-      cover_image_url: article.cover_image_url || '',
-      status: article.status || 'draft',
-    };
-    editTab.value = 'markdown';
-    htmlMode.value = 'preview';
-    editDrawerVisible.value = true;
-  } catch {
-    MessagePlugin.error('加载文章失败');
-  }
+const openFullEditor = (row: any) => {
+  router.push(`/create?article_id=${row.id}`);
 };
 
 const onEditDrawerClose = () => {
@@ -1307,9 +1291,6 @@ const executePublishAction = async () => {
     const articleId = publishTargetArticle.value.id;
     const actionText = publishAction.value === 'publish' ? '发布' : '同步';
 
-    // Log for debugging
-    console.log(`[${actionText}] Article ID: ${articleId}, Target Accounts:`, publishTargetIds.value);
-
     const requestData = {
       target_account_ids: publishTargetIds.value.length > 0 ? publishTargetIds.value : undefined,
     };
@@ -1319,7 +1300,6 @@ const executePublishAction = async () => {
       : syncArticle(articleId, requestData);
 
     const res = await request;
-    console.log(`[${actionText}] Response:`, res.data);
 
     const payload = res.data as PublishResponsePayload;
     const message = buildPublishResultMessage(payload);
@@ -1894,7 +1874,7 @@ async function onConfirmDraft() {
   if (!slideshowTaskId.value || slideshowSubmitting.value) return;
   slideshowSubmitting.value = true;
   try {
-    await confirmSlideshowDraft(slideshowTaskId.value);
+    await confirmSlideshowDraft(slideshowTaskId.value, draftSlides.value);
     slideshowPhase.value = 'progress';
     slideshowPollRetries = 0;
     const taskId = slideshowTaskId.value;
@@ -1976,7 +1956,6 @@ const onExtensionAction = async (action: any, article: any) => {
     try {
       const { data } = await http.post(action.endpoint, { article_id: article.id });
       MessagePlugin.success(`${action.label} 任务已创建`);
-      console.log('Extension action result:', data);
     } catch (err: any) {
       MessagePlugin.error(err?.response?.data?.detail || `${action.label} 失败`);
     }

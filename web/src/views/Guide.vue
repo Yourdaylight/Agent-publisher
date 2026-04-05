@@ -182,7 +182,7 @@
       <template #footer>
         <div style="display: flex; justify-content: space-between">
           <t-button variant="outline" @click="currentStep = 4">上一步</t-button>
-          <t-button theme="primary" @click="$router.push('/dashboard')">完成，进入仪表盘</t-button>
+          <t-button theme="primary" @click="$router.push('/create')">完成，开始创作</t-button>
         </div>
       </template>
     </t-card>
