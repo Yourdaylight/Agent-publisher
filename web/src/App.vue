@@ -170,6 +170,7 @@ const isCreatePage = computed(() => route.path === '/create');
 const expandedStorageKey = 'ap_menu_expanded_v2';
 
 const menuGroupByPath: Array<[string, string]> = [
+  ['/home', ''],
   ['/trending', ''],
   ['/create', ''],
   ['/articles', ''],

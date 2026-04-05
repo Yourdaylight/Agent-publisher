@@ -176,7 +176,14 @@
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
                 AI 生成
               </div>
-              <div class="ai-prompt-label">创作指令</div>
+              <!-- 创作模式选择 -->
+              <div class="ai-prompt-label">创作模式</div>
+              <div class="mode-chips">
+                <button v-for="m in modeOptions" :key="m.value" type="button" class="mode-chip" :class="{ active: selectedMode === m.value }" @click="selectedMode = m.value">
+                  {{ m.icon }} {{ m.label }}
+                </button>
+              </div>
+              <div class="ai-prompt-label" style="margin-top: 10px">创作指令</div>
               <textarea
                 v-model="userPrompt"
                 class="ai-prompt-box"
@@ -185,13 +192,26 @@
               <button
                 type="button"
                 class="ai-generate-btn"
-                :disabled="creating || !selectedHotspot"
+                :disabled="creating || hotspotLoading"
                 @click="doAIWrite"
               >
-                <span v-if="!creating">AI 生成文章</span>
+                <span v-if="!creating && !hotspotLoading">AI 生成文章</span>
+                <span v-else-if="hotspotLoading">加载话题中...</span>
                 <t-loading v-else size="small" theme="dots" />
               </button>
               <div class="ai-cost">消耗 ~3 Credits · 约30秒</div>
+            </div>
+
+            <!-- 模块1b: 生成封面图 -->
+            <div class="ai-card" v-if="form.id">
+              <div class="ai-card-title">🖼 AI 配图</div>
+              <button type="button" class="beautify-btn primary-beauty" style="width:100%" :disabled="coverGenerating" @click="doGenerateCover">
+                <template v-if="!coverGenerating">
+                  <span>🖼 生成封面图</span>
+                  <span class="b-desc">AI 自动生成配图 · 1 Credit</span>
+                </template>
+                <template v-else><t-loading size="small" /> 生成中...</template>
+              </button>
             </div>
 
             <!-- 模块2: 排版美化（高亮核心模块） -->
@@ -298,6 +318,9 @@
         <t-button variant="outline" size="medium" :loading="saving" :disabled="!form.id" @click="saveArticle">
           💾 保存草稿
         </t-button>
+        <t-button variant="outline" size="medium" :disabled="!form.id" @click="openSlideshow">
+          🎬 生成视频
+        </t-button>
         <t-button
           theme="primary"
           size="medium"
@@ -323,7 +346,7 @@ import {
   beautifyArticle, getAgents, getArticle, getArticles, generateVariants,
   getHotspot, getHotspots, getPromptTemplates, getStylePresets,
   syncArticle, updateArticle, uploadMedia, getMedia, getAccounts,
-  getCreditsBalance,
+  getCreditsBalance, generateCoverImage, generateSlideshow, getSlideshowPreviewUrl,
 } from '@/api';
 
 interface EditForm {
@@ -345,6 +368,16 @@ const aiBeautifying = ref(false);
 const createVisible = ref(false);
 const configPanelVisible = ref(false);
 const showStylePicker = ref(false);
+const coverGenerating = ref(false);
+const hotspotLoading = ref(false);
+
+// --- 创作模式 ---
+const selectedMode = ref('rewrite');
+const modeOptions = [
+  { value: 'rewrite', label: '爆款二创', icon: '🔥' },
+  { value: 'expand', label: '深度分析', icon: '🧠' },
+  { value: 'summary', label: '热点总结', icon: '📊' },
+];
 
 // --- 数据源 ---
 const selectedHotspot = ref<any>(null);
@@ -596,16 +629,25 @@ const fetchArticle = async () => {
 const loadSelectedHotspot = async () => {
   const id = route.query.hotspot_id ? Number(route.query.hotspot_id) : undefined;
   if (!id || Number.isNaN(id)) return;
+  hotspotLoading.value = true;
   try {
     const res = await getHotspot(id);
     selectedHotspot.value = res.data;
     selectedHotspotId.value = res.data.id;
-  } catch {}
+  } catch {
+    MessagePlugin.warning('话题加载失败，请从顶栏重新选择');
+  } finally {
+    hotspotLoading.value = false;
+  }
 };
 
 // ---- AI 生成 ----
 
 const doAIWrite = async () => {
+  if (hotspotLoading.value) {
+    MessagePlugin.info('话题正在加载，请稍候');
+    return;
+  }
   if (!selectedHotspot.value) {
     if (trendingHotspots.value.length) selectHotspot(trendingHotspots.value[0]);
     else { MessagePlugin.warning('请先选择话题'); return; }
@@ -617,6 +659,7 @@ const doAIWrite = async () => {
       style_id: selectedStyleId.value,
       prompt_template_id: selectedPromptId.value,
       user_prompt: userPrompt.value || undefined,
+      mode: selectedMode.value || undefined,
     });
     connectTaskSSE(res.data.task_id);
   } catch (err: any) {
@@ -756,6 +799,32 @@ const saveAndSync = async () => {
   } catch (err: any) {
     MessagePlugin.error(err?.response?.data?.detail || '同步失败');
   } finally { syncing.value = false; }
+};
+
+// ---- 封面图生成 ----
+const doGenerateCover = async () => {
+  if (!form.value.id) return;
+  coverGenerating.value = true;
+  try {
+    const saved = await saveArticle();
+    if (!saved) return;
+    const res = await generateCoverImage(form.value.id);
+    if (res.data.cover_image_url) {
+      form.value.cover_image_url = res.data.cover_image_url;
+      MessagePlugin.success('封面图已生成');
+      fetchCredits();
+    }
+  } catch (err: any) {
+    MessagePlugin.error(err?.response?.data?.detail || '封面图生成失败');
+  } finally {
+    coverGenerating.value = false;
+  }
+};
+
+// ---- 视频生成入口 ----
+const openSlideshow = () => {
+  if (!form.value.id) { MessagePlugin.warning('请先保存文章'); return; }
+  router.push(`/articles?slideshow=${form.value.id}`);
 };
 
 // ---- 初始化 ----
@@ -1141,6 +1210,20 @@ onMounted(async () => {
 .draft-item:hover { background: #e8eaed; }
 .draft-item.active { background: #dbeafe; color: var(--td-brand-color, #2563eb); }
 .draft-empty { font-size: 11px; color: #ccc; padding: 6px 0; }
+
+/* mode chips */
+.mode-chips { display: flex; gap: 6px; margin-bottom: 4px; }
+.mode-chip {
+  padding: 5px 12px; border-radius: 99px; font-size: 12px; font-weight: 600;
+  border: 1px solid var(--td-border-level-1-color, #e5e7eb);
+  background: #fff; color: var(--td-text-color-secondary, #6b7280);
+  cursor: pointer; transition: all .15s; font-family: inherit;
+}
+.mode-chip:hover { border-color: var(--td-brand-color, #2563eb); color: var(--td-brand-color); }
+.mode-chip.active {
+  border-color: var(--td-brand-color, #2563eb); color: #fff;
+  background: var(--td-brand-color, #2563eb);
+}
 
 /* ==================== 底栏（固定）==================== */
 .bottombar {

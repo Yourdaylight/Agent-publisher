@@ -111,6 +111,7 @@ export const getArticlePublishRecords = (id: number) => http.get(`/articles/${id
 export const generateVariants = (articleId: number, data: { agent_ids: number[]; style_ids: string[] }) =>
   http.post(`/articles/${articleId}/variants`, data);
 export const getArticleVariants = (articleId: number) => http.get(`/articles/${articleId}/variants`);
+export const generateCoverImage = (articleId: number) => http.post(`/articles/${articleId}/generate-cover`);
 export const createFromMaterials = (data: { material_ids: number[]; agent_id: number; style_id?: string; prompt_id?: number; user_prompt?: string; mode?: string }) =>
   http.post('/articles/from-materials', data);
 

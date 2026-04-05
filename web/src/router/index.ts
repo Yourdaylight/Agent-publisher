@@ -48,7 +48,7 @@ router.beforeEach((to, _from, next) => {
     if (to.meta?.requiresAdmin) {
       const userInfo = getUserInfo();
       if (!userInfo?.is_admin) {
-        next('/create');
+        next('/home');
         return;
       }
     }

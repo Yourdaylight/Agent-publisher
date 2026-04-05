@@ -18,6 +18,7 @@ from agent_publisher.schemas.article import (
     ArticleSyncResponse,
 )
 from agent_publisher.services.article_service import ArticleService
+from agent_publisher.services.credits_service import CreditsService
 from agent_publisher.services.task_service import TaskService
 
 router = APIRouter(prefix="/api/articles", tags=["articles"])
@@ -36,6 +37,15 @@ class VariantGenerateRequest(BaseModel):
     """Request body for batch variant generation."""
     agent_ids: list[int]
     style_ids: list[str]
+
+
+class WorkbenchCreateRequest(BaseModel):
+    material_ids: list[int]
+    agent_id: int
+    style_id: str | None = None
+    prompt_id: int | None = None
+    user_prompt: str | None = None
+    mode: str | None = None
 
 
 async def _get_article_with_ownership(
@@ -178,6 +188,108 @@ async def get_article(
     return await _get_article_with_ownership(article_id, user, db)
 
 
+@router.post("/from-materials")
+async def create_article_from_materials(
+    data: WorkbenchCreateRequest,
+    db: AsyncSession = Depends(get_db),
+    user: UserContext = Depends(get_current_user),
+):
+    agent = await db.get(Agent, data.agent_id)
+    if not agent:
+        raise HTTPException(404, "Agent not found")
+    if not user.is_admin:
+        account = await db.get(Account, agent.account_id)
+        if not account or account.owner_email != user.email:
+            raise HTTPException(403, "Access denied")
+    article_svc = ArticleService(db)
+    try:
+        article = await article_svc.create_article_from_materials(
+            agent=agent,
+            material_ids=data.material_ids,
+            style_id=data.style_id,
+            prompt_template_id=data.prompt_id,
+            user_prompt=data.user_prompt,
+            mode=data.mode,
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {
+        "ok": True,
+        "article_id": article.id,
+        "title": article.title,
+        "status": article.status,
+    }
+
+
+@router.post("/{article_id}/beautify")
+async def beautify_article(
+    article_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: UserContext = Depends(get_current_user),
+):
+    """Re-render article Markdown content through wenyan for beautiful formatting."""
+    article = await _get_article_own_only(article_id, user, db)
+    if not article.content:
+        raise HTTPException(400, "文章没有 Markdown 内容，无法美化排版")
+
+    article_svc = ArticleService(db)
+    html = article_svc._markdown_to_html(article.content)
+    article.html_content = html
+    await db.commit()
+    await db.refresh(article)
+
+    return {
+        "ok": True,
+        "article_id": article.id,
+        "html_content": html,
+    }
+
+
+@router.post("/{article_id}/ai-beautify")
+async def ai_beautify_article(
+    article_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: UserContext = Depends(get_current_user),
+):
+    """Use LLM to beautify article HTML for WeChat formatting. Costs 3 Credits."""
+    article = await _get_article_own_only(article_id, user, db)
+
+    # Check & consume credits
+    credits_svc = CreditsService(db)
+    check = await credits_svc.check(user.email, cost=3)
+    if not check["ok"]:
+        raise HTTPException(402, f"Credits 不足，需要 3，当前 {check['available']}")
+
+    consume_result = await credits_svc.consume(
+        user_email=user.email,
+        operation_type="ai_beautify",
+        cost=3,
+        reference_id=article_id,
+        description=f"AI 美化文章 #{article_id}",
+    )
+    if not consume_result["ok"]:
+        raise HTTPException(402, consume_result.get("error", "Credits 不足"))
+
+    article_svc = ArticleService(db)
+    try:
+        html = await article_svc.ai_beautify_html(article)
+    except Exception as e:
+        # Refund on failure
+        await credits_svc.refund(
+            user_email=user.email,
+            operation_type="ai_beautify",
+            cost=3,
+            reference_id=article_id,
+        )
+        raise HTTPException(500, f"AI 美化失败：{e}")
+
+    return {
+        "ok": True,
+        "article_id": article.id,
+        "html_content": html,
+        "credits_consumed": 3,
+    }
+
 @router.post("/{article_id}/publish", response_model=ArticlePublishResponse)
 async def publish_article(
     article_id: int,
@@ -275,6 +387,63 @@ async def get_article_publish_records(
         }
         for r in records
     ]
+
+
+@router.post("/{article_id}/generate-cover")
+async def generate_cover_image(
+    article_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: UserContext = Depends(get_current_user),
+):
+    """Generate a cover image for an article using AI. Costs 1 Credit."""
+    article = await _get_article_own_only(article_id, user, db)
+
+    credits_svc = CreditsService(db)
+    check = await credits_svc.check(user.email, cost=1)
+    if not check["ok"]:
+        raise HTTPException(402, f"Credits 不足，需要 1，当前 {check['available']}")
+
+    consume_result = await credits_svc.consume(
+        user_email=user.email,
+        operation_type="generate_cover",
+        cost=1,
+        reference_id=article_id,
+        description=f"生成封面图 #{article_id}",
+    )
+    if not consume_result["ok"]:
+        raise HTTPException(402, consume_result.get("error", "Credits 不足"))
+
+    from agent_publisher.services.image_service import HunyuanImageService
+    image_svc = HunyuanImageService()
+
+    # Build a safe image prompt from article title/digest
+    title = article.title or "科技资讯"
+    prompt = (
+        f"一张精美的现代简约风格插画，主题是：{title[:50]}，"
+        "适合作为公众号文章封面，无任何文字，色彩鲜明，高质量数字艺术。"
+    )
+
+    try:
+        cover_url = await image_svc.generate_image(prompt, "1024:1024")
+    except Exception as e:
+        await credits_svc.refund(
+            user_email=user.email,
+            operation_type="generate_cover",
+            cost=1,
+            reference_id=article_id,
+        )
+        raise HTTPException(500, f"封面图生成失败：{e}")
+
+    article.cover_image_url = cover_url
+    await db.commit()
+    await db.refresh(article)
+
+    return {
+        "ok": True,
+        "article_id": article.id,
+        "cover_image_url": cover_url,
+        "credits_consumed": 1,
+    }
 
 
 @router.post("/{article_id}/variants")

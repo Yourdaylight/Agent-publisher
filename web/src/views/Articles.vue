@@ -924,7 +924,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue';
-import { onBeforeRouteLeave, useRouter } from 'vue-router';
+import { onBeforeRouteLeave, useRouter, useRoute } from 'vue-router';
 import {
   getArticles,
   getArticle,
@@ -957,6 +957,7 @@ import { MessagePlugin, NotifyPlugin } from 'tdesign-vue-next';
 import { getUserInfo } from '@/api';
 
 const router = useRouter();
+const route = useRoute();
 const loading = ref(false);
 const articles = ref<any[]>([]);
 const agentOptions = ref<any[]>([]);
@@ -1992,6 +1993,17 @@ onMounted(async () => {
   fetchData();
   fetchRunningTasks();
   fetchStylePresets();
+
+  // Auto-open slideshow drawer if ?slideshow=articleId
+  const slideshowArticleId = route.query.slideshow ? Number(route.query.slideshow) : undefined;
+  if (slideshowArticleId && !Number.isNaN(slideshowArticleId)) {
+    nextTick(async () => {
+      try {
+        const { data } = await getArticle(slideshowArticleId);
+        openSlideshowDrawerForArticle(data);
+      } catch {}
+    });
+  }
 });
 
 onBeforeUnmount(() => {
