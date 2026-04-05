@@ -4,11 +4,12 @@ from __future__ import annotations
 import logging
 from typing import Sequence
 
-from sqlalchemy import delete, select, and_
+from sqlalchemy import and_, delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from agent_publisher.models.agent import Agent
+from agent_publisher.models.candidate_material import CandidateMaterial
 from agent_publisher.models.source_config import AgentSourceBinding, SourceConfig
 from agent_publisher.schemas.source_config import (
     AgentSourceBindingCreate,
@@ -252,6 +253,55 @@ class SourceRegistryService:
             {k: len(v) for k, v in results.items()},
         )
         return results
+
+    async def collect_all_trending(self) -> dict[str, object]:
+        """采集所有已启用的 trending 数据源，用于管理员全局刷新热榜。"""
+        sources = await self.list_sources(source_type="trending", is_enabled=True)
+        seen_platforms: set[str] = set()
+        platform_ids: list[str] = []
+        for source in sources:
+            platform_id = (source.config or {}).get("platform_id")
+            if platform_id and platform_id not in seen_platforms:
+                seen_platforms.add(platform_id)
+                platform_ids.append(platform_id)
+
+        if not platform_ids:
+            return {
+                "platforms_collected": [],
+                "total_items": 0,
+                "new_items": 0,
+                "duplicate_items": 0,
+            }
+
+        collector = TrendingCollectorService(self.session)
+        created_ids = await collector.collect(
+            agent_id=None,
+            agent_name="global_trending",
+            platform_configs=[{"platform_id": pid} for pid in platform_ids],
+        )
+
+        if not created_ids:
+            return {
+                "platforms_collected": platform_ids,
+                "total_items": 0,
+                "new_items": 0,
+                "duplicate_items": 0,
+            }
+
+        result = await self.session.execute(
+            select(CandidateMaterial.id).where(
+                CandidateMaterial.id.in_(created_ids),
+                CandidateMaterial.is_duplicate.is_(False),
+            )
+        )
+        new_items = len(result.scalars().all())
+
+        return {
+            "platforms_collected": platform_ids,
+            "total_items": len(created_ids),
+            "new_items": new_items,
+            "duplicate_items": len(created_ids) - new_items,
+        }
 
     async def _collect_rss(
         self, agent: Agent, bindings: list[AgentSourceBinding]

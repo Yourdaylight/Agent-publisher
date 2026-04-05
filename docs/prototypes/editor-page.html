@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agent Publisher - 创作控制台原型</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Helvetica Neue', sans-serif; background: #f5f6fa; color: #1a1a2e; }
+
+  /* 顶部导航 */
+  .top-nav {
+    display: flex; align-items: center; justify-content: space-between;
+    height: 56px; background: #fff; border-bottom: 1px solid #e8e8ec;
+    padding: 0 24px; position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+  }
+  .nav-left { display: flex; align-items: center; gap: 32px; }
+  .logo { font-size: 18px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+  .nav-tabs { display: flex; gap: 4px; }
+  .nav-tab { padding: 8px 16px; border-radius: 8px; font-size: 14px; font-weight: 500; color: #666; }
+  .nav-tab.active { background: #e8f0fe; color: #1a73e8; }
+  .nav-right { display: flex; align-items: center; gap: 16px; }
+  .credits-badge { padding: 6px 12px; border-radius: 20px; background: #f0f7ff; font-size: 13px; font-weight: 600; color: #1a73e8; }
+  .save-status { font-size: 12px; color: #2ecc71; display: flex; align-items: center; gap: 4px; }
+  .user-avatar { width: 32px; height: 32px; border-radius: 50%; background: #6c5ce7; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 600; }
+
+  /* 三列布局 */
+  .editor-layout {
+    display: grid;
+    grid-template-columns: 260px 1fr 340px;
+    margin-top: 56px;
+    height: calc(100vh - 56px);
+  }
+
+  /* ===== 左栏 ===== */
+  .left-panel {
+    background: #fff; border-right: 1px solid #e8e8ec;
+    overflow-y: auto; padding: 16px;
+  }
+  .panel-section { margin-bottom: 20px; }
+  .panel-title {
+    font-size: 12px; font-weight: 700; color: #999; text-transform: uppercase;
+    letter-spacing: 0.5px; margin-bottom: 10px;
+    display: flex; align-items: center; justify-content: space-between;
+    cursor: pointer;
+  }
+  .panel-title .arrow { font-size: 10px; transition: transform .2s; }
+
+  .config-item { margin-bottom: 12px; }
+  .config-label { font-size: 12px; font-weight: 600; color: #555; margin-bottom: 4px; }
+  .config-select {
+    width: 100%; padding: 8px 10px; border: 1px solid #e0e0e0;
+    border-radius: 6px; font-size: 13px; background: #fafbfc;
+  }
+
+  /* 素材引用 */
+  .source-card {
+    background: #f5f6fa; border-radius: 8px; padding: 10px;
+    margin-bottom: 8px; border-left: 3px solid #1a73e8;
+  }
+  .source-card .title { font-size: 12px; font-weight: 600; margin-bottom: 2px; }
+  .source-card .meta { font-size: 11px; color: #999; }
+
+  /* 最近草稿 */
+  .draft-item {
+    padding: 8px 10px; border-radius: 6px; font-size: 12px; color: #666;
+    cursor: pointer; transition: background .15s; margin-bottom: 2px;
+  }
+  .draft-item:hover { background: #f5f6fa; }
+  .draft-item .time { font-size: 11px; color: #bbb; }
+
+  /* ===== 中栏 ===== */
+  .center-panel {
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+
+  /* 编辑器工具栏 */
+  .toolbar {
+    display: flex; align-items: center; gap: 2px; padding: 8px 16px;
+    background: #fff; border-bottom: 1px solid #e8e8ec; flex-wrap: wrap;
+  }
+  .tool-btn {
+    width: 32px; height: 32px; border: none; background: transparent;
+    border-radius: 6px; font-size: 14px; cursor: pointer; color: #555;
+    display: flex; align-items: center; justify-content: center;
+    transition: all .15s;
+  }
+  .tool-btn:hover { background: #f0f1f5; }
+  .tool-btn.active { background: #e8f0fe; color: #1a73e8; }
+  .tool-divider { width: 1px; height: 20px; background: #e0e0e0; margin: 0 4px; }
+  .tool-label { font-size: 11px; color: #999; padding: 0 6px; }
+
+  /* 编辑区域 */
+  .editor-area {
+    flex: 1; overflow-y: auto; padding: 32px 40px; background: #fff;
+  }
+  .editor-title {
+    font-size: 22px; font-weight: 700; border: none; outline: none;
+    width: 100%; margin-bottom: 8px; color: #1a1a2e;
+    border-bottom: 2px solid transparent;
+  }
+  .editor-title:focus { border-bottom-color: #1a73e8; }
+  .editor-digest {
+    font-size: 14px; color: #888; border: none; outline: none;
+    width: 100%; margin-bottom: 20px; padding-bottom: 16px;
+    border-bottom: 1px solid #eee;
+  }
+  .editor-content {
+    font-size: 15px; line-height: 1.8; color: #333;
+    min-height: 400px; outline: none;
+  }
+  .editor-content p { margin-bottom: 12px; }
+  .editor-content h2 { font-size: 18px; font-weight: 600; margin: 24px 0 12px; color: #1a1a2e; }
+  .editor-content blockquote {
+    border-left: 3px solid #1a73e8; padding-left: 16px; color: #666;
+    margin: 16px 0; font-style: italic;
+  }
+
+  /* 浮动 AI 工具条 */
+  .float-toolbar {
+    position: absolute; background: #1a1a2e; border-radius: 8px;
+    padding: 4px; display: flex; gap: 2px; box-shadow: 0 4px 16px rgba(0,0,0,.2);
+    top: 380px; left: 380px;
+  }
+  .float-btn {
+    padding: 6px 10px; border: none; background: transparent;
+    color: #fff; font-size: 12px; border-radius: 6px; cursor: pointer;
+    white-space: nowrap;
+  }
+  .float-btn:hover { background: rgba(255,255,255,.15); }
+
+  /* 底部操作栏 */
+  .bottom-bar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 24px; background: #fff; border-top: 1px solid #e8e8ec;
+  }
+  .bottom-left { display: flex; align-items: center; gap: 12px; font-size: 12px; color: #999; }
+  .bottom-right { display: flex; gap: 8px; }
+  .btn {
+    padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 500;
+    border: none; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;
+  }
+  .btn-ghost { background: #f5f6fa; color: #666; }
+  .btn-ghost:hover { background: #e8e9ed; }
+  .btn-primary { background: #1a73e8; color: #fff; }
+  .btn-primary:hover { background: #1557b0; }
+  .btn-success { background: #2ecc71; color: #fff; }
+  .btn-success:hover { background: #27ae60; }
+
+  /* ===== 右栏：微信预览 ===== */
+  .right-panel {
+    background: #f0f1f5; border-left: 1px solid #e8e8ec;
+    overflow-y: auto; padding: 20px; display: flex; flex-direction: column; align-items: center;
+  }
+  .preview-label {
+    font-size: 12px; font-weight: 600; color: #999; margin-bottom: 12px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .preview-mode-switch {
+    display: flex; gap: 4px; background: #e0e1e5; border-radius: 6px; padding: 2px;
+  }
+  .preview-mode {
+    padding: 4px 8px; border-radius: 4px; font-size: 11px; cursor: pointer;
+    color: #666;
+  }
+  .preview-mode.active { background: #fff; color: #333; font-weight: 600; box-shadow: 0 1px 3px rgba(0,0,0,.1); }
+
+  /* 手机壳 */
+  .phone-frame {
+    width: 300px; background: #1a1a2e; border-radius: 32px;
+    padding: 12px; box-shadow: 0 8px 32px rgba(0,0,0,.15);
+  }
+  .phone-screen {
+    background: #fff; border-radius: 22px; overflow: hidden;
+    height: 520px; overflow-y: auto;
+  }
+
+  /* 微信状态栏 */
+  .wx-status-bar {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 6px 16px; font-size: 11px; color: #333; font-weight: 600;
+  }
+
+  /* 微信文章头 */
+  .wx-article-header {
+    padding: 16px 16px 8px;
+  }
+  .wx-title { font-size: 17px; font-weight: 700; line-height: 1.4; margin-bottom: 12px; }
+  .wx-meta { font-size: 11px; color: #b2b2b2; margin-bottom: 12px; }
+  .wx-meta span { margin-right: 8px; }
+
+  /* 微信正文 */
+  .wx-content {
+    padding: 0 16px 16px; font-size: 14px; line-height: 1.75; color: #3f3f3f;
+  }
+  .wx-content p { margin-bottom: 12px; }
+  .wx-content h2 {
+    font-size: 16px; font-weight: 700; margin: 16px 0 8px;
+    padding-bottom: 4px; border-bottom: 2px solid #1a73e8;
+    display: inline-block;
+  }
+  .wx-content blockquote {
+    background: #f7f7f7; border-left: 3px solid #1a73e8;
+    padding: 8px 12px; margin: 12px 0; font-size: 13px; color: #666;
+  }
+
+  .annotation {
+    background: #fffbe6; border: 1px solid #ffe58f; border-radius: 8px;
+    padding: 12px 16px; margin: 16px 24px; font-size: 13px; color: #8c6d1f; line-height: 1.6;
+    position: fixed; bottom: 60px; left: 280px; right: 360px; z-index: 50;
+  }
+  .annotation strong { color: #614700; }
+</style>
+</head>
+<body>
+
+<!-- 顶部导航 -->
+<nav class="top-nav">
+  <div class="nav-left">
+    <div class="logo">🚀 Agent Publisher</div>
+    <div class="nav-tabs">
+      <span class="nav-tab">🔥 发现</span>
+      <span class="nav-tab active">✍️ 创作</span>
+      <span class="nav-tab">📦 内容</span>
+      <span class="nav-tab">📊 数据</span>
+    </div>
+  </div>
+  <div class="nav-right">
+    <div class="save-status">● 已保存</div>
+    <div class="credits-badge">💎 440</div>
+    <div class="user-avatar">李</div>
+  </div>
+</nav>
+
+<!-- 三列编辑器布局 -->
+<div class="editor-layout">
+
+  <!-- 左栏：写作配置 -->
+  <div class="left-panel">
+
+    <div class="panel-section">
+      <div class="panel-title">▼ 写作配置</div>
+      <div class="config-item">
+        <div class="config-label">写作身份 (Agent)</div>
+        <select class="config-select">
+          <option>🤖 锐评官（内置默认）</option>
+          <option>📱 数码测评师</option>
+        </select>
+      </div>
+      <div class="config-item">
+        <div class="config-label">风格预设</div>
+        <select class="config-select">
+          <option>深度分析</option>
+          <option>轻松科普</option>
+          <option>新闻速报</option>
+        </select>
+      </div>
+      <div class="config-item">
+        <div class="config-label">提示词模板</div>
+        <select class="config-select">
+          <option>🔥 爆款二创</option>
+          <option>📋 热点总结</option>
+          <option>💡 观点扩写</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="panel-section">
+      <div class="panel-title">▼ 素材引用</div>
+      <div class="source-card">
+        <div class="title">DeepSeek 发布新一代推理模型 R2</div>
+        <div class="meta">微博热搜 #1 · 热度 0.92</div>
+      </div>
+      <div style="text-align:center;padding:8px;">
+        <span style="font-size:12px;color:#1a73e8;cursor:pointer;">+ 添加更多素材</span>
+      </div>
+    </div>
+
+    <div class="panel-section">
+      <div class="panel-title">▼ 最近草稿</div>
+      <div class="draft-item">
+        <div>AI Agent 趋势分析报告</div>
+        <div class="time">2小时前</div>
+      </div>
+      <div class="draft-item">
+        <div>苹果 WWDC 2026 前瞻</div>
+        <div class="time">昨天 18:30</div>
+      </div>
+      <div class="draft-item">
+        <div>程序员副业指南：AI接单</div>
+        <div class="time">2天前</div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- 中栏：编辑器 -->
+  <div class="center-panel">
+    <!-- AI 操作栏 + 用户创作指令 -->
+    <div style="padding:12px 16px;background:#f8fbff;border-bottom:1px solid #e8e8ec;">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">
+        <button style="padding:8px 20px;border-radius:8px;background:#1a73e8;color:#fff;border:none;font-size:14px;font-weight:600;cursor:pointer;">AI 帮我写</button>
+        <span style="font-size:13px;color:#555;font-weight:600;">基于：DeepSeek R2 深度解读</span>
+        <span style="margin-left:auto;font-size:12px;color:#999;">消耗 10 💎</span>
+      </div>
+      <div style="display:flex;gap:8px;">
+        <input type="text" placeholder="创作指令：你的指令会与锐评官系统提示词自动融合..." style="flex:1;padding:8px 12px;border:1px solid #ddd;border-radius:6px;font-size:13px;" />
+        <select style="padding:8px;border:1px solid #ddd;border-radius:6px;font-size:12px;background:#fff;">
+          <option>🔥 爆款二创</option>
+          <option>📋 热点总结</option>
+          <option>💡 观点扩写</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- 工具栏 -->
+    <div class="toolbar">
+      <button class="tool-btn" title="撤销">↩</button>
+      <button class="tool-btn" title="重做">↪</button>
+      <div class="tool-divider"></div>
+      <button class="tool-btn active" title="加粗"><b>B</b></button>
+      <button class="tool-btn" title="斜体"><i>I</i></button>
+      <button class="tool-btn" title="下划线"><u>U</u></button>
+      <div class="tool-divider"></div>
+      <button class="tool-btn" title="一级标题">H1</button>
+      <button class="tool-btn" title="二级标题">H2</button>
+      <button class="tool-btn" title="引用">❝</button>
+      <button class="tool-btn" title="列表">☰</button>
+      <div class="tool-divider"></div>
+      <button class="tool-btn" title="插入图片">🖼</button>
+      <button class="tool-btn" title="插入链接">🔗</button>
+      <button class="tool-btn" title="分割线">—</button>
+      <div class="tool-divider"></div>
+      <span class="tool-label">Markdown</span>
+      <button class="tool-btn" title="切换 Markdown 模式">M↓</button>
+    </div>
+
+    <!-- 编辑区 -->
+    <div class="editor-area" style="position:relative;">
+      <input class="editor-title" value="DeepSeek R2 深度解读：推理能力如何超越 GPT-5？" />
+      <input class="editor-digest" value="DeepSeek R2 的发布标志着国产大模型在推理能力上的重大突破，本文深度解析其技术亮点和行业影响。" />
+
+      <div class="editor-content" contenteditable="true">
+        <p>近日，DeepSeek 正式发布了其新一代推理模型 R2，在多个权威基准测试中全面超越了 OpenAI 的 GPT-5，引发了 AI 行业的广泛关注和热烈讨论。</p>
+
+        <h2>一、技术架构的核心突破</h2>
+
+        <p>R2 采用了全新的 <strong>混合专家（MoE）架构</strong>，在保持参数效率的同时大幅提升了推理能力。与前代相比，R2 在以下方面实现了质的飞跃：</p>
+
+        <blockquote>
+          "R2 不仅仅是一次性能提升，它代表了一种全新的推理范式。" —— DeepSeek 首席科学家
+        </blockquote>
+
+        <p style="background:#e8f0fe;padding:4px 8px;border-radius:4px;display:inline;">这段文字被选中了，注意上方的浮动 AI 工具条 ↑</p>
+
+        <h2>二、基准测试全面领先</h2>
+
+        <p>在 MMLU、HumanEval、MATH、GSM8K 等核心评测中，R2 的表现令人瞩目。特别是在数学推理和代码生成方面，R2 展现出了明显优势...</p>
+
+        <h2>三、对行业的深远影响</h2>
+
+        <p>R2 的发布不仅是 DeepSeek 的里程碑，更是中国 AI 技术自主创新的标志性事件。它证明了开源路线在 AGI 竞赛中的可行性...</p>
+      </div>
+
+      <!-- 浮动 AI 工具条 -->
+      <div class="float-toolbar">
+        <button class="float-btn">✨ AI 改写</button>
+        <button class="float-btn">📝 扩写</button>
+        <button class="float-btn">✂️ 缩写</button>
+      </div>
+    </div>
+
+    <!-- 底部操作栏 -->
+    <div class="bottom-bar">
+      <div class="bottom-left">
+        <span>📝 1,856 字</span>
+        <span>·</span>
+        <span>预计阅读 5 分钟</span>
+      </div>
+      <div class="bottom-right">
+        <button class="btn btn-ghost">💾 保存草稿</button>
+        <button class="btn btn-ghost">🖼️ AI 配图 <span style="font-size:11px;color:#1a73e8;">5💎</span></button>
+        <button class="btn btn-success">📤 发布到草稿箱</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 右栏：微信预览 -->
+  <div class="right-panel">
+    <div class="preview-label">
+      微信预览
+      <div class="preview-mode-switch">
+        <span class="preview-mode active">阅读</span>
+        <span class="preview-mode">朋友圈</span>
+      </div>
+    </div>
+
+    <div class="phone-frame">
+      <div class="phone-screen">
+        <div class="wx-status-bar">
+          <span>9:41</span>
+          <span>🔋</span>
+        </div>
+        <div class="wx-article-header">
+          <div class="wx-title">DeepSeek R2 深度解读：推理能力如何超越 GPT-5？</div>
+          <div class="wx-meta">
+            <span>AI看公司</span>
+            <span>2026-04-04</span>
+          </div>
+        </div>
+        <div class="wx-content">
+          <p>近日，DeepSeek 正式发布了其新一代推理模型 R2，在多个权威基准测试中全面超越了 OpenAI 的 GPT-5，引发了 AI 行业的广泛关注和热烈讨论。</p>
+
+          <h2>一、技术架构的核心突破</h2>
+
+          <p>R2 采用了全新的 <strong>混合专家（MoE）架构</strong>，在保持参数效率的同时大幅提升了推理能力。</p>
+
+          <blockquote>
+            "R2 不仅仅是一次性能提升，它代表了一种全新的推理范式。"
+          </blockquote>
+
+          <h2>二、基准测试全面领先</h2>
+
+          <p>在 MMLU、HumanEval、MATH 等核心评测中，R2 的表现令人瞩目...</p>
+
+          <h2>三、对行业的深远影响</h2>
+
+          <p>R2 的发布不仅是 DeepSeek 的里程碑，更是中国 AI 技术自主创新的标志性事件...</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+</body>
+</html>

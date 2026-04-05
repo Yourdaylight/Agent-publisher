@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agent Publisher - 导航布局原型</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Helvetica Neue', sans-serif; background: #f5f6fa; color: #1a1a2e; }
+
+  /* ===== 顶部导航 ===== */
+  .top-nav {
+    display: flex; align-items: center; justify-content: space-between;
+    height: 56px; background: #fff; border-bottom: 1px solid #e8e8ec;
+    padding: 0 24px; position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+  }
+  .nav-left { display: flex; align-items: center; gap: 32px; }
+  .logo { font-size: 18px; font-weight: 700; color: #1a1a2e; display: flex; align-items: center; gap: 8px; }
+  .logo .icon { font-size: 22px; }
+  .nav-tabs { display: flex; gap: 4px; }
+  .nav-tab {
+    padding: 8px 16px; border-radius: 8px; font-size: 14px; font-weight: 500;
+    color: #666; cursor: pointer; transition: all .2s; text-decoration: none;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .nav-tab:hover { background: #f0f1f5; color: #333; }
+  .nav-tab.active { background: #e8f0fe; color: #1a73e8; }
+
+  .nav-right { display: flex; align-items: center; gap: 16px; }
+  .credits-badge {
+    display: flex; align-items: center; gap: 4px;
+    padding: 6px 12px; border-radius: 20px; background: #f0f7ff;
+    font-size: 13px; font-weight: 600; color: #1a73e8; cursor: pointer;
+    transition: all .2s;
+  }
+  .credits-badge:hover { background: #dceafe; }
+  .credits-badge.low { color: #e67e22; background: #fff8f0; }
+  .credits-badge.empty { color: #e74c3c; background: #fef0f0; }
+
+  .user-avatar {
+    width: 32px; height: 32px; border-radius: 50%; background: #6c5ce7;
+    color: #fff; display: flex; align-items: center; justify-content: center;
+    font-size: 13px; font-weight: 600; cursor: pointer;
+  }
+  .settings-btn {
+    width: 32px; height: 32px; border-radius: 8px; border: none;
+    background: transparent; cursor: pointer; font-size: 18px;
+    display: flex; align-items: center; justify-content: center;
+    color: #666; transition: all .2s;
+  }
+  .settings-btn:hover { background: #f0f1f5; color: #333; }
+
+  /* ===== 主内容区 ===== */
+  .main-content {
+    margin-top: 56px; padding: 24px; min-height: calc(100vh - 56px);
+  }
+
+  /* ===== 页面标题 ===== */
+  .page-header { margin-bottom: 24px; }
+  .page-header h1 { font-size: 22px; font-weight: 600; margin-bottom: 4px; }
+  .page-header p { font-size: 14px; color: #888; }
+
+  /* ===== 演示内容区 ===== */
+  .demo-pages { display: flex; flex-direction: column; gap: 32px; }
+
+  .demo-section {
+    background: #fff; border-radius: 12px; padding: 24px;
+    border: 2px dashed #ddd;
+  }
+  .demo-section h2 {
+    font-size: 16px; font-weight: 600; color: #1a73e8;
+    margin-bottom: 8px; display: flex; align-items: center; gap: 8px;
+  }
+  .demo-section p { font-size: 13px; color: #888; }
+
+  .demo-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; margin-top: 16px; }
+  .demo-card {
+    border: 1px solid #eee; border-radius: 8px; padding: 16px;
+    background: #fafbfc;
+  }
+  .demo-card h3 { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
+  .demo-card p { font-size: 12px; color: #999; }
+
+  /* ===== 设置菜单 ===== */
+  .settings-dropdown {
+    position: fixed; top: 50px; right: 80px;
+    background: #fff; border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,.12);
+    padding: 8px; width: 220px; display: none; z-index: 200;
+  }
+  .settings-dropdown.show { display: block; }
+  .settings-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 12px; border-radius: 8px; cursor: pointer;
+    font-size: 14px; color: #333; transition: all .15s;
+  }
+  .settings-item:hover { background: #f5f6fa; }
+  .settings-item .icon { font-size: 16px; width: 20px; text-align: center; }
+
+  /* ===== Credits 下拉 ===== */
+  .credits-dropdown {
+    position: fixed; top: 50px; right: 140px;
+    background: #fff; border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,.12);
+    padding: 16px; width: 260px; display: none; z-index: 200;
+  }
+  .credits-dropdown.show { display: block; }
+  .credits-detail-row { display: flex; justify-content: space-between; font-size: 13px; padding: 4px 0; color: #666; }
+  .credits-detail-row .label { color: #999; }
+  .credits-actions { display: flex; gap: 8px; margin-top: 12px; }
+  .credits-actions a {
+    flex: 1; text-align: center; padding: 8px; border-radius: 8px;
+    font-size: 13px; font-weight: 500; text-decoration: none;
+    transition: all .2s;
+  }
+  .credits-actions .buy { background: #1a73e8; color: #fff; }
+  .credits-actions .buy:hover { background: #1557b0; }
+  .credits-actions .detail { background: #f0f1f5; color: #666; }
+  .credits-actions .detail:hover { background: #e0e1e5; }
+
+  .divider { height: 1px; background: #eee; margin: 10px 0; }
+
+  /* ===== 说明标注 ===== */
+  .annotation {
+    background: #fffbe6; border: 1px solid #ffe58f; border-radius: 8px;
+    padding: 12px 16px; margin: 16px 0; font-size: 13px; color: #8c6d1f;
+    line-height: 1.6;
+  }
+  .annotation strong { color: #614700; }
+</style>
+</head>
+<body>
+
+<!-- 顶部导航 -->
+<nav class="top-nav">
+  <div class="nav-left">
+    <div class="logo">
+      <span class="icon">🚀</span>
+      Agent Publisher
+    </div>
+    <div class="nav-tabs">
+      <a class="nav-tab active" onclick="switchTab(this, 'discover')">🔥 发现</a>
+      <a class="nav-tab" onclick="switchTab(this, 'create')">✍️ 创作</a>
+      <a class="nav-tab" onclick="switchTab(this, 'content')">📦 内容</a>
+      <a class="nav-tab" onclick="switchTab(this, 'stats')">📊 数据</a>
+    </div>
+  </div>
+  <div class="nav-right">
+    <div class="credits-badge" onclick="toggleCredits()">💎 450</div>
+    <button class="settings-btn" onclick="toggleSettings()">⚙️</button>
+    <div class="user-avatar">李</div>
+  </div>
+</nav>
+
+<!-- Credits 下拉 -->
+<div class="credits-dropdown" id="creditsDropdown">
+  <div style="font-size:15px;font-weight:600;margin-bottom:8px;">Credits 余额</div>
+  <div style="font-size:28px;font-weight:700;color:#1a73e8;margin-bottom:12px;">450</div>
+  <div class="credits-detail-row"><span class="label">免费额度</span><span>20 / 50</span></div>
+  <div class="credits-detail-row"><span class="label">付费额度</span><span>430</span></div>
+  <div class="divider"></div>
+  <div style="font-size:13px;font-weight:600;margin-bottom:6px;">本月消耗</div>
+  <div class="credits-detail-row"><span class="label">生成文章 ×3</span><span>-30</span></div>
+  <div class="credits-detail-row"><span class="label">AI 配图 ×3</span><span>-15</span></div>
+  <div class="credits-detail-row"><span class="label">段落改写 ×2</span><span>-5</span></div>
+  <div class="credits-actions">
+    <a class="buy" href="#">购买 Credits</a>
+    <a class="detail" href="#">消耗详情</a>
+  </div>
+</div>
+
+<!-- 设置菜单 -->
+<div class="settings-dropdown" id="settingsDropdown">
+  <div class="settings-item"><span class="icon">📱</span> 公众号管理</div>
+  <div class="settings-item"><span class="icon">🤖</span> 写作身份</div>
+  <div class="settings-item"><span class="icon">📡</span> 数据源配置</div>
+  <div class="settings-item"><span class="icon">📝</span> 提示词库</div>
+  <div class="settings-item"><span class="icon">🧠</span> LLM 模型配置</div>
+  <div style="height:1px;background:#eee;margin:4px 0;"></div>
+  <div class="settings-item"><span class="icon">💎</span> Credits 套餐</div>
+  <div class="settings-item"><span class="icon">👤</span> 账号设置</div>
+</div>
+
+<!-- 主内容区 -->
+<div class="main-content">
+
+  <div class="annotation">
+    <strong>📐 原型说明：</strong>这是 Agent Publisher 的新导航布局原型。<br>
+    <strong>核心变化：</strong>从 22 个页面收敛为 4 个核心 Tab（发现/创作/内容/数据） + 设置齿轮菜单。<br>
+    <strong>交互：</strong>点击顶部 Tab 切换页面标识；点击 💎 展开 Credits 面板；点击 ⚙️ 展开设置菜单。
+  </div>
+
+  <div class="demo-pages">
+
+    <!-- 发现页占位 -->
+    <div class="demo-section" id="page-discover">
+      <h2>🔥 发现页 /discover</h2>
+      <p>系统的默认首页和生产入口。聚合全网热榜，支持筛选、搜索、一键创作。</p>
+      <div class="demo-row">
+        <div class="demo-card"><h3>筛选栏</h3><p>平台 Chip + 排序 + 时间 + 搜索</p></div>
+        <div class="demo-card"><h3>热点卡片列表</h3><p>标题、热度条、跨平台标签、一键创作</p></div>
+        <div class="demo-card"><h3>快速创作弹窗</h3><p>选 Agent + 模式 + 补充指令 → 生成</p></div>
+      </div>
+      <p style="margin-top:12px;font-size:12px;color:#aaa;">→ 详细原型见 discovery-page.html</p>
+    </div>
+
+    <!-- 创作页占位 -->
+    <div class="demo-section" id="page-create" style="display:none;">
+      <h2>✍️ 创作页 /create</h2>
+      <p>三列布局写作工作台：左栏配置、中栏编辑、右栏微信预览。</p>
+      <div class="demo-row">
+        <div class="demo-card"><h3>左栏：写作配置</h3><p>Agent 选择、风格、模板、素材、最近草稿</p></div>
+        <div class="demo-card"><h3>中栏：编辑器</h3><p>AI 生成区 → TipTap 编辑器</p></div>
+        <div class="demo-card"><h3>右栏：微信预览</h3><p>手机壳模拟 + 实时同步</p></div>
+      </div>
+      <p style="margin-top:12px;font-size:12px;color:#aaa;">→ 详细原型见 editor-page.html</p>
+    </div>
+
+    <!-- 内容页占位 -->
+    <div class="demo-section" id="page-content" style="display:none;">
+      <h2>📦 内容页 /content</h2>
+      <p>草稿箱 + 已发布内容管理，支持批量操作。</p>
+      <div class="demo-row">
+        <div class="demo-card"><h3>Tab 切换</h3><p>全部 / 草稿 / 已发布 / 已归档</p></div>
+        <div class="demo-card"><h3>内容列表</h3><p>标题、Agent、状态、操作</p></div>
+        <div class="demo-card"><h3>批量操作</h3><p>批量发布、批量删除</p></div>
+      </div>
+    </div>
+
+    <!-- 数据页占位 -->
+    <div class="demo-section" id="page-stats" style="display:none;">
+      <h2>📊 数据页 /stats</h2>
+      <p>Credits 使用情况 + 内容效果追踪。</p>
+      <div class="demo-row">
+        <div class="demo-card"><h3>Credits 概览</h3><p>余额、消耗、生成次数统计</p></div>
+        <div class="demo-card"><h3>消耗趋势</h3><p>每日消耗柱状图</p></div>
+        <div class="demo-card"><h3>消耗记录</h3><p>按时间倒序的消耗明细</p></div>
+      </div>
+      <p style="margin-top:12px;font-size:12px;color:#aaa;">→ 详细原型见 credits-dashboard.html</p>
+    </div>
+
+  </div>
+
+  <!-- 旧页面映射 -->
+  <div class="annotation" style="margin-top:32px;">
+    <strong>页面映射（旧 → 新）：</strong><br>
+    /dashboard → 移除（合并到发现页）<br>
+    /trending, /hotspots → /discover<br>
+    /workbench → /create<br>
+    /articles → /content<br>
+    /accounts, /agents, /sources, /prompts, /llm-config → ⚙️ 设置区<br>
+    /membership → /settings/credits（Credits 体系替换会员）<br>
+    /materials → 合并到创作页左栏<br>
+    /tasks, /publish-records → 合并到内容页<br>
+  </div>
+
+</div>
+
+<script>
+function switchTab(el, page) {
+  document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  document.querySelectorAll('.demo-section').forEach(s => s.style.display = 'none');
+  const target = document.getElementById('page-' + page);
+  if (target) target.style.display = 'block';
+  // Close dropdowns
+  document.getElementById('settingsDropdown').classList.remove('show');
+  document.getElementById('creditsDropdown').classList.remove('show');
+}
+
+function toggleSettings() {
+  document.getElementById('creditsDropdown').classList.remove('show');
+  document.getElementById('settingsDropdown').classList.toggle('show');
+}
+
+function toggleCredits() {
+  document.getElementById('settingsDropdown').classList.remove('show');
+  document.getElementById('creditsDropdown').classList.toggle('show');
+}
+
+document.addEventListener('click', function(e) {
+  if (!e.target.closest('.settings-btn') && !e.target.closest('.settings-dropdown')) {
+    document.getElementById('settingsDropdown').classList.remove('show');
+  }
+  if (!e.target.closest('.credits-badge') && !e.target.closest('.credits-dropdown')) {
+    document.getElementById('creditsDropdown').classList.remove('show');
+  }
+});
+</script>
+</body>
+</html>

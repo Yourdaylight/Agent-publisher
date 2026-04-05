@@ -31,6 +31,8 @@ from agent_publisher.services.image_service import HunyuanImageService
 from agent_publisher.services.llm_service import LLMService
 from agent_publisher.services.rss_service import RSSService
 from agent_publisher.services.wechat_service import WeChatService
+from agent_publisher.services.prompt_template_service import PromptTemplateService
+from agent_publisher.services.style_preset_service import StylePresetService
 
 logger = logging.getLogger(__name__)
 
@@ -246,6 +248,128 @@ class ArticleService:
             )
 
         logger.info("Article created: id=%d title=%s", article.id, article.title)
+        return article
+
+    async def create_article_from_materials(
+        self,
+        *,
+        agent: Agent,
+        material_ids: list[int],
+        style_id: str | None = None,
+        prompt_template_id: int | None = None,
+        user_prompt: str | None = None,
+        mode: str | None = None,
+        step_callback: Callable[..., Awaitable[None]] | None = None,
+        chunk_callback: Callable[[str], Awaitable[None]] | None = None,
+    ) -> Article:
+        stmt = select(CandidateMaterial).where(CandidateMaterial.id.in_(material_ids)).order_by(CandidateMaterial.created_at.desc())
+        result = await self.session.execute(stmt)
+        materials = list(result.scalars().all())
+        if not materials:
+            raise ValueError("No materials found")
+
+        title_seed = materials[0].title
+        digest_seed = materials[0].summary or materials[0].title
+        combined_content = "\n\n".join(
+            f"标题：{item.title}\n摘要：{item.summary}\n正文：{item.raw_content or item.summary}\n来源：{item.original_url}"
+            for item in materials
+        )
+
+        prompt_text = agent.prompt_template or ""
+        if prompt_template_id:
+            prompt_service = PromptTemplateService(self.session)
+            prompt_template = await prompt_service.get_template(prompt_template_id)
+            if prompt_template:
+                prompt_text = prompt_template.content
+                await prompt_service.increment_usage(prompt_template_id)
+
+        if style_id:
+            style_service = StylePresetService(self.session)
+            style = await style_service.get_preset(style_id)
+            if style and style.prompt:
+                prompt_text = f"{prompt_text}\n\n附加风格要求：\n{style.prompt}" if prompt_text else style.prompt
+
+        if user_prompt and user_prompt.strip():
+            prompt_text = f"{prompt_text}\n\n用户创作指令：\n{user_prompt.strip()}" if prompt_text else user_prompt.strip()
+
+        # Apply creation mode instructions
+        mode_instructions = {
+            "rewrite": "创作模式：爆款二创。基于以下素材进行二次创作，保留核心信息但用全新的角度和更吸引人的方式重新表达。",
+            "summary": "创作模式：热点总结。从多个信源角度综合总结以下素材，提炼关键信息，给出全面客观的概述。",
+            "expand": "创作模式：观点扩写。基于以下素材展开深度分析，加入独到观点、行业洞察和前瞻性判断。",
+        }
+        if mode and mode in mode_instructions:
+            mode_text = mode_instructions[mode]
+            prompt_text = f"{prompt_text}\n\n{mode_text}" if prompt_text else mode_text
+
+        from agent_publisher.config import settings
+        messages = self.llm.build_article_messages(
+            topic=agent.topic,
+            news_list=combined_content,
+            prompt_template=prompt_text,
+            agent_description=agent.description or "",
+        )
+
+        if chunk_callback:
+            # Streaming mode
+            raw_response = ""
+            if step_callback:
+                await step_callback("llm_generate", "running", {"provider": settings.default_llm_provider, "model": settings.default_llm_model})
+            stream = self.llm.generate_stream(
+                provider=settings.default_llm_provider,
+                model=settings.default_llm_model,
+                api_key=settings.default_llm_api_key,
+                messages=messages,
+                base_url=settings.default_llm_base_url,
+            )
+            async for chunk in stream:
+                raw_response += chunk
+                await chunk_callback(chunk)
+        else:
+            raw_response = await self.llm.generate(
+                provider=settings.default_llm_provider,
+                model=settings.default_llm_model,
+                api_key=settings.default_llm_api_key,
+                messages=messages,
+                base_url=settings.default_llm_base_url,
+            )
+        parsed = self.llm.parse_article_response(raw_response)
+        if step_callback:
+            await step_callback("llm_generate", "success", {
+                "title": parsed.get("title", ""),
+                "content_length": len(parsed.get("content", "")),
+            })
+        final_title = parsed.get("title") or title_seed
+        final_digest = parsed.get("digest") or digest_seed[:180]
+        final_content = parsed.get("content") or combined_content
+        html_content = self._markdown_to_html(final_content)
+
+        article = Article(
+            agent_id=agent.id if (agent and agent.id) else None,
+            title=final_title,
+            digest=final_digest,
+            content=final_content,
+            html_content=html_content,
+            cover_image_url="",
+            images=[],
+            source_news=[
+                {
+                    "title": item.title,
+                    "link": item.original_url,
+                    "source": item.source_identity,
+                    "material_id": item.id,
+                }
+                for item in materials
+            ],
+            status="draft",
+            variant_style=style_id,
+        )
+        self.session.add(article)
+        await self.session.commit()
+        await self.session.refresh(article)
+        await self._sync_article_body_media_assets(article)
+        await self.session.commit()
+        await self.session.refresh(article)
         return article
 
     async def publish_article(
@@ -1288,3 +1412,74 @@ class ArticleService:
             mapping.error_message = str(exc)
             await self.session.flush()
             raise
+
+    # ------------------------------------------------------------------
+    # AI Beautify: LLM-powered HTML formatting for WeChat
+    # ------------------------------------------------------------------
+
+    async def ai_beautify_html(self, article: Article) -> str:
+        """Use LLM to beautify article HTML for WeChat Official Account layout.
+
+        Sends the current html_content (or renders markdown first) to the LLM
+        with formatting instructions. Returns the beautified HTML string and
+        persists it on the article row.
+        """
+        from agent_publisher.config import settings
+
+        html_input = article.html_content or ''
+        if not html_input and article.content:
+            html_input = self._markdown_to_html(article.content)
+
+        if not html_input:
+            raise ValueError("文章没有可美化的内容")
+
+        system_prompt = (
+            "你是一位资深的微信公众号排版设计师。"
+            "你的任务是将用户提供的 HTML 内容进行排版美化，使其适合微信公众号阅读体验。\n\n"
+            "排版规范：\n"
+            "1. 所有样式必须使用 inline style（微信不支持 <style> 标签）\n"
+            "2. 标题使用合适的字号和加粗，添加适当的颜色对比\n"
+            "3. 段落文字使用 16px，行高 1.75，颜色 #3f3f3f\n"
+            "4. 段落之间保持合理的间距（margin-bottom: 20px）\n"
+            "5. 引用块添加左边框（#07C160 绿色）和浅灰背景\n"
+            "6. 重点内容可以用加粗或高亮色（#07C160）标注\n"
+            "7. 适当添加分隔线 <hr>，使用浅色细线样式\n"
+            "8. 图片保持 100% 宽度，添加圆角\n"
+            "9. 列表项添加适当缩进和间距\n"
+            "10. 整体排版简洁大气，符合微信公众号主流风格\n\n"
+            "重要：只输出美化后的 HTML，不要添加任何解释文字。保持原文内容不变，只优化排版样式。"
+        )
+
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": f"请美化以下 HTML 排版：\n\n{html_input}"},
+        ]
+
+        provider = settings.default_llm_provider
+        model = settings.default_llm_model
+        api_key = settings.default_llm_api_key
+        base_url = settings.default_llm_base_url
+
+        beautified = await self.llm.generate(
+            provider=provider,
+            model=model,
+            api_key=api_key,
+            messages=messages,
+            base_url=base_url,
+        )
+
+        # Strip potential markdown code fences from LLM output
+        beautified = beautified.strip()
+        if beautified.startswith("```html"):
+            beautified = beautified[7:]
+        if beautified.startswith("```"):
+            beautified = beautified[3:]
+        if beautified.endswith("```"):
+            beautified = beautified[:-3]
+        beautified = beautified.strip()
+
+        article.html_content = beautified
+        await self.session.commit()
+        await self.session.refresh(article)
+
+        return beautified

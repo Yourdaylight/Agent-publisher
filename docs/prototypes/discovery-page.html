@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agent Publisher - 发现页原型</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Helvetica Neue', sans-serif; background: #f5f6fa; color: #1a1a2e; }
+
+  /* ===== 顶部导航 (简化) ===== */
+  .top-nav {
+    display: flex; align-items: center; justify-content: space-between;
+    height: 56px; background: #fff; border-bottom: 1px solid #e8e8ec;
+    padding: 0 24px; position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+  }
+  .nav-left { display: flex; align-items: center; gap: 32px; }
+  .logo { font-size: 18px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+  .nav-tabs { display: flex; gap: 4px; }
+  .nav-tab {
+    padding: 8px 16px; border-radius: 8px; font-size: 14px; font-weight: 500;
+    color: #666; cursor: pointer; text-decoration: none; transition: all .2s;
+  }
+  .nav-tab:hover { background: #f0f1f5; }
+  .nav-tab.active { background: #e8f0fe; color: #1a73e8; }
+  .nav-right { display: flex; align-items: center; gap: 16px; }
+  .credits-badge {
+    padding: 6px 12px; border-radius: 20px; background: #f0f7ff;
+    font-size: 13px; font-weight: 600; color: #1a73e8;
+  }
+  .user-avatar {
+    width: 32px; height: 32px; border-radius: 50%; background: #6c5ce7;
+    color: #fff; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 600;
+  }
+
+  /* ===== 主内容 ===== */
+  .main { margin-top: 56px; padding: 20px 24px; max-width: 960px; margin-left: auto; margin-right: auto; }
+
+  /* ===== 筛选栏 ===== */
+  .filter-bar { margin-bottom: 20px; }
+  .filter-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+  .chip {
+    padding: 6px 14px; border-radius: 20px; font-size: 13px; font-weight: 500;
+    border: 1px solid #ddd; background: #fff; color: #666;
+    cursor: pointer; transition: all .15s; white-space: nowrap;
+  }
+  .chip:hover { border-color: #1a73e8; color: #1a73e8; }
+  .chip.active { background: #1a73e8; color: #fff; border-color: #1a73e8; }
+  .filter-select {
+    padding: 6px 12px; border-radius: 8px; font-size: 13px;
+    border: 1px solid #ddd; background: #fff; color: #333; cursor: pointer;
+  }
+  .search-input {
+    flex: 1; min-width: 200px; padding: 8px 12px 8px 32px;
+    border-radius: 8px; border: 1px solid #ddd; font-size: 13px;
+    background: #fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='%23999' viewBox='0 0 16 16'%3E%3Cpath d='M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001c.03.04.062.078.098.115l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85a1.007 1.007 0 0 0-.115-.1zM12 6.5a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0z'/%3E%3C/svg%3E") 10px center no-repeat;
+    transition: border-color .2s;
+  }
+  .search-input:focus { outline: none; border-color: #1a73e8; }
+
+  /* ===== 热点卡片 ===== */
+  .hotspot-list { display: flex; flex-direction: column; gap: 12px; }
+
+  .hotspot-card {
+    background: #fff; border-radius: 12px; padding: 20px;
+    border: 1px solid #eee; transition: all .2s; cursor: default;
+    position: relative;
+  }
+  .hotspot-card:hover {
+    box-shadow: 0 4px 16px rgba(0,0,0,.06);
+    transform: translateY(-1px);
+    border-color: #ddd;
+  }
+
+  .hotspot-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .platform-tag {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;
+  }
+  .platform-tag.weibo { background: #fff0f0; color: #e74c3c; }
+  .platform-tag.zhihu { background: #f0f4ff; color: #0066ff; }
+  .platform-tag.toutiao { background: #fff5f0; color: #e67e22; }
+  .platform-tag.douyin { background: #f0f0f0; color: #333; }
+  .platform-tag.bilibili { background: #f0faff; color: #00a1d6; }
+  .platform-tag.kr36 { background: #f0fff4; color: #2ecc71; }
+
+  .rank-badge { font-size: 12px; font-weight: 700; color: #999; }
+  .rank-badge.top3 { color: #e74c3c; }
+
+  .time-label { font-size: 12px; color: #bbb; margin-left: auto; }
+
+  .hotspot-title { font-size: 16px; font-weight: 600; line-height: 1.5; margin-bottom: 6px; color: #1a1a2e; }
+  .hotspot-summary { font-size: 13px; color: #888; line-height: 1.5; margin-bottom: 12px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+  .hotspot-meta { display: flex; align-items: center; gap: 16px; margin-bottom: 12px; }
+
+  /* 热度条 */
+  .heat-bar-wrap { display: flex; align-items: center; gap: 8px; }
+  .heat-bar { width: 120px; height: 6px; background: #f0f0f0; border-radius: 3px; overflow: hidden; }
+  .heat-bar-fill { height: 100%; border-radius: 3px; transition: width .3s; }
+  .heat-bar-fill.low { background: #bbb; }
+  .heat-bar-fill.warm { background: #f1c40f; }
+  .heat-bar-fill.hot { background: #e67e22; }
+  .heat-bar-fill.fire { background: linear-gradient(90deg, #e74c3c, #ff6b35); }
+  .heat-score { font-size: 13px; font-weight: 600; }
+
+  /* 跨平台 */
+  .cross-platforms { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .cross-tag {
+    font-size: 11px; color: #999; background: #f5f6fa; padding: 2px 6px; border-radius: 4px;
+  }
+  .cross-count { font-size: 12px; font-weight: 600; color: #e67e22; }
+
+  /* 操作按钮 */
+  .hotspot-actions {
+    display: flex; gap: 8px; justify-content: flex-end;
+    opacity: 0; transition: opacity .2s;
+  }
+  .hotspot-card:hover .hotspot-actions { opacity: 1; }
+
+  .btn {
+    padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 500;
+    border: none; cursor: pointer; transition: all .15s;
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  .btn-primary { background: #1a73e8; color: #fff; }
+  .btn-primary:hover { background: #1557b0; }
+  .btn-ghost { background: #f5f6fa; color: #666; }
+  .btn-ghost:hover { background: #e8e9ed; }
+
+  /* 已创作标记 */
+  .created-badge {
+    position: absolute; top: 12px; right: 12px;
+    padding: 2px 8px; border-radius: 4px; font-size: 11px;
+    background: #f0fff4; color: #2ecc71; font-weight: 600;
+  }
+
+  /* ===== 弹窗 ===== */
+  .overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,.4);
+    display: none; align-items: center; justify-content: center; z-index: 500;
+  }
+  .overlay.show { display: flex; }
+
+  .dialog {
+    background: #fff; border-radius: 16px; padding: 28px;
+    width: 440px; max-width: 90vw;
+    box-shadow: 0 20px 60px rgba(0,0,0,.15);
+  }
+  .dialog h2 { font-size: 18px; font-weight: 600; margin-bottom: 20px; }
+
+  .form-group { margin-bottom: 16px; }
+  .form-label { font-size: 13px; font-weight: 600; color: #333; margin-bottom: 6px; display: block; }
+  .form-hint { font-size: 12px; color: #999; margin-top: 2px; }
+
+  .form-select {
+    width: 100%; padding: 10px 12px; border: 1px solid #ddd;
+    border-radius: 8px; font-size: 14px; background: #fff;
+  }
+  .form-textarea {
+    width: 100%; padding: 10px 12px; border: 1px solid #ddd;
+    border-radius: 8px; font-size: 14px; resize: vertical; min-height: 60px;
+  }
+
+  .radio-group { display: flex; gap: 8px; }
+  .radio-option {
+    flex: 1; padding: 10px 12px; border: 1px solid #ddd;
+    border-radius: 8px; font-size: 13px; text-align: center;
+    cursor: pointer; transition: all .15s;
+  }
+  .radio-option:hover { border-color: #1a73e8; }
+  .radio-option.active { background: #e8f0fe; border-color: #1a73e8; color: #1a73e8; font-weight: 600; }
+
+  .dialog-source {
+    background: #f5f6fa; border-radius: 8px; padding: 12px;
+    margin-bottom: 16px;
+  }
+  .dialog-source .title { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
+  .dialog-source .meta { font-size: 12px; color: #999; }
+
+  .credits-cost {
+    font-size: 13px; color: #888; margin-bottom: 16px;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .credits-cost strong { color: #1a73e8; }
+
+  .dialog-actions { display: flex; gap: 8px; justify-content: flex-end; }
+  .btn-lg { padding: 10px 24px; font-size: 14px; }
+  .btn-cancel { background: #f0f1f5; color: #666; }
+  .btn-cancel:hover { background: #e0e1e5; }
+
+  /* ===== 加载更多 ===== */
+  .load-more {
+    text-align: center; padding: 16px; font-size: 14px; color: #1a73e8;
+    cursor: pointer;
+  }
+  .load-more:hover { text-decoration: underline; }
+
+  /* ===== 注释 ===== */
+  .annotation {
+    background: #fffbe6; border: 1px solid #ffe58f; border-radius: 8px;
+    padding: 12px 16px; margin-bottom: 20px; font-size: 13px; color: #8c6d1f; line-height: 1.6;
+  }
+  .annotation strong { color: #614700; }
+</style>
+</head>
+<body>
+
+<!-- 顶部导航 -->
+<nav class="top-nav">
+  <div class="nav-left">
+    <div class="logo">🚀 Agent Publisher</div>
+    <div class="nav-tabs">
+      <a class="nav-tab active">🔥 发现</a>
+      <a class="nav-tab">✍️ 创作</a>
+      <a class="nav-tab">📦 内容</a>
+      <a class="nav-tab">📊 数据</a>
+    </div>
+  </div>
+  <div class="nav-right">
+    <div class="credits-badge">💎 450</div>
+    <div class="user-avatar">李</div>
+  </div>
+</nav>
+
+<div class="main">
+
+  <div class="annotation">
+    <strong>📐 原型说明：</strong>发现页是系统的默认首页和核心生产入口。<br>
+    <strong>核心理念：</strong>参考 baolem "每日爆款"页，每条热点旁直接挂操作按钮（一键创作/收藏），不需要用户跳转寻找功能。<br>
+    <strong>交互：</strong>悬停卡片显示操作按钮；点击"一键创作"弹出快速创作弹窗（不跳页）；筛选实时过滤。
+  </div>
+
+  <!-- 筛选栏 -->
+  <div class="filter-bar">
+    <div class="filter-row">
+      <span class="chip active" onclick="toggleChip(this)">全部</span>
+      <span class="chip" onclick="toggleChip(this)">🔴 微博</span>
+      <span class="chip" onclick="toggleChip(this)">🔵 知乎</span>
+      <span class="chip" onclick="toggleChip(this)">🟠 头条</span>
+      <span class="chip" onclick="toggleChip(this)">⚫ 抖音</span>
+      <span class="chip" onclick="toggleChip(this)">🔷 B站</span>
+      <span class="chip" onclick="toggleChip(this)">🟢 36氪</span>
+      <span class="chip" onclick="toggleChip(this)">📰 少数派</span>
+      <span class="chip" onclick="toggleChip(this)">💻 IT之家</span>
+    </div>
+    <div class="filter-row">
+      <select class="filter-select">
+        <option>🔥 热度最高</option>
+        <option>⏰ 最新上榜</option>
+        <option>🌐 跨平台最多</option>
+      </select>
+      <select class="filter-select">
+        <option>今天</option>
+        <option>近 3 天</option>
+        <option>近 7 天</option>
+      </select>
+      <input class="search-input" placeholder="搜索热点关键词...">
+    </div>
+  </div>
+
+  <!-- 热点列表 -->
+  <div class="hotspot-list">
+
+    <!-- 卡片 1: 高热 + 跨平台 -->
+    <div class="hotspot-card">
+      <div class="hotspot-header">
+        <span class="platform-tag weibo">🔴 微博热搜</span>
+        <span class="rank-badge top3">#1</span>
+        <span class="time-label">2小时前上榜</span>
+      </div>
+      <div class="hotspot-title">DeepSeek 发布新一代推理模型 R2，性能超越 GPT-5</div>
+      <div class="hotspot-summary">DeepSeek 今日正式发布 R2 推理模型，在 MMLU、HumanEval、MATH 等多个基准测试中全面超越 GPT-5，引发 AI 行业广泛关注。该模型采用全新的 MoE 架构...</div>
+      <div class="hotspot-meta">
+        <div class="heat-bar-wrap">
+          <div class="heat-bar"><div class="heat-bar-fill fire" style="width:92%"></div></div>
+          <span class="heat-score" style="color:#e74c3c">0.92</span>
+        </div>
+        <div class="cross-platforms">
+          <span class="cross-tag">微博 #1</span>
+          <span class="cross-tag">知乎 #3</span>
+          <span class="cross-tag">头条 #5</span>
+          <span class="cross-count">3平台上榜</span>
+        </div>
+      </div>
+      <div class="hotspot-actions">
+        <button class="btn btn-primary" onclick="openCreateDialog(0)">📝 一键创作</button>
+        <button class="btn btn-ghost">📋 收藏素材</button>
+      </div>
+    </div>
+
+    <!-- 卡片 2: 中高热 -->
+    <div class="hotspot-card">
+      <div class="hotspot-header">
+        <span class="platform-tag zhihu">🔵 知乎热榜</span>
+        <span class="rank-badge top3">#2</span>
+        <span class="time-label">持续热议4小时</span>
+      </div>
+      <div class="hotspot-title">为什么说 Agent 是 AI 应用的终极形态？</div>
+      <div class="hotspot-summary">随着 Claude、GPT 等大模型能力不断增强，AI Agent 成为 2026 年最热门的技术方向。从 Manus 到 Devin，从代码助手到自动化运营...</div>
+      <div class="hotspot-meta">
+        <div class="heat-bar-wrap">
+          <div class="heat-bar"><div class="heat-bar-fill hot" style="width:78%"></div></div>
+          <span class="heat-score" style="color:#e67e22">0.78</span>
+        </div>
+        <div class="cross-platforms">
+          <span class="cross-tag">知乎 #2</span>
+          <span class="cross-tag">36氪 #8</span>
+          <span class="cross-count">2平台上榜</span>
+        </div>
+      </div>
+      <div class="hotspot-actions">
+        <button class="btn btn-primary" onclick="openCreateDialog(1)">📝 一键创作</button>
+        <button class="btn btn-ghost">📋 收藏素材</button>
+      </div>
+    </div>
+
+    <!-- 卡片 3: 已创作标记 -->
+    <div class="hotspot-card">
+      <span class="created-badge">✅ 已创作</span>
+      <div class="hotspot-header">
+        <span class="platform-tag toutiao">🟠 今日头条</span>
+        <span class="rank-badge top3">#3</span>
+        <span class="time-label">6小时前上榜</span>
+      </div>
+      <div class="hotspot-title">苹果 WWDC 2026 将发布全新 AI 系统，Siri 迎来史上最大更新</div>
+      <div class="hotspot-summary">多方消息源确认，苹果将在今年 WWDC 上发布基于自研大模型的全新 Siri，整合到 iOS 20 中，支持多轮对话、代码执行和跨应用操作...</div>
+      <div class="hotspot-meta">
+        <div class="heat-bar-wrap">
+          <div class="heat-bar"><div class="heat-bar-fill hot" style="width:71%"></div></div>
+          <span class="heat-score" style="color:#e67e22">0.71</span>
+        </div>
+        <div class="cross-platforms">
+          <span class="cross-tag">头条 #3</span>
+          <span class="cross-tag">微博 #12</span>
+          <span class="cross-tag">B站 #6</span>
+          <span class="cross-count">3平台上榜</span>
+        </div>
+      </div>
+      <div class="hotspot-actions">
+        <button class="btn btn-primary" onclick="openCreateDialog(2)">📝 再次创作</button>
+        <button class="btn btn-ghost">📋 查看草稿</button>
+      </div>
+    </div>
+
+    <!-- 卡片 4: 中温 + 单平台 -->
+    <div class="hotspot-card">
+      <div class="hotspot-header">
+        <span class="platform-tag douyin">⚫ 抖音热点</span>
+        <span class="rank-badge">#7</span>
+        <span class="time-label">1小时前上榜</span>
+      </div>
+      <div class="hotspot-title">程序员副业月入3万：AI自动化接单的完整教程</div>
+      <div class="hotspot-summary">一位前大厂程序员分享了利用 AI 工具自动化处理外包需求的方法，引发程序员群体热议...</div>
+      <div class="hotspot-meta">
+        <div class="heat-bar-wrap">
+          <div class="heat-bar"><div class="heat-bar-fill warm" style="width:55%"></div></div>
+          <span class="heat-score" style="color:#f1c40f">0.55</span>
+        </div>
+        <div class="cross-platforms">
+          <span class="cross-tag">抖音 #7</span>
+        </div>
+      </div>
+      <div class="hotspot-actions">
+        <button class="btn btn-primary" onclick="openCreateDialog(3)">📝 一键创作</button>
+        <button class="btn btn-ghost">📋 收藏素材</button>
+      </div>
+    </div>
+
+    <!-- 卡片 5: 低温 -->
+    <div class="hotspot-card">
+      <div class="hotspot-header">
+        <span class="platform-tag bilibili">🔷 B站热门</span>
+        <span class="rank-badge">#15</span>
+        <span class="time-label">刚刚上榜</span>
+      </div>
+      <div class="hotspot-title">用 Cursor + Claude 一天搞定毕业设计，导师直呼离谱</div>
+      <div class="hotspot-summary">一位大四学生分享了使用 AI 辅助编程工具完成毕业设计的经历，视频播放量已超百万...</div>
+      <div class="hotspot-meta">
+        <div class="heat-bar-wrap">
+          <div class="heat-bar"><div class="heat-bar-fill low" style="width:38%"></div></div>
+          <span class="heat-score" style="color:#999">0.38</span>
+        </div>
+        <div class="cross-platforms">
+          <span class="cross-tag">B站 #15</span>
+        </div>
+      </div>
+      <div class="hotspot-actions">
+        <button class="btn btn-primary" onclick="openCreateDialog(4)">📝 一键创作</button>
+        <button class="btn btn-ghost">📋 收藏素材</button>
+      </div>
+    </div>
+
+    <div class="load-more">加载更多热点 ↓</div>
+  </div>
+</div>
+
+<!-- 快速创作弹窗 -->
+<div class="overlay" id="createOverlay" onclick="if(event.target===this)closeDialog()">
+  <div class="dialog">
+    <h2>📝 快速创作</h2>
+
+    <div class="dialog-source">
+      <div class="title" id="dialogTitle">DeepSeek 发布新一代推理模型 R2</div>
+      <div class="meta" id="dialogMeta">来源：微博热搜 #1 · 热度 0.92</div>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">写作身份</label>
+      <select class="form-select">
+      <t-option>🤖 锐评官（内置默认）</t-option>
+          <t-option>📱 数码测评师 → 数码生活</t-option>
+          <t-option>💰 财经分析师 → 金融早报</t-option>
+      </select>
+      <div class="form-hint">Agent 决定写作风格和目标公众号，默认使用内置"锐评官"</div>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">创作模式</label>
+      <div class="radio-group">
+        <div class="radio-option active" onclick="selectMode(this)">🔥 爆款二创</div>
+        <div class="radio-option" onclick="selectMode(this)">📋 热点总结</div>
+        <div class="radio-option" onclick="selectMode(this)">💡 观点扩写</div>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">创作指令 <span style="color:#bbb;font-weight:400;">（与系统提示词自动融合）</span></label>
+      <textarea class="form-textarea" placeholder="例：重点分析技术突破点，字数控制在 2000 字左右..."></textarea>
+      <div class="form-hint">你的指令会与 Agent 系统提示词 + 风格预设 + 模板组合后发送给 AI</div>
+    </div>
+
+    <div class="credits-cost">
+      预估消耗：<strong>10 Credits</strong> · 当前余额 450 Credits
+    </div>
+
+    <div class="dialog-actions">
+      <button class="btn btn-lg btn-cancel" onclick="closeDialog()">取消</button>
+      <button class="btn btn-lg btn-primary" onclick="startGenerate()">🚀 开始生成</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const hotspots = [
+  { title: 'DeepSeek 发布新一代推理模型 R2，性能超越 GPT-5', meta: '来源：微博热搜 #1 · 热度 0.92' },
+  { title: '为什么说 Agent 是 AI 应用的终极形态？', meta: '来源：知乎热榜 #2 · 热度 0.78' },
+  { title: '苹果 WWDC 2026 将发布全新 AI 系统', meta: '来源：今日头条 #3 · 热度 0.71' },
+  { title: '程序员副业月入3万：AI自动化接单的完整教程', meta: '来源：抖音热点 #7 · 热度 0.55' },
+  { title: '用 Cursor + Claude 一天搞定毕业设计', meta: '来源：B站热门 #15 · 热度 0.38' },
+];
+
+function toggleChip(el) {
+  if (el.textContent.trim() === '全部') {
+    document.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
+    el.classList.add('active');
+  } else {
+    document.querySelector('.chip.active:first-child')?.classList.remove('active');
+    el.classList.toggle('active');
+    if (!document.querySelector('.chip.active')) {
+      document.querySelector('.chip:first-child').classList.add('active');
+    }
+  }
+}
+
+function openCreateDialog(idx) {
+  document.getElementById('dialogTitle').textContent = hotspots[idx].title;
+  document.getElementById('dialogMeta').textContent = hotspots[idx].meta;
+  document.getElementById('createOverlay').classList.add('show');
+}
+
+function closeDialog() {
+  document.getElementById('createOverlay').classList.remove('show');
+}
+
+function selectMode(el) {
+  document.querySelectorAll('.radio-option').forEach(o => o.classList.remove('active'));
+  el.classList.add('active');
+}
+
+function startGenerate() {
+  closeDialog();
+  alert('✅ 跳转到创作页，AI 开始生成...\n\n路由: /create?hotspot=123&agent=1&mode=rewrite');
+}
+</script>
+</body>
+</html>

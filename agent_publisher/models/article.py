@@ -12,7 +12,7 @@ class Article(Base):
     __tablename__ = "articles"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    agent_id: Mapped[int] = mapped_column(ForeignKey("agents.id"))
+    agent_id: Mapped[int | None] = mapped_column(ForeignKey("agents.id"), nullable=True, default=None)
     title: Mapped[str] = mapped_column(String(200))
     digest: Mapped[str] = mapped_column(String(500), default="")
     content: Mapped[str] = mapped_column(Text, default="")

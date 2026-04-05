@@ -10,7 +10,7 @@ class AgentCreate(BaseModel):
     name: str
     topic: str
     description: str = ""
-    account_id: int
+    account_id: int | None = None  # Optional: can create agent without a WeChat account
     rss_sources: list[dict] = []
     role: Literal["collector", "processor", "publisher", "full_pipeline"] = "full_pipeline"
     source_mode: Literal["independent_search", "rss", "skills_feed", "multi_source"] = "rss"
@@ -54,7 +54,7 @@ class AgentOut(BaseModel):
     name: str
     topic: str
     description: str
-    account_id: int
+    account_id: int | None = None
     rss_sources: list[dict] | None
     role: str
     source_mode: str

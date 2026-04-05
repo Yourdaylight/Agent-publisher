@@ -1,4 +1,14 @@
-"""Media asset library API: upload, list, download, delete image assets."""
+"""Media asset library API: upload, list, download, delete image assets.
+
+Storage backend priority:
+  1. COS (Tencent Cloud Object Storage) — when COS_BUCKET / COS_SECRET_ID etc. are set
+  2. Local disk (data/uploads/) — fallback / default
+
+When COS is active:
+- `stored_filename` in DB holds the COS object key (e.g. "media/abc123.png")
+- Download endpoint redirects to the public COS URL instead of serving locally
+- `source_kind` = "cos" is stored so article_service can tell COS URLs apart
+"""
 from __future__ import annotations
 
 import logging
@@ -7,6 +17,7 @@ import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi.responses import RedirectResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -14,6 +25,7 @@ from sqlalchemy.orm import selectinload
 from agent_publisher.api.deps import get_db, get_current_user, UserContext
 from agent_publisher.config import settings
 from agent_publisher.models.media import MediaAsset
+from agent_publisher.services.cos_storage import get_cos_storage
 
 logger = logging.getLogger(__name__)
 
@@ -103,9 +115,12 @@ async def upload_media(
     db: AsyncSession = Depends(get_db),
     user: UserContext = Depends(get_current_user),
 ):
-    """Upload an image/media file to the asset library."""
-    _ensure_upload_dir()
+    """Upload an image/media file to the asset library.
 
+    If COS is configured, the file is stored in COS and the stored_filename
+    field holds the COS object key.  The download endpoint will redirect to
+    the public COS URL.  Otherwise falls back to local disk.
+    """
     # Validate content type
     content_type = file.content_type or "application/octet-stream"
     if content_type not in ALLOWED_TYPES:
@@ -122,19 +137,46 @@ async def upload_media(
     if file_size == 0:
         raise HTTPException(status_code=400, detail="Empty file")
 
-    # Generate stored filename with UUID
     original_filename = file.filename or "unnamed"
+    tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
+
+    cos = get_cos_storage()
+    if cos.enabled:
+        # ── COS path ──────────────────────────────────────────────────
+        try:
+            cos_key, cos_url = await cos.upload(content, original_filename, content_type)
+        except Exception as exc:
+            logger.error("COS upload failed, falling back to local disk: %s", exc)
+            cos_key, cos_url = None, None
+
+        if cos_key:
+            asset = MediaAsset(
+                filename=original_filename,
+                stored_filename=cos_key,   # COS object key
+                content_type=content_type,
+                file_size=file_size,
+                tags=tag_list,
+                description=description,
+                owner_email=user.email,
+                source_kind="cos",
+                source_url=cos_url,        # public URL — usable in WeChat HTML directly
+            )
+            db.add(asset)
+            await db.commit()
+            await db.refresh(asset)
+            logger.info(
+                "Media uploaded to COS: id=%d key=%s size=%d",
+                asset.id, cos_key, file_size,
+            )
+            return _serialize_media_asset(asset)
+
+    # ── Local disk fallback ───────────────────────────────────────────
+    _ensure_upload_dir()
     ext = Path(original_filename).suffix or ".png"
     stored_filename = f"{uuid.uuid4().hex}{ext}"
-
-    # Write to disk
     file_path = UPLOAD_DIR / stored_filename
     file_path.write_bytes(content)
 
-    # Parse tags
-    tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
-
-    # Save to database
     asset = MediaAsset(
         filename=original_filename,
         stored_filename=stored_filename,
@@ -142,13 +184,13 @@ async def upload_media(
         file_size=file_size,
         tags=tag_list,
         description=description,
-        owner_email=user.email,  # Set owner to current user
+        owner_email=user.email,
     )
     db.add(asset)
     await db.commit()
     await db.refresh(asset)
 
-    logger.info("Media uploaded: id=%d filename=%s size=%d", asset.id, original_filename, file_size)
+    logger.info("Media uploaded (local): id=%d filename=%s size=%d", asset.id, original_filename, file_size)
     return _serialize_media_asset(asset)
 
 
@@ -222,15 +264,22 @@ async def download_media(
     media_id: int,
     db: AsyncSession = Depends(get_db),
 ):
-    """Download (serve) the media file."""
-    from fastapi.responses import FileResponse
+    """Download (serve) the media file.
 
+    - COS-backed assets: redirect to public COS URL (no server bandwidth)
+    - Local assets: serve the file directly from disk
+    """
     asset = await db.get(MediaAsset, media_id)
     if not asset:
         raise HTTPException(status_code=404, detail="Media asset not found")
 
+    # COS-backed: redirect to public URL
+    if asset.source_kind == "cos" and asset.source_url:
+        return RedirectResponse(url=asset.source_url, status_code=302)
+
+    # Local disk fallback
+    from fastapi.responses import FileResponse
     file_path = (UPLOAD_DIR / asset.stored_filename).resolve()
-    # Defense-in-depth: ensure resolved path stays within upload directory
     if not file_path.is_relative_to(UPLOAD_DIR.resolve()):
         raise HTTPException(status_code=403, detail="Access denied")
     if not file_path.is_file():
@@ -249,13 +298,18 @@ async def delete_media(
     db: AsyncSession = Depends(get_db),
     user: UserContext = Depends(get_current_user),
 ):
-    """Delete a media asset."""
+    """Delete a media asset (from COS or local disk)."""
     asset = await _get_media_with_ownership(media_id, user, db)
 
-    # Remove file from disk
-    file_path = UPLOAD_DIR / asset.stored_filename
-    if file_path.is_file():
-        file_path.unlink()
+    if asset.source_kind == "cos" and asset.stored_filename:
+        # Delete from COS
+        cos = get_cos_storage()
+        await cos.delete(asset.stored_filename)
+    else:
+        # Delete from local disk
+        file_path = UPLOAD_DIR / asset.stored_filename
+        if file_path.is_file():
+            file_path.unlink()
 
     await db.delete(asset)
     await db.commit()

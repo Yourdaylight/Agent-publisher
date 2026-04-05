@@ -19,10 +19,7 @@ def _validate_agent_config(data: AgentCreate | AgentUpdate, is_create: bool = Tr
     source_mode = getattr(data, 'source_mode', None)
     if source_mode is None and not is_create:
         return
-    if source_mode == "rss" and is_create:
-        rss_sources = getattr(data, 'rss_sources', None)
-        if not rss_sources:
-            raise HTTPException(422, "RSS mode requires at least one RSS source")
+    # RSS and skills_feed validation is relaxed — sources can be added later
     if source_mode == "skills_feed" and is_create:
         allowed = getattr(data, 'allowed_skill_sources', None)
         if not allowed:
@@ -49,9 +46,11 @@ async def _get_agent_with_ownership(
     if not agent:
         raise HTTPException(404, "Agent not found")
     if not user.is_admin:
-        account = await db.get(Account, agent.account_id)
-        if not account or account.owner_email != user.email:
-            raise HTTPException(403, "Access denied")
+        if agent.account_id:
+            account = await db.get(Account, agent.account_id)
+            if not account or account.owner_email != user.email:
+                raise HTTPException(403, "Access denied")
+        # Agents without account_id (e.g. builtin) are accessible to all
     return agent
 
 
@@ -62,8 +61,9 @@ async def create_agent(
     user: UserContext = Depends(get_current_user),
 ):
     _validate_agent_config(data, is_create=True)
-    # Verify user owns the target account
-    await _check_account_ownership(data.account_id, user, db)
+    # Verify user owns the target account (if specified)
+    if data.account_id:
+        await _check_account_ownership(data.account_id, user, db)
     # Enforce per-user agent limit for non-admins
     if not user.is_admin:
         existing_count = (
@@ -92,7 +92,10 @@ async def list_agents(
 ):
     stmt = select(Agent).order_by(Agent.id)
     if not user.is_admin:
-        stmt = stmt.join(Account).where(Account.owner_email == user.email)
+        # Show agents owned by user's accounts + agents with no account (builtin)
+        stmt = stmt.outerjoin(Account).where(
+            (Agent.account_id.is_(None)) | (Account.owner_email == user.email)
+        )
     result = await db.execute(stmt)
     return result.scalars().all()
 

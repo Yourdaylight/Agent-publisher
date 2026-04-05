@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agent Publisher - 快速创作弹窗原型</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Helvetica Neue', sans-serif;
+    background: #e8e8ec; display: flex; align-items: center; justify-content: center;
+    min-height: 100vh; padding: 20px;
+  }
+
+  .page-wrapper { max-width: 800px; width: 100%; }
+
+  .annotation {
+    background: #fffbe6; border: 1px solid #ffe58f; border-radius: 8px;
+    padding: 12px 16px; margin-bottom: 20px; font-size: 13px; color: #8c6d1f; line-height: 1.6;
+  }
+  .annotation strong { color: #614700; }
+
+  /* ===== 三种弹窗状态 ===== */
+  .states { display: flex; flex-direction: column; gap: 24px; }
+  .state-label {
+    font-size: 14px; font-weight: 600; color: #666; margin-bottom: 8px;
+    padding-left: 4px;
+  }
+
+  .dialog {
+    background: #fff; border-radius: 16px; padding: 28px;
+    box-shadow: 0 20px 60px rgba(0,0,0,.1);
+  }
+  .dialog h2 { font-size: 18px; font-weight: 600; margin-bottom: 20px; }
+
+  .dialog-source {
+    background: #f5f6fa; border-radius: 8px; padding: 12px; margin-bottom: 16px;
+  }
+  .dialog-source .title { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
+  .dialog-source .meta { font-size: 12px; color: #999; }
+
+  .form-group { margin-bottom: 16px; }
+  .form-label { font-size: 13px; font-weight: 600; color: #333; margin-bottom: 6px; display: block; }
+  .form-hint { font-size: 12px; color: #999; margin-top: 2px; }
+
+  .form-select {
+    width: 100%; padding: 10px 12px; border: 1px solid #ddd;
+    border-radius: 8px; font-size: 14px; background: #fff;
+  }
+  .form-textarea {
+    width: 100%; padding: 10px 12px; border: 1px solid #ddd;
+    border-radius: 8px; font-size: 14px; resize: vertical; min-height: 60px;
+  }
+
+  .radio-group { display: flex; gap: 8px; }
+  .radio-option {
+    flex: 1; padding: 10px 12px; border: 1px solid #ddd;
+    border-radius: 8px; font-size: 13px; text-align: center; cursor: pointer;
+  }
+  .radio-option.active { background: #e8f0fe; border-color: #1a73e8; color: #1a73e8; font-weight: 600; }
+
+  .credits-cost {
+    font-size: 13px; color: #888; margin-bottom: 16px;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .credits-cost strong { color: #1a73e8; }
+
+  .dialog-actions { display: flex; gap: 8px; justify-content: flex-end; }
+  .btn {
+    padding: 10px 24px; border-radius: 8px; font-size: 14px; font-weight: 500;
+    border: none; cursor: pointer;
+  }
+  .btn-cancel { background: #f0f1f5; color: #666; }
+  .btn-primary { background: #1a73e8; color: #fff; }
+  .btn-primary:hover { background: #1557b0; }
+  .btn-disabled { background: #e0e1e5; color: #aaa; cursor: not-allowed; }
+
+  /* ===== 余额不足状态 ===== */
+  .insufficient-banner {
+    background: #fef0f0; border: 1px solid #fde2e2; border-radius: 8px;
+    padding: 12px; margin-bottom: 16px; display: flex; align-items: center; gap: 8px;
+  }
+  .insufficient-banner .icon { font-size: 20px; }
+  .insufficient-banner .text { font-size: 13px; color: #c0392b; }
+  .insufficient-banner .text strong { font-weight: 600; }
+
+  .insufficient-actions { display: flex; gap: 8px; margin-top: 8px; }
+  .insufficient-actions a {
+    padding: 6px 12px; border-radius: 6px; font-size: 12px; font-weight: 500;
+    text-decoration: none;
+  }
+  .insufficient-actions .buy { background: #1a73e8; color: #fff; }
+  .insufficient-actions .upgrade { background: #f0f1f5; color: #666; }
+
+  /* ===== 生成中状态 ===== */
+  .generating-state {
+    text-align: center; padding: 32px 0;
+  }
+  .spinner {
+    width: 40px; height: 40px; border: 3px solid #e8e8ec;
+    border-top-color: #1a73e8; border-radius: 50%;
+    animation: spin 1s linear infinite; margin: 0 auto 16px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .generating-text { font-size: 14px; color: #666; }
+  .generating-step { font-size: 13px; color: #1a73e8; margin-top: 8px; font-weight: 500; }
+  .generating-cancel { margin-top: 16px; font-size: 13px; color: #999; cursor: pointer; text-decoration: underline; }
+
+  /* ===== 无Agent提示 ===== */
+  .no-agent-hint {
+    background: #fff8f0; border: 1px solid #ffe0b2; border-radius: 8px;
+    padding: 16px; text-align: center;
+  }
+  .no-agent-hint p { font-size: 14px; color: #e67e22; margin-bottom: 8px; }
+  .no-agent-hint a {
+    font-size: 13px; color: #1a73e8; font-weight: 600; text-decoration: none;
+  }
+</style>
+</head>
+<body>
+<div class="page-wrapper">
+
+  <div class="annotation">
+    <strong>📐 原型说明：</strong>快速创作弹窗的三种状态。<br>
+    <strong>触发方式：</strong>在发现页热点卡片点击"一键创作"按钮弹出。<br>
+    <strong>核心理念：</strong>不离开当前页面，在弹窗内完成创作配置，点击后跳转到创作控制台开始 AI 生成。<br>
+    <strong>默认 Agent：</strong>系统内置"锐评官"，新用户无需配置即可创作。<br>
+    <strong>提示词融合：</strong>用户输入的"创作指令"会与 Agent 系统提示词 + 风格预设 + 模板自动融合。
+  </div>
+
+  <div class="states">
+
+    <!-- 状态1: 正常态 -->
+    <div>
+      <div class="state-label">状态 1：正常态（余额充足）</div>
+      <div class="dialog">
+        <h2>📝 快速创作</h2>
+        <div class="dialog-source">
+          <div class="title">DeepSeek 发布新一代推理模型 R2，性能超越 GPT-5</div>
+          <div class="meta">来源：微博热搜 #1 · 热度 0.92 · 3平台上榜</div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">写作身份</label>
+          <select class="form-select">
+            <option>🤖 锐评官（内置默认）</option>
+          </select>
+          <div class="form-hint">Agent 决定写作风格和目标公众号</div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">创作模式</label>
+          <div class="radio-group">
+            <div class="radio-option active">🔥 爆款二创</div>
+            <div class="radio-option">📋 热点总结</div>
+            <div class="radio-option">💡 观点扩写</div>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">补充指令 <span style="color:#bbb;font-weight:400;">（可选）</span></label>
+          <textarea class="form-textarea" placeholder="例：重点分析技术突破点，字数控制在 2000 字左右..."></textarea>
+        </div>
+        <div class="credits-cost">
+          预估消耗：<strong>10 Credits</strong> · 当前余额 450 Credits
+        </div>
+        <div class="dialog-actions">
+          <button class="btn btn-cancel">取消</button>
+          <button class="btn btn-primary">🚀 开始生成</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 状态2: 余额不足 -->
+    <div>
+      <div class="state-label">状态 2：余额不足</div>
+      <div class="dialog">
+        <h2>📝 快速创作</h2>
+        <div class="dialog-source">
+          <div class="title">为什么说 Agent 是 AI 应用的终极形态？</div>
+          <div class="meta">来源：知乎热榜 #2 · 热度 0.78</div>
+        </div>
+        <div class="insufficient-banner">
+          <span class="icon">⚠️</span>
+          <div>
+            <div class="text"><strong>Credits 不足</strong>：需要 10 Credits，当前仅剩 3 Credits</div>
+            <div class="insufficient-actions">
+              <a class="buy" href="#">购买加油包</a>
+              <a class="upgrade" href="#">升级套餐</a>
+            </div>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">写作身份</label>
+          <select class="form-select">
+            <option>🤖 锐评官（内置默认）</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">创作模式</label>
+          <div class="radio-group">
+            <div class="radio-option active">🔥 爆款二创</div>
+            <div class="radio-option">📋 热点总结</div>
+            <div class="radio-option">💡 观点扩写</div>
+          </div>
+        </div>
+        <div class="dialog-actions">
+          <button class="btn btn-cancel">取消</button>
+          <button class="btn btn-disabled">🚀 开始生成</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 状态3: 生成中 -->
+    <div>
+      <div class="state-label">状态 3：AI 生成中（跳转到创作页前的过渡态）</div>
+      <div class="dialog">
+        <h2>📝 快速创作</h2>
+        <div class="dialog-source">
+          <div class="title">DeepSeek 发布新一代推理模型 R2，性能超越 GPT-5</div>
+          <div class="meta">来源：微博热搜 #1 · 消耗 10 Credits</div>
+        </div>
+        <div class="generating-state">
+          <div class="spinner"></div>
+          <div class="generating-text">正在为你生成文章...</div>
+          <div class="generating-step">📄 正在生成正文...</div>
+          <div class="generating-cancel">取消生成（Credits 将退回）</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 状态4: 内置 Agent 说明 -->
+    <div>
+      <div class="state-label">状态 4：首次使用，展示内置 Agent 说明</div>
+      <div class="dialog">
+        <h2>📝 快速创作</h2>
+        <div class="dialog-source">
+          <div class="title">苹果 WWDC 2026 将发布全新 AI 系统</div>
+          <div class="meta">来源：今日头条 #3 · 热度 0.71</div>
+        </div>
+        <div class="no-agent-hint" style="background:#f0f7ff;border-color:#c8dffe;">
+          <p style="color:#1a73e8;">🤖 正在使用内置写作身份「锐评官」</p>
+          <p style="font-size:13px;color:#666;margin-bottom:8px;">锐评官擅长犀利独到的科技观察，善于拆解本质、观点鲜明。你可以随时在设置中修改风格或创建自己的写作身份。</p>
+          <a href="#" style="font-size:13px;color:#1a73e8;font-weight:600;text-decoration:none;">自定义写作身份 →</a>
+        </div>
+        <div class="form-group">
+          <label class="form-label">创作模式</label>
+          <div class="radio-group">
+            <div class="radio-option active">🔥 爆款二创</div>
+            <div class="radio-option">📋 热点总结</div>
+            <div class="radio-option">💡 观点扩写</div>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">创作指令</label>
+          <textarea class="form-textarea" placeholder="你的指令会与锐评官的系统提示词自动融合..."></textarea>
+        </div>
+        <div class="dialog-actions" style="margin-top:16px;">
+          <button class="btn btn-cancel">取消</button>
+          <button class="btn btn-primary">🚀 开始生成</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+</body>
+</html>
