@@ -10,9 +10,10 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, Request, HTTPException
 from pydantic import BaseModel, field_validator
 
-from agent_publisher.api.deps import get_current_user, UserContext
+from agent_publisher.api.deps import get_current_user, UserContext, get_db
 from agent_publisher.api.skills import _create_skill_token, verify_skill_token
 from agent_publisher.config import settings
+from agent_publisher.database import async_session_factory
 
 logger = logging.getLogger(__name__)
 
@@ -193,3 +194,91 @@ async def verify(request: Request):
 async def get_me(user: UserContext = Depends(get_current_user)):
     """Return the current authenticated user's identity."""
     return UserInfoResponse(email=user.email, is_admin=user.is_admin)
+
+
+# ---------------------------------------------------------------------------
+# Invite Code Login (public endpoint)
+# ---------------------------------------------------------------------------
+
+class InviteLoginRequest(BaseModel):
+    code: str
+    email: str
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, v: str) -> str:
+        v = v.strip().lower()
+        if not re.match(r"^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$", v):
+            raise ValueError("Invalid email address")
+        return v
+
+
+@router.post("/invite", response_model=LoginResponse)
+async def invite_login(req: InviteLoginRequest, request: Request):
+    """Login via invite code. Auto-registers user and grants bonus credits."""
+    from sqlalchemy import select, func as sa_func
+    from agent_publisher.models.invite_code import InviteCode, InviteRedemption
+    from agent_publisher.services.credits_service import CreditsService
+
+    ip = _get_client_ip(request)
+    _check_ip_ban(ip)
+    email = req.email.strip().lower()
+
+    async with async_session_factory() as session:
+        # 1. Validate invite code
+        result = await session.execute(
+            select(InviteCode).where(InviteCode.code == req.code, InviteCode.is_active == True)
+        )
+        invite = result.scalar_one_or_none()
+        if not invite:
+            _record_failed_attempt(ip)
+            raise HTTPException(status_code=400, detail="邀请码无效或已停用")
+
+        if invite.expires_at and invite.expires_at < datetime.now(timezone.utc):
+            raise HTTPException(status_code=400, detail="邀请码已过期")
+
+        if invite.max_uses > 0 and invite.used_count >= invite.max_uses:
+            raise HTTPException(status_code=400, detail="邀请码已达到使用上限")
+
+        # 2. Rate limit: max 5 activations per IP per 24h
+        day_ago = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        ip_count_result = await session.execute(
+            select(sa_func.count()).where(
+                InviteRedemption.ip_address == ip,
+                InviteRedemption.created_at >= day_ago,
+            )
+        )
+        ip_count = ip_count_result.scalar() or 0
+        if ip_count >= 5:
+            raise HTTPException(status_code=429, detail="同一 IP 每日最多激活 5 次邀请码")
+
+        # 3. Check if email already registered
+        is_existing_user = settings.is_email_allowed(email)
+
+        if not is_existing_user:
+            # New user: add to runtime whitelist
+            settings.add_to_whitelist(email)
+
+            # Create credits account with bonus
+            credits_svc = CreditsService(session)
+            await credits_svc.get_or_create_balance(email)
+            await credits_svc.recharge(email, invite.bonus_credits, f"邀请码 {invite.code} 激活奖励")
+
+        # 4. Record redemption and update usage count
+        invite.used_count += 1
+        session.add(InviteRedemption(
+            invite_code_id=invite.id,
+            user_email=email,
+            ip_address=ip,
+        ))
+        await session.commit()
+
+        # 5. Issue token
+        _reset_attempts(ip)
+        token = _create_skill_token(email)
+        return LoginResponse(
+            token=token,
+            message=f"欢迎！已获得 {invite.bonus_credits} AI 创作积分" if not is_existing_user else "登录成功",
+            email=email,
+            is_admin=settings.is_admin(email),
+        )

@@ -27,7 +27,12 @@ from agent_publisher.api.settings import router as settings_router
 from agent_publisher.api.skills import router as skills_router, verify_skill_token
 from agent_publisher.api.sources import router as sources_router
 from agent_publisher.api.style_presets import router as style_presets_router
+from agent_publisher.api.prompts import router as prompts_router
+from agent_publisher.api.hotspots import router as hotspots_router
+from agent_publisher.api.membership import router as membership_router
+from agent_publisher.api.credits import router as credits_router
 from agent_publisher.api.tasks import router as tasks_router
+from agent_publisher.api.invite_codes import router as invite_codes_router
 from agent_publisher.api.deps import get_db, get_current_user, UserContext
 from agent_publisher.config import settings
 from agent_publisher.models.account import Account
@@ -36,8 +41,14 @@ from agent_publisher.models.article import Article
 from agent_publisher.models.llm_profile import LLMProfile
 from agent_publisher.models.media import MediaAsset
 from agent_publisher.models.style_preset import StylePreset
+from agent_publisher.models.prompt_template import PromptTemplate
+from agent_publisher.models.membership_plan import MembershipPlan
+from agent_publisher.models.user_membership import UserMembership
+from agent_publisher.models.order import Order
 from agent_publisher.models.task import Task
+from agent_publisher.models.credits import CreditsBalance, CreditsTransaction  # noqa: F401
 from agent_publisher.models.group import UserGroup, UserGroupMember  # noqa: F401 – ensure tables are created
+from agent_publisher.models.invite_code import InviteCode, InviteRedemption  # noqa: F401
 from agent_publisher.database import engine
 from agent_publisher.models.base import Base
 from agent_publisher.extensions import registry as extension_registry
@@ -82,6 +93,28 @@ async def _auto_migrate_sqlite(conn):
                     logger.info(f"Auto-migrate: {ddl}")
                     sync_conn.execute(sa.text(ddl))
 
+        # Fix: make agents.account_id nullable if it's currently NOT NULL
+        # SQLite cannot ALTER COLUMN, so we rebuild the table
+        if inspector.has_table("agents"):
+            cols = inspector.get_columns("agents")
+            acct_col = next((c for c in cols if c["name"] == "account_id"), None)
+            if acct_col and not acct_col.get("nullable", True):
+                logger.info("Auto-migrate: rebuilding agents table to make account_id nullable")
+                col_defs = []
+                for c in cols:
+                    col_type = str(c["type"])
+                    name = c["name"]
+                    nullable_part = "" if c.get("nullable", True) or name == "account_id" else " NOT NULL"
+                    default_part = f" DEFAULT {c['default']}" if c.get("default") is not None else ""
+                    pk = " PRIMARY KEY" if name == "id" else ""
+                    col_defs.append(f"{name} {col_type}{pk}{nullable_part}{default_part}")
+                col_list = ", ".join(col_defs)
+                col_names = ", ".join(c["name"] for c in cols)
+                sync_conn.execute(sa.text(f"ALTER TABLE agents RENAME TO _agents_old"))
+                sync_conn.execute(sa.text(f"CREATE TABLE agents ({col_list})"))
+                sync_conn.execute(sa.text(f"INSERT INTO agents ({col_names}) SELECT {col_names} FROM _agents_old"))
+                sync_conn.execute(sa.text(f"DROP TABLE _agents_old"))
+
     await conn.run_sync(_do_migrate)
 
 
@@ -95,12 +128,23 @@ async def lifespan(app: FastAPI):
             await _auto_migrate_sqlite(conn)
         logger.info("SQLite tables created/verified (with auto-migration).")
 
-    # Initialize built-in style presets
+    # Initialize built-in style presets / prompt templates / membership plans
     from agent_publisher.database import async_session_factory
     from agent_publisher.services.style_preset_service import StylePresetService
+    from agent_publisher.services.prompt_template_service import PromptTemplateService
+    from agent_publisher.services.membership_service import MembershipService
     async with async_session_factory() as session:
         sps = StylePresetService(session)
         await sps.init_builtin_presets()
+        pts = PromptTemplateService(session)
+        await pts.init_builtin_templates()
+        ms = MembershipService(session)
+        await ms.init_default_plans()
+
+    # Initialize built-in agent(s)
+    from agent_publisher.services.agent_init_service import init_builtin_agent
+    async with async_session_factory() as session:
+        await init_builtin_agent(session)
 
     # Seed default trending platform sources
     from agent_publisher.services.source_registry_service import SourceRegistryService
@@ -112,6 +156,30 @@ async def lifespan(app: FastAPI):
 
     logger.info("Starting Agent Publisher scheduler...")
     await sync_agent_schedules()
+
+    # Auto-install wenyan-cli if not found
+    import shutil
+    if not shutil.which('wenyan'):
+        logger.info("wenyan-cli not found, attempting auto-install via npm...")
+        import subprocess
+        try:
+            result = subprocess.run(
+                ['npm', 'install', '-g', '@wenyan-md/cli'],
+                capture_output=True, text=True, timeout=120,
+            )
+            if result.returncode == 0:
+                logger.info("wenyan-cli installed successfully.")
+            else:
+                logger.warning("wenyan-cli install failed: %s", result.stderr[:500])
+        except FileNotFoundError:
+            logger.warning("npm not found — wenyan-cli auto-install skipped. Install Node.js to enable typesetting.")
+        except subprocess.TimeoutExpired:
+            logger.warning("wenyan-cli install timed out.")
+        except Exception as e:
+            logger.warning("wenyan-cli auto-install failed: %s", e)
+    else:
+        logger.info("wenyan-cli already available.")
+
     scheduler.start()
     yield
     # Shutdown
@@ -122,7 +190,22 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Agent Publisher", version=get_version_info()["version"], lifespan=lifespan)
 
 # Public routes (no auth required)
-PUBLIC_PREFIXES = ("/api/auth/", "/api/version", "/api/skills/auth", "/api/skills/setup-guide", "/api/skill-package/", "/api/server-info", "/assets/", "/favicon.ico")
+# Note: auth endpoints are intentionally enumerated to keep `/api/auth/me`
+# protected by the auth middleware.
+PUBLIC_PREFIXES = (
+    "/api/auth/login",
+    "/api/auth/verify",
+    "/api/auth/invite",
+    "/api/version",
+    "/api/skills/auth",
+    "/api/skills/setup-guide",
+    "/api/skill-package/",
+    "/api/server-info",
+    "/api/membership/plans",
+    "/api/membership/contact",
+    "/assets/",
+    "/favicon.ico",
+)
 
 
 @app.middleware("http")
@@ -153,6 +236,7 @@ async def auth_middleware(request: Request, call_next) -> Response:
         "/api/extensions/slideshow/chapter/",
         "/api/extensions/slideshow/timeline/",
         "/api/extensions/slideshow/status/",
+        "/api/tasks/",  # SSE task streaming (EventSource can't send headers)
     )
     if any(path.startswith(p) for p in SLIDESHOW_TOKEN_PATHS):
         auth_header = request.headers.get("authorization", "")
@@ -209,10 +293,15 @@ app.include_router(tasks_router)
 app.include_router(media_router)
 app.include_router(publish_records_router)
 app.include_router(style_presets_router)
+app.include_router(prompts_router)
+app.include_router(hotspots_router)
+app.include_router(membership_router)
+app.include_router(credits_router)
 app.include_router(skills_router)
 app.include_router(sources_router)
 app.include_router(candidate_materials_router)
 app.include_router(extensions_router)
+app.include_router(invite_codes_router)
 
 # Discover and register extensions (graceful degradation: failures only logged)
 extension_registry.discover_and_load()

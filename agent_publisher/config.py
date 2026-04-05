@@ -13,6 +13,17 @@ class Settings(BaseSettings):
     tencent_secret_id: str = ""
     tencent_secret_key: str = ""
 
+    # Tencent Cloud COS (Object Storage) — optional media backend
+    # When configured, uploaded media is stored in COS instead of local disk.
+    # Media served via COS CDN URL can be used directly in WeChat article HTML.
+    # cos_base_url: custom CDN domain, e.g. "https://cdn.example.com"
+    #               leave empty to use default COS URL.
+    cos_secret_id: str = ""
+    cos_secret_key: str = ""
+    cos_bucket: str = ""        # e.g. "my-bucket-1250000000"
+    cos_region: str = "ap-beijing"
+    cos_base_url: str = ""      # optional CDN domain prefix
+
     # Default LLM
     default_llm_provider: str = "openai"
     default_llm_model: str = "gpt-4o"
@@ -31,6 +42,8 @@ class Settings(BaseSettings):
 
     # Runtime-added admins (not persisted to .env, managed via API)
     _runtime_admins: set[str] = set()
+    # Runtime-added whitelist emails (from invite code activation)
+    _runtime_whitelist: set[str] = set()
 
     # Server
     host: str = "0.0.0.0"
@@ -41,6 +54,17 @@ class Settings(BaseSettings):
     # Can be a domain (e.g. "publisher.example.com") or IP (e.g. "1.2.3.4").
     # If empty, auto-detected from outbound socket.
     server_host: str = ""
+
+    # HTTP proxy for WeChat API calls only (e.g. "http://1.2.3.4:8080")
+    # Useful when the server IP is not on WeChat IP whitelist and a proxy
+    # server with a whitelisted IP is available.
+    # Leave empty to disable. Only affects WeChatService calls.
+    wechat_proxy: str = ""
+
+    # Membership / payment placeholder contact
+    contact_wechat_qr: str = ""
+    contact_wechat_id: str = ""
+    contact_description: str = "当前支付能力建设中，请联系管理员微信完成开通。"
 
     def get_jwt_secret(self) -> str:
         return self.jwt_secret or f"jwt-{self.access_key}-secret"
@@ -83,7 +107,15 @@ class Settings(BaseSettings):
     def is_email_allowed(self, email: str) -> bool:
         """Check if an email is in the whitelist (admins are always allowed)."""
         email_lower = email.strip().lower()
-        return email_lower in self.get_email_whitelist() or email_lower in self.get_admin_emails()
+        return (
+            email_lower in self.get_email_whitelist()
+            or email_lower in self.get_admin_emails()
+            or email_lower in self._runtime_whitelist
+        )
+
+    def add_to_whitelist(self, email: str) -> None:
+        """Add an email to the runtime whitelist (not persisted to .env)."""
+        self._runtime_whitelist.add(email.strip().lower())
 
     def is_admin(self, email: str) -> bool:
         """Check if an email is an admin."""
