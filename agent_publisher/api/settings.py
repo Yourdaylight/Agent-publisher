@@ -37,6 +37,12 @@ class AccessKeyUpdate(BaseModel):
     new_key: str
 
 
+class MembershipContactSettingsUpdate(BaseModel):
+    contact_wechat_qr: str | None = None
+    contact_wechat_id: str | None = None
+    contact_description: str | None = None
+
+
 class AllSettings(BaseModel):
     default_llm_provider: str
     default_llm_model: str
@@ -45,6 +51,14 @@ class AllSettings(BaseModel):
     tencent_secret_id: str
     tencent_secret_key: str
     access_key_masked: str
+    contact_wechat_qr: str
+    contact_wechat_id: str
+    contact_description: str
+    wechat_proxy: str
+
+
+class WeChatProxyUpdate(BaseModel):
+    wechat_proxy: str
 
 
 def _mask(value: str) -> str:
@@ -65,6 +79,10 @@ async def get_settings(_: UserContext = Depends(_require_admin_user)):
         tencent_secret_id=_mask(settings.tencent_secret_id) if settings.tencent_secret_id else "",
         tencent_secret_key=_mask(settings.tencent_secret_key) if settings.tencent_secret_key else "",
         access_key_masked=_mask(settings.access_key),
+        contact_wechat_qr=settings.contact_wechat_qr,
+        contact_wechat_id=settings.contact_wechat_id,
+        contact_description=settings.contact_description,
+        wechat_proxy=settings.wechat_proxy,
     )
 
 
@@ -92,6 +110,34 @@ async def update_image_settings(req: ImageSettingsUpdate, _: UserContext = Depen
         settings.tencent_secret_key = req.tencent_secret_key
     logger.info("Image generation settings updated")
     return {"message": "Image settings updated"}
+
+
+@router.put("/membership-contact")
+async def update_membership_contact_settings(req: MembershipContactSettingsUpdate, _: UserContext = Depends(_require_admin_user)):
+    """Update membership contact / QR placeholder settings. Admin only."""
+    if req.contact_wechat_qr is not None:
+        settings.contact_wechat_qr = req.contact_wechat_qr
+    if req.contact_wechat_id is not None:
+        settings.contact_wechat_id = req.contact_wechat_id
+    if req.contact_description is not None:
+        settings.contact_description = req.contact_description
+    logger.info("Membership contact settings updated")
+    return {"message": "Membership contact settings updated"}
+
+
+@router.put("/proxy")
+async def update_wechat_proxy(req: WeChatProxyUpdate, _: UserContext = Depends(_require_admin_user)):
+    """Update WeChat API HTTP proxy at runtime. Admin only.
+
+    Set to an empty string to disable the proxy.
+    Only affects calls to the WeChat API (api.weixin.qq.com).
+    """
+    proxy = req.wechat_proxy.strip()
+    if proxy and not (proxy.startswith("http://") or proxy.startswith("https://") or proxy.startswith("socks5://")):
+        raise HTTPException(status_code=400, detail="代理地址格式无效，应以 http://、https:// 或 socks5:// 开头")
+    settings.wechat_proxy = proxy
+    logger.info("WeChat proxy updated: %s", proxy or "(disabled)")
+    return {"message": "WeChat proxy updated", "wechat_proxy": proxy}
 
 
 @router.put("/access-key")

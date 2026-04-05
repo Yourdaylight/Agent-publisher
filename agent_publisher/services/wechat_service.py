@@ -11,13 +11,29 @@ logger = logging.getLogger(__name__)
 WECHAT_API_BASE = "https://api.weixin.qq.com/cgi-bin"
 
 
+def _wechat_client(timeout: int = 30) -> httpx.AsyncClient:
+    """Create an httpx AsyncClient for WeChat API calls.
+
+    If ``settings.wechat_proxy`` is configured, routes all requests through
+    that HTTP proxy. Only WeChat API calls use this proxy — no other services
+    are affected.
+    """
+    from agent_publisher.config import settings
+
+    proxy = settings.wechat_proxy.strip() or None
+    kwargs: dict = {"timeout": timeout}
+    if proxy:
+        kwargs["proxy"] = proxy
+    return httpx.AsyncClient(**kwargs)
+
+
 class WeChatService:
     @staticmethod
     async def get_access_token(appid: str, appsecret: str) -> tuple[str, datetime]:
         """Get or refresh access token. Returns (token, expires_at)."""
         url = f"{WECHAT_API_BASE}/token"
         params = {"grant_type": "client_credential", "appid": appid, "secret": appsecret}
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with _wechat_client(timeout=30) as client:
             resp = await client.get(url, params=params)
             resp.raise_for_status()
             data = resp.json()
@@ -39,7 +55,7 @@ class WeChatService:
         url = f"{WECHAT_API_BASE}/material/add_material"
         params = {"access_token": access_token, "type": "image"}
         files = {"media": (filename, image_data, "image/png")}
-        async with httpx.AsyncClient(timeout=60) as client:
+        async with _wechat_client(timeout=60) as client:
             resp = await client.post(url, params=params, files=files)
             resp.raise_for_status()
             data = resp.json()
@@ -58,7 +74,7 @@ class WeChatService:
         url = f"{WECHAT_API_BASE}/material/add_material"
         params = {"access_token": access_token, "type": "thumb"}
         files = {"media": (filename, image_data, "image/jpeg")}
-        async with httpx.AsyncClient(timeout=60) as client:
+        async with _wechat_client(timeout=60) as client:
             resp = await client.post(url, params=params, files=files)
             resp.raise_for_status()
             data = resp.json()
@@ -85,7 +101,7 @@ class WeChatService:
         )
         files = {"media": (filename, image_data, resolved_content_type)}
 
-        async with httpx.AsyncClient(timeout=60) as client:
+        async with _wechat_client(timeout=60) as client:
             resp = await client.post(url, params=params, files=files)
             resp.raise_for_status()
             data = resp.json()
@@ -112,7 +128,7 @@ class WeChatService:
         url = f"{WECHAT_API_BASE}/draft/add"
         params = {"access_token": access_token}
         payload = {"articles": articles}
-        async with httpx.AsyncClient(timeout=60) as client:
+        async with _wechat_client(timeout=60) as client:
             resp = await client.post(url, params=params, json=payload)
             resp.raise_for_status()
             data = resp.json()
@@ -144,7 +160,7 @@ class WeChatService:
             "index": index,
             "articles": articles,
         }
-        async with httpx.AsyncClient(timeout=60) as client:
+        async with _wechat_client(timeout=60) as client:
             resp = await client.post(url, params=params, json=payload)
             resp.raise_for_status()
             data = resp.json()
@@ -211,7 +227,7 @@ class WeChatService:
         chunks = WeChatService._split_date_range(begin_date, end_date, max_days=7)
         all_data: list[dict] = []
 
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with _wechat_client(timeout=30) as client:
             for chunk_begin, chunk_end in chunks:
                 url = f"{WECHAT_API_BASE.replace('/cgi-bin', '')}/datacube/getusersummary"
                 params = {"access_token": access_token}
@@ -235,7 +251,7 @@ class WeChatService:
         chunks = WeChatService._split_date_range(begin_date, end_date, max_days=7)
         all_data: list[dict] = []
 
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with _wechat_client(timeout=30) as client:
             for chunk_begin, chunk_end in chunks:
                 url = f"{WECHAT_API_BASE.replace('/cgi-bin', '')}/datacube/getusercumulate"
                 params = {"access_token": access_token}
@@ -259,7 +275,7 @@ class WeChatService:
         chunks = WeChatService._split_date_range(begin_date, end_date, max_days=1)
         all_data: list[dict] = []
 
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with _wechat_client(timeout=30) as client:
             for chunk_begin, chunk_end in chunks:
                 url = f"{WECHAT_API_BASE.replace('/cgi-bin', '')}/datacube/getarticlesummary"
                 params = {"access_token": access_token}
@@ -283,7 +299,7 @@ class WeChatService:
         chunks = WeChatService._split_date_range(begin_date, end_date, max_days=1)
         all_data: list[dict] = []
 
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with _wechat_client(timeout=30) as client:
             for chunk_begin, chunk_end in chunks:
                 url = f"{WECHAT_API_BASE.replace('/cgi-bin', '')}/datacube/getarticletotal"
                 params = {"access_token": access_token}
@@ -308,7 +324,7 @@ class WeChatService:
         if next_openid:
             params["next_openid"] = next_openid
 
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with _wechat_client(timeout=30) as client:
             resp = await client.get(url, params=params)
             resp.raise_for_status()
             data = resp.json()
