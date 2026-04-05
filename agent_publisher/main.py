@@ -156,6 +156,8 @@ async def lifespan(app: FastAPI):
 
     logger.info("Starting Agent Publisher scheduler...")
     await sync_agent_schedules()
+    from agent_publisher.scheduler import sync_trending_schedule
+    sync_trending_schedule()
 
     # Auto-install wenyan-cli if not found
     import shutil

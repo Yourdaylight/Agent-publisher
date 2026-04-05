@@ -55,10 +55,15 @@ class AllSettings(BaseModel):
     contact_wechat_id: str
     contact_description: str
     wechat_proxy: str
+    trending_refresh_interval: int
 
 
 class WeChatProxyUpdate(BaseModel):
     wechat_proxy: str
+
+
+class TrendingRefreshUpdate(BaseModel):
+    interval_minutes: int  # 0 = disabled
 
 
 def _mask(value: str) -> str:
@@ -83,6 +88,7 @@ async def get_settings(_: UserContext = Depends(_require_admin_user)):
         contact_wechat_id=settings.contact_wechat_id,
         contact_description=settings.contact_description,
         wechat_proxy=settings.wechat_proxy,
+        trending_refresh_interval=settings.trending_refresh_interval,
     )
 
 
@@ -138,6 +144,23 @@ async def update_wechat_proxy(req: WeChatProxyUpdate, _: UserContext = Depends(_
     settings.wechat_proxy = proxy
     logger.info("WeChat proxy updated: %s", proxy or "(disabled)")
     return {"message": "WeChat proxy updated", "wechat_proxy": proxy}
+
+
+@router.put("/trending")
+async def update_trending_settings(req: TrendingRefreshUpdate, _: UserContext = Depends(_require_admin_user)):
+    """Update trending hotspot auto-refresh interval. Admin only.
+
+    interval_minutes=0 disables automatic refresh.
+    Changes take effect immediately (scheduler job is updated at runtime).
+    """
+    if req.interval_minutes < 0:
+        raise HTTPException(status_code=400, detail="interval_minutes 不能为负数")
+    settings.trending_refresh_interval = req.interval_minutes
+    from agent_publisher.scheduler import sync_trending_schedule
+    sync_trending_schedule(req.interval_minutes)
+    msg = f"热榜每 {req.interval_minutes} 分钟自动刷新" if req.interval_minutes > 0 else "热榜自动刷新已禁用"
+    logger.info("Trending refresh interval updated: %d minutes", req.interval_minutes)
+    return {"message": msg, "interval_minutes": req.interval_minutes}
 
 
 @router.put("/access-key")

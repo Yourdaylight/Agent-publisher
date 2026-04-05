@@ -61,6 +61,10 @@ class Settings(BaseSettings):
     # Leave empty to disable. Only affects WeChatService calls.
     wechat_proxy: str = ""
 
+    # Trending hotspot auto-refresh interval in minutes (0 = disabled).
+    # Default: every 60 minutes. Scheduler picks this up at startup.
+    trending_refresh_interval: int = 60
+
     # Membership / payment placeholder contact
     contact_wechat_qr: str = ""
     contact_wechat_id: str = ""

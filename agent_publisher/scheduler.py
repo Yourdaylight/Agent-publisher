@@ -4,6 +4,7 @@ import logging
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 from sqlalchemy import select
 
 from agent_publisher.database import async_session_factory
@@ -13,6 +14,54 @@ from agent_publisher.services.task_service import run_scheduled_agent
 logger = logging.getLogger(__name__)
 
 scheduler = AsyncIOScheduler()
+
+TRENDING_JOB_ID = "global_trending_refresh"
+
+
+async def run_trending_refresh() -> None:
+    """全局热榜定时刷新任务 — 由调度器自动触发，禁止普通用户手动调用。"""
+    logger.info("Scheduler: running global trending refresh")
+    try:
+        async with async_session_factory() as session:
+            from agent_publisher.services.source_registry_service import SourceRegistryService
+            registry = SourceRegistryService(session)
+            result = await registry.collect_all_trending()
+            logger.info(
+                "Scheduler: trending refresh done — sources=%s new_items=%d",
+                result.get("platforms_collected", []),
+                result.get("new_items", 0),
+            )
+    except Exception as e:
+        logger.error("Scheduler: trending refresh failed: %s", e, exc_info=True)
+
+
+def sync_trending_schedule(interval_minutes: int | None = None) -> None:
+    """Register (or update) the global trending refresh job.
+
+    Args:
+        interval_minutes: refresh interval in minutes; 0 or None disables the job.
+                          Defaults to settings.trending_refresh_interval.
+    """
+    from agent_publisher.config import settings
+
+    minutes = interval_minutes if interval_minutes is not None else settings.trending_refresh_interval
+
+    # Remove existing job first
+    if scheduler.get_job(TRENDING_JOB_ID):
+        scheduler.remove_job(TRENDING_JOB_ID)
+
+    if minutes <= 0:
+        logger.info("Trending auto-refresh disabled (interval=0)")
+        return
+
+    scheduler.add_job(
+        run_trending_refresh,
+        trigger=IntervalTrigger(minutes=minutes),
+        id=TRENDING_JOB_ID,
+        replace_existing=True,
+        name=f"Global trending refresh (every {minutes}min)",
+    )
+    logger.info("Scheduled global trending refresh every %d minutes", minutes)
 
 
 def _parse_cron_trigger(cron_str: str) -> CronTrigger | None:

@@ -77,6 +77,7 @@ export const updateAccessKey = (currentKey: string, newKey: string) =>
 export const updateMembershipContactSettings = (data: { contact_wechat_qr?: string; contact_wechat_id?: string; contact_description?: string }) =>
   http.put('/settings/membership-contact', data);
 export const updateWeChatProxy = (wechat_proxy: string) => http.put('/settings/proxy', { wechat_proxy });
+export const updateTrendingSettings = (interval_minutes: number) => http.put('/settings/trending', { interval_minutes });
 
 // Accounts
 export const getAccounts = () => http.get('/accounts');

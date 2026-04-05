@@ -96,6 +96,32 @@
       </div>
     </t-card>
 
+    <t-card title="热榜自动刷新" style="margin-bottom: 20px" :bordered="true">
+      <t-alert theme="info" style="margin-bottom: 16px">
+        <template #message>
+          热榜数据由定时任务自动采集，<strong>普通用户无法手动触发刷新</strong>。
+          管理员可在此调整刷新频率，设为 0 则禁用自动刷新。
+        </template>
+      </t-alert>
+      <t-form :data="trendingForm" label-align="right" :label-width="140">
+        <t-form-item label="刷新间隔（分钟）">
+          <t-input-number
+            v-model="trendingForm.interval_minutes"
+            :min="0"
+            :max="1440"
+            :step="15"
+            style="width: 180px"
+          />
+          <span style="margin-left: 10px; font-size: 13px; color: var(--td-text-color-secondary)">
+            {{ trendingForm.interval_minutes === 0 ? '0 = 禁用自动刷新' : `约每 ${trendingForm.interval_minutes} 分钟刷新一次` }}
+          </span>
+        </t-form-item>
+        <t-form-item>
+          <t-button theme="primary" :loading="trendingSaving" @click="saveTrending">保存刷新配置</t-button>
+        </t-form-item>
+      </t-form>
+    </t-card>
+
     <!-- Current settings overview -->
     <t-card title="当前配置概览" style="margin-top: 20px" :bordered="true">
       <t-loading v-if="overviewLoading" />
@@ -108,6 +134,7 @@
         <t-descriptions-item label="腾讯云 Secret Key">{{ overview.tencent_secret_key || '未配置' }}</t-descriptions-item>
         <t-descriptions-item label="访问密钥">{{ overview.access_key_masked }}</t-descriptions-item>
         <t-descriptions-item label="微信代理">{{ overview.wechat_proxy || '未配置（直连）' }}</t-descriptions-item>
+        <t-descriptions-item label="热榜刷新">{{ overview.trending_refresh_interval > 0 ? `每 ${overview.trending_refresh_interval} 分钟` : '已禁用' }}</t-descriptions-item>
       </t-descriptions>
     </t-card>
   </div>
@@ -115,7 +142,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue';
-import { getSettings, updateLLMSettings, updateImageSettings, updateAccessKey, updateWeChatProxy } from '@/api';
+import { getSettings, updateLLMSettings, updateImageSettings, updateAccessKey, updateWeChatProxy, updateTrendingSettings } from '@/api';
 import { MessagePlugin } from 'tdesign-vue-next';
 import { useRouter } from 'vue-router';
 
@@ -143,12 +170,17 @@ const proxyForm = reactive({
   wechat_proxy: '',
 });
 
+const trendingForm = reactive({
+  interval_minutes: 60,
+});
+
 const overview = ref<any>({});
 const overviewLoading = ref(false);
 const llmSaving = ref(false);
 const imageSaving = ref(false);
 const keySaving = ref(false);
 const proxySaving = ref(false);
+const trendingSaving = ref(false);
 
 const fetchOverview = async () => {
   overviewLoading.value = true;
@@ -162,6 +194,8 @@ const fetchOverview = async () => {
     const proxy = res.data.wechat_proxy || '';
     proxyForm.enabled = !!proxy;
     proxyForm.wechat_proxy = proxy;
+    // 同步热榜刷新间隔
+    trendingForm.interval_minutes = res.data.trending_refresh_interval ?? 60;
   } catch {
     // ignore
   } finally {
@@ -234,6 +268,21 @@ const saveKey = async () => {
     MessagePlugin.error(detail);
   } finally {
     keySaving.value = false;
+  }
+};
+
+const saveTrending = async () => {
+  trendingSaving.value = true;
+  try {
+    await updateTrendingSettings(trendingForm.interval_minutes);
+    MessagePlugin.success(trendingForm.interval_minutes > 0
+      ? `已设置：每 ${trendingForm.interval_minutes} 分钟自动刷新热榜`
+      : '热榜自动刷新已禁用');
+    fetchOverview();
+  } catch (err: any) {
+    MessagePlugin.error(err?.response?.data?.detail || '保存失败');
+  } finally {
+    trendingSaving.value = false;
   }
 };
 
