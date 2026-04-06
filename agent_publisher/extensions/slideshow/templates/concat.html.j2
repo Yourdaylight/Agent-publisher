@@ -120,6 +120,10 @@
       var chapterInfo = document.getElementById('chapter-info');
       var notesPanel = document.getElementById('notes-panel');
 
+      // Extract auth token from URL querystring for sub-resource loading
+      var urlParams = new URLSearchParams(window.location.search);
+      var authToken = urlParams.get('token') || '';
+
       // Build progress chapter dividers
       var totalSlides = chapters.reduce(function(s, c) { return s + c.slide_count; }, 0);
       chapters.forEach(function(ch) {
@@ -145,7 +149,10 @@
         if (iframe) { stage.removeChild(iframe); }
 
         iframe = document.createElement('iframe');
-        iframe.src = chapters[idx].html_file;
+        // Build absolute API URL with auth token: /api/extensions/slideshow/chapter/{taskId}/{chapterId}?token=xxx
+        var ch = chapters[idx];
+        var sep = authToken ? (authToken.includes('?') ? '&' : '?') : '';
+        iframe.src = '../chapter/{{ task_id }}/' + ch.chapter_id + sep + 'token=' + encodeURIComponent(authToken);
         iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin');
         stage.appendChild(iframe);
 

@@ -111,7 +111,7 @@ def build_chapter_html(
     return html
 
 
-def build_concat_html(timeline: dict) -> str:
+def build_concat_html(timeline: dict, *, task_id: int = 0) -> str:
     """Render the concat.html browser player.
 
     The player loads chapter HTML files via iframes and provides
@@ -133,6 +133,7 @@ def build_concat_html(timeline: dict) -> str:
     html = template.render(
         title=timeline.get("title", "Slideshow"),
         chapters=timeline.get("chapters", []),
+        task_id=task_id,
         chapters_json=json.dumps(chapters_for_js, ensure_ascii=False),
     )
     return html
@@ -227,7 +228,7 @@ def build_vertical_scene_html(
     return html
 
 
-def build_vertical_concat_html(timeline: dict) -> str:
+def build_vertical_concat_html(timeline: dict, *, task_id: int = 0) -> str:
     """Render the vertical video concat.html player.
 
     Loads scene HTML files via iframes in 9:16 portrait ratio.
@@ -247,6 +248,7 @@ def build_vertical_concat_html(timeline: dict) -> str:
     html = template.render(
         title=timeline.get("title", "Video"),
         scenes=timeline.get("scenes", []),
+        task_id=task_id,
         scenes_json=json.dumps(scenes_for_js, ensure_ascii=False),
     )
     return html

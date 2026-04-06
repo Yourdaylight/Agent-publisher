@@ -467,7 +467,7 @@ async def _assemble(
     )
 
     # Build concat.html player
-    concat_html = build_concat_html(timeline)
+    concat_html = build_concat_html(timeline, task_id=task.id)
     concat_path = out_dir / "concat.html"
     concat_path.write_text(concat_html, encoding="utf-8")
 
@@ -643,7 +643,7 @@ async def _assemble_vertical(
     )
 
     # Build concat.html player
-    concat_html = build_vertical_concat_html(timeline)
+    concat_html = build_vertical_concat_html(timeline, task_id=task.id)
     concat_path = out_dir / "concat.html"
     concat_path.write_text(concat_html, encoding="utf-8")
 

@@ -120,6 +120,10 @@
       var sceneInfo = document.getElementById('scene-info');
       var notesPanel = document.getElementById('notes-panel');
 
+      // Extract auth token from URL querystring for sub-resource loading
+      var urlParams = new URLSearchParams(window.location.search);
+      var authToken = urlParams.get('token') || '';
+
       // Build progress scene dividers (each scene = 1 segment)
       scenes.forEach(function() {
         var div = document.createElement('div');
@@ -144,7 +148,10 @@
         if (iframe) { stage.removeChild(iframe); }
 
         iframe = document.createElement('iframe');
-        iframe.src = scenes[idx].html_file;
+        // Build absolute API URL with auth token: /api/extensions/slideshow/scene/{taskId}/{sceneId}?token=xxx
+        var sc = scenes[idx];
+        var sep = authToken ? (authToken.includes('?') ? '&' : '?') : '';
+        iframe.src = '../scene/{{ task_id }}/' + sc.scene_id + sep + 'token=' + encodeURIComponent(authToken);
         iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin');
         stage.appendChild(iframe);
 
