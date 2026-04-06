@@ -74,6 +74,8 @@ cp .env.example .env
 
 # 安装依赖
 pip install -e .
+# 或使用 uv:
+# uv sync && uv pip install -e .
 ```
 
 ### 2. 数据库初始化

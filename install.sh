@@ -287,6 +287,14 @@ else
     exit 1
 fi
 
+# 以 editable 模式安装当前包（uv sync 不会自动注册包到 Python 路径）
+info "运行 uv pip install -e . ..."
+if uv pip install -e .; then
+    success "agent_publisher 包已注册"
+else
+    warning "editable 安装失败，尝试继续..."
+fi
+
 # ============================================================================
 # 步骤 4: 构建前端（可跳过）
 # ============================================================================
