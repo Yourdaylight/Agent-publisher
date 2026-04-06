@@ -6,6 +6,8 @@ Architecture:
   Phase 2: Assembly — build HTML files + timeline.json + concat.html player
 
 No Playwright, no ffmpeg, no TTS dependencies.
+Note: Video generation has been migrated to agent_publisher/extensions/video/
+      which uses Remotion for proper video rendering.
 """
 from __future__ import annotations
 
@@ -24,19 +26,12 @@ from agent_publisher.extensions.slideshow.chapter_builder import (
     build_chapter_html,
     build_concat_html,
     build_timeline_json,
-    build_vertical_scene_html,
-    build_vertical_concat_html,
-    build_video_timeline_json,
 )
 from agent_publisher.extensions.slideshow.prompts import (
     ORCHESTRATOR_SYSTEM_PROMPT,
     CHAPTER_WRITER_SYSTEM_PROMPT,
     build_orchestrator_prompt,
     build_chapter_prompt,
-    VIDEO_ORCHESTRATOR_SYSTEM_PROMPT,
-    VIDEO_SCENE_WRITER_SYSTEM_PROMPT,
-    build_video_orchestrator_prompt,
-    build_video_scene_prompt,
 )
 from agent_publisher.models.article import Article
 from agent_publisher.models.task import Task
@@ -58,7 +53,10 @@ async def run_chapter_pipeline(
     *,
     mode: str = "slideshow",
 ) -> None:
-    """Full pipeline: orchestrator → parallel chapters/scenes → assembly."""
+    """Full pipeline: orchestrator → parallel chapters → assembly.
+
+    Note: mode='video' is no longer supported here. Use the video extension instead.
+    """
     task = await session.get(Task, task_id)
     if not task:
         return
@@ -77,43 +75,25 @@ async def run_chapter_pipeline(
         timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
         out_dir = STORAGE_ROOT / f"article_{article_id}_{timestamp}"
 
-        if mode == "video":
-            # Video mode: vertical 1080×1920
-            orchestrator_output = await _run_orchestrator(
-                article, task, session, mode="video"
-            )
-            scene_results = await _run_scenes_parallel(
-                orchestrator_output, article, task, session
-            )
-            result = await _assemble_vertical(
-                orchestrator_output, scene_results, out_dir, task, session
-            )
-            task.status = "success"
-            task.result = {
-                "article_id": article_id,
-                "mode": "video",
-                **result,
-            }
-        else:
-            # Slideshow mode: horizontal 1920×1080 (existing)
-            orchestrator_output = await _run_orchestrator(article, task, session)
-            chapter_results = await _run_chapters_parallel(
-                orchestrator_output, article, task, session
-            )
-            result = await _assemble(
-                orchestrator_output, chapter_results, out_dir, task, session
-            )
-            task.status = "success"
-            task.result = {
-                "article_id": article_id,
-                **result,
-            }
+        # Slideshow mode: horizontal 1920×1080
+        orchestrator_output = await _run_orchestrator(article, task, session)
+        chapter_results = await _run_chapters_parallel(
+            orchestrator_output, article, task, session
+        )
+        result = await _assemble(
+            orchestrator_output, chapter_results, out_dir, task, session
+        )
+        task.status = "success"
+        task.result = {
+            "article_id": article_id,
+            **result,
+        }
 
         task.finished_at = datetime.now(timezone.utc)
         await session.commit()
         logger.info(
-            "Slideshow pipeline complete: task=%d mode=%s",
-            task_id, mode,
+            "Slideshow pipeline complete: task=%d",
+            task_id,
         )
 
     except Exception as exc:
@@ -249,24 +229,15 @@ async def _run_orchestrator(
     article: Article,
     task: Task,
     session: AsyncSession,
-    *,
-    mode: str = "slideshow",
 ) -> dict:
-    """Single LLM call to split article into chapters/scenes."""
+    """Single LLM call to split article into chapters."""
     await _record_step(task, session, "orchestrator", "running", {})
 
-    if mode == "video":
-        user_prompt = build_video_orchestrator_prompt(
-            title=article.title or "无标题",
-            content=article.content or article.html_content or "",
-        )
-        system_prompt = VIDEO_ORCHESTRATOR_SYSTEM_PROMPT
-    else:
-        user_prompt = build_orchestrator_prompt(
-            title=article.title or "无标题",
-            content=article.content or article.html_content or "",
-        )
-        system_prompt = ORCHESTRATOR_SYSTEM_PROMPT
+    user_prompt = build_orchestrator_prompt(
+        title=article.title or "无标题",
+        content=article.content or article.html_content or "",
+    )
+    system_prompt = ORCHESTRATOR_SYSTEM_PROMPT
 
     messages = [
         {"role": "system", "content": system_prompt},
@@ -279,27 +250,16 @@ async def _run_orchestrator(
     if not isinstance(result, dict):
         raise ValueError("Orchestrator LLM 返回格式不正确")
 
-    if mode == "video":
-        scenes = result.get("scenes")
-        if not isinstance(scenes, list) or len(scenes) == 0:
-            raise ValueError("Orchestrator 返回了空的场景列表")
-        for i, sc in enumerate(scenes):
-            if "scene_id" not in sc:
-                sc["scene_id"] = f"scene_{i + 1:02d}"
-        await _record_step(task, session, "orchestrator", "success", {
-            "scene_count": len(scenes),
-        })
-    else:
-        chapters = result.get("chapters")
-        if not isinstance(chapters, list) or len(chapters) == 0:
-            raise ValueError("Orchestrator 返回了空的章节列表")
-        for i, ch in enumerate(chapters):
-            if "chapter_id" not in ch:
-                ch["chapter_id"] = f"ch_{i + 1:02d}"
-        await _record_step(task, session, "orchestrator", "success", {
-            "chapter_count": len(chapters),
-            "total_slides": sum(ch.get("slide_count", 2) for ch in chapters),
-        })
+    chapters = result.get("chapters")
+    if not isinstance(chapters, list) or len(chapters) == 0:
+        raise ValueError("Orchestrator 返回了空的章节列表")
+    for i, ch in enumerate(chapters):
+        if "chapter_id" not in ch:
+            ch["chapter_id"] = f"ch_{i + 1:02d}"
+    await _record_step(task, session, "orchestrator", "success", {
+        "chapter_count": len(chapters),
+        "total_slides": sum(ch.get("slide_count", 2) for ch in chapters),
+    })
 
     return result
 
@@ -489,181 +449,6 @@ async def _assemble(
                 "html_file": ch["html_file"],
             }
             for ch in chapter_entries
-        ],
-    }
-
-
-# ---------------------------------------------------------------------------
-# Phase 1 (video): Parallel scene generation
-# ---------------------------------------------------------------------------
-
-async def _run_scenes_parallel(
-    orchestrator_output: dict,
-    article: Article,
-    task: Task,
-    session: AsyncSession,
-) -> list[dict]:
-    """Generate data for each video scene concurrently (Semaphore=3)."""
-    scenes = orchestrator_output["scenes"]
-    title = orchestrator_output.get("title", "")
-    narrative_arc = orchestrator_output.get("narrative_arc", "")
-    total = len(scenes)
-
-    semaphore = asyncio.Semaphore(3)
-    step_lock = asyncio.Lock()
-    results: list[dict | None] = [None] * total
-    errors: list[str] = []
-
-    async def _generate_one(index: int, scene: dict) -> None:
-        scene_id = scene.get("scene_id", f"scene_{index + 1:02d}")
-        step_name = f"scene_{scene_id}"
-
-        async with semaphore:
-            async with step_lock:
-                await _record_step(task, session, step_name, "running", {})
-            try:
-                prev_title = scenes[index - 1]["title"] if index > 0 else None
-                next_title = scenes[index + 1]["title"] if index < total - 1 else None
-
-                user_prompt = build_video_scene_prompt(
-                    video_title=title,
-                    scene=scene,
-                    scene_index=index + 1,
-                    total_scenes=total,
-                    prev_title=prev_title,
-                    next_title=next_title,
-                    narrative_arc=narrative_arc,
-                )
-                messages = [
-                    {"role": "system", "content": VIDEO_SCENE_WRITER_SYSTEM_PROMPT},
-                    {"role": "user", "content": user_prompt},
-                ]
-
-                raw = await _call_llm(messages)
-                scene_data = _parse_json(raw)
-
-                if not isinstance(scene_data, dict):
-                    raise ValueError(f"Scene {scene_id} 返回了非对象数据")
-
-                # Ensure scene_id and duration
-                if "scene_id" not in scene_data:
-                    scene_data["scene_id"] = scene_id
-                if "duration" not in scene_data:
-                    notes = scene_data.get("notes", "")
-                    scene_data["duration"] = max(len(notes) // 4, 5)
-
-                results[index] = scene_data
-
-                async with step_lock:
-                    await _record_step(task, session, step_name, "success", {
-                        "duration": scene_data.get("duration", 8),
-                    })
-
-            except Exception as exc:
-                logger.error("Scene %s generation failed: %s", scene_id, exc)
-                errors.append(f"{scene_id}: {exc}")
-                async with step_lock:
-                    await _record_step(task, session, step_name, "failed", {
-                        "error": str(exc),
-                    })
-
-    tasks = [_generate_one(i, sc) for i, sc in enumerate(scenes)]
-    await asyncio.gather(*tasks, return_exceptions=True)
-
-    successful = [r for r in results if r is not None]
-
-    if not successful:
-        raise ValueError(f"所有场景生成均失败: {'; '.join(errors)}")
-
-    if errors:
-        logger.warning(
-            "Some scenes failed (%d/%d): %s",
-            len(errors), total, "; ".join(errors),
-        )
-
-    return successful
-
-
-# ---------------------------------------------------------------------------
-# Phase 2 (video): Vertical assembly
-# ---------------------------------------------------------------------------
-
-async def _assemble_vertical(
-    orchestrator_output: dict,
-    scene_results: list[dict],
-    out_dir: Path,
-    task: Task,
-    session: AsyncSession,
-) -> dict:
-    """Write vertical scene HTML files + timeline.json + concat.html."""
-    await _record_step(task, session, "assembly", "running", {})
-
-    scenes_dir = out_dir / "scenes"
-    scenes_dir.mkdir(parents=True, exist_ok=True)
-
-    title = orchestrator_output.get("title", "Video")
-    theme = orchestrator_output.get("theme", "dark_video")
-    narrative_arc = orchestrator_output.get("narrative_arc", "")
-
-    # Build scene HTML files — each scene is its own self-contained HTML
-    scene_entries = []
-    for sc in scene_results:
-        scene_id = sc["scene_id"]
-        html_filename = f"{scene_id}.html"
-        html_path = scenes_dir / html_filename
-
-        # Each scene file contains just one scene (as a list of 1)
-        html = build_vertical_scene_html(
-            scenes=[sc],
-            theme=theme,
-            video_title=title,
-            scene_title=sc.get("top_text", {}).get("headline", ""),
-        )
-        html_path.write_text(html, encoding="utf-8")
-
-        scene_entries.append({
-            "scene_id": scene_id,
-            "title": sc.get("top_text", {}).get("headline", ""),
-            "duration": sc.get("duration", 8),
-            "html_file": f"scenes/{html_filename}",
-            "notes": sc.get("notes", ""),
-        })
-
-    # Build timeline.json
-    timeline = build_video_timeline_json(
-        title=title,
-        theme=theme,
-        narrative_arc=narrative_arc,
-        scenes=scene_entries,
-    )
-    timeline_path = out_dir / "timeline.json"
-    timeline_path.write_text(
-        json.dumps(timeline, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-
-    # Build concat.html player
-    concat_html = build_vertical_concat_html(timeline, task_id=task.id)
-    concat_path = out_dir / "concat.html"
-    concat_path.write_text(concat_html, encoding="utf-8")
-
-    await _record_step(task, session, "assembly", "success", {
-        "scene_count": len(scene_entries),
-        "output_dir": str(out_dir),
-    })
-
-    return {
-        "output_dir": str(out_dir),
-        "scene_count": len(scene_entries),
-        "timeline_path": str(timeline_path),
-        "concat_path": str(concat_path),
-        "scenes": [
-            {
-                "scene_id": sc["scene_id"],
-                "title": sc["title"],
-                "html_file": sc["html_file"],
-            }
-            for sc in scene_entries
         ],
     }
 

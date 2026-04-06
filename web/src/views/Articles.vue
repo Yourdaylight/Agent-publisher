@@ -158,6 +158,16 @@
           >
             {{ row.slideshowStatus === 'success' ? '🎬 已生成' : row.slideshowStatus === 'failed' ? '❌ 失败' : '⏳ 生成中' }}
           </t-tag>
+          <!-- video status tag -->
+          <t-tag
+            v-if="row.videoTaskId"
+            size="small"
+            :theme="row.videoStatus === 'success' ? 'success' : row.videoStatus === 'failed' ? 'danger' : 'warning'"
+            style="margin-left: 4px; cursor: pointer"
+            @click="openVideoDrawerForArticle(row)"
+          >
+            {{ row.videoStatus === 'success' ? '🎥 视频已生成' : row.videoStatus === 'failed' ? '❌ 视频失败' : '⏳ 视频生成中' }}
+          </t-tag>
         </div>
       </template>
     </t-table>
@@ -919,6 +929,116 @@
         </div>
       </div>
     </t-drawer>
+
+    <!-- ===== Video Generation Drawer (Remotion) ===== -->
+    <t-drawer
+      v-model:visible="videoDrawerVisible"
+      :header="`生成短视频 — ${videoArticle?.title || ''}`"
+      size="60%"
+      placement="right"
+      :footer="false"
+      @close="onVideoDrawerClose"
+    >
+      <div style="padding: 8px 0">
+
+        <!-- Phase: Setup -->
+        <div v-if="videoPhase === 'setup'">
+          <t-card :bordered="true" style="margin-bottom: 20px">
+            <div style="font-size: 13px; color: var(--td-text-color-secondary); margin-bottom: 4px">文章</div>
+            <div style="font-weight: 600; font-size: 15px">{{ videoArticle?.title }}</div>
+          </t-card>
+          <t-alert theme="info" style="margin-bottom: 20px">
+            <template #message>
+              生成流程：AI 生成视频脚本（约15秒）→ Remotion 渲染 MP4（约2-5分钟）→ 完成下载<br>
+              <span style="font-size:12px;opacity:.7">脚本生成后即可查看 HTML 预览，无需等待渲染完成</span>
+            </template>
+          </t-alert>
+          <t-button theme="primary" size="large" block :loading="videoSubmitting" @click="startVideoGeneration">
+            开始生成短视频
+          </t-button>
+        </div>
+
+        <!-- Phase: Progress -->
+        <div v-else-if="videoPhase === 'progress'">
+          <t-alert theme="info" style="margin-bottom: 20px">
+            <template #message>正在生成短视频，请耐心等待…</template>
+          </t-alert>
+          <div class="step-timeline" style="margin-bottom: 24px">
+            <div v-for="(step, idx) in videoSteps" :key="idx" style="display: flex; gap: 12px; align-items: flex-start; padding: 10px 0; border-bottom: 1px solid var(--td-border-level-1-color)">
+              <t-tag size="small" :theme="step.status === 'success' ? 'success' : step.status === 'failed' ? 'danger' : step.status === 'skipped' ? 'default' : 'warning'" variant="light" style="min-width: 48px; text-align: center">
+                {{ step.status === 'success' ? '✓' : step.status === 'failed' ? '✗' : step.status === 'skipped' ? '—' : '…' }}
+              </t-tag>
+              <div style="flex: 1">
+                <div style="font-size: 13px; font-weight: 500">
+                  {{ ({ script_generation: 'AI 生成脚本', props_ready: '脚本就绪', remotion_render: 'Remotion 渲染 MP4' } as Record<string, string>)[step.name] || step.name }}
+                </div>
+                <div v-if="step.output?.scene_count" style="font-size: 12px; color: var(--td-text-color-secondary)">
+                  {{ step.output.scene_count }} 个场景 · {{ step.output.total_duration_s }}s
+                </div>
+                <div v-if="step.output?.reason" style="font-size: 12px; color: var(--td-text-color-secondary)">
+                  {{ step.output.reason }}
+                </div>
+                <div v-if="step.output?.file_size_mb" style="font-size: 12px; color: var(--td-text-color-secondary)">
+                  MP4: {{ step.output.file_size_mb }} MB
+                </div>
+              </div>
+            </div>
+          </div>
+          <!-- Show preview button as soon as props_ready -->
+          <div v-if="videoHasPreview" style="margin-bottom: 16px">
+            <t-button theme="primary" block @click="openVideoPreview">
+              <t-icon name="browse" style="margin-right: 6px" />查看脚本预览（HTML）
+            </t-button>
+          </div>
+          <t-button variant="outline" block @click="videoDrawerVisible = false">后台运行</t-button>
+        </div>
+
+        <!-- Phase: Completed -->
+        <div v-else-if="videoPhase === 'completed'">
+          <t-result theme="success" :title="`「${videoTitle}」生成完成`" style="margin-bottom: 24px">
+            <template #description>
+              <div>{{ videoSceneCount }} 个场景 · 约 {{ videoDurationS }} 秒</div>
+            </template>
+          </t-result>
+          <div style="display: flex; gap: 12px; flex-direction: column">
+            <t-button theme="primary" size="large" block @click="openVideoPreview">
+              <t-icon name="browse" style="margin-right: 6px" />查看脚本预览（HTML）
+            </t-button>
+            <t-button v-if="videoHasMp4" size="large" block @click="downloadVideo">
+              <t-icon name="download" style="margin-right: 6px" />下载 MP4
+            </t-button>
+            <div v-else style="padding: 12px; background: var(--td-bg-color-container-hover); border-radius: 8px; font-size: 13px; color: var(--td-text-color-secondary)">
+              MP4 渲染未完成（需要 Remotion 环境）。脚本 JSON 已生成，可手动运行 Remotion 渲染。
+            </div>
+            <t-divider />
+            <t-button variant="outline" @click="onRegenerateVideo">重新生成</t-button>
+          </div>
+        </div>
+
+        <!-- Phase: Failed -->
+        <div v-else-if="videoPhase === 'failed'">
+          <t-result theme="error" title="生成失败" style="margin-bottom: 24px">
+            <template #description>{{ videoErrorMsg || '生成过程中发生错误，请重试' }}</template>
+          </t-result>
+          <t-button theme="primary" block @click="videoPhase = 'setup'">重新生成</t-button>
+        </div>
+
+        <!-- Phase: Preview (iframe) -->
+        <div v-else-if="videoPhase === 'preview'" style="height: calc(100vh - 120px); position: relative">
+          <t-loading v-if="videoPreviewLoading" style="position: absolute; inset: 0; display: flex; align-items: center; justify-content: center" />
+          <iframe
+            v-if="videoPreviewUrl"
+            :src="videoPreviewUrl"
+            style="width: 100%; height: 100%; border: none; border-radius: 8px; background: #0a0a0f"
+            @load="videoPreviewLoading = false"
+          />
+          <div style="position: absolute; top: 8px; right: 8px">
+            <t-button size="small" theme="default" @click="videoPhase = videoTaskId ? 'completed' : 'setup'">← 返回</t-button>
+          </div>
+        </div>
+
+      </div>
+    </t-drawer>
   </div>
 </template>
 
@@ -951,6 +1071,10 @@ import {
   confirmSlideshowDraft,
   skipSlideshowDraft,
   getSlideshowPreviewUrl,
+  generateVideo,
+  getVideoStatus,
+  getVideoPreviewUrl,
+  getVideoDownloadUrl,
 } from '@/api';
 import http from '@/api';
 import { MessagePlugin, NotifyPlugin } from 'tdesign-vue-next';
@@ -1949,9 +2073,157 @@ function onRegenerateSlideshow() {
   slideshowOrchestrator.value = null;
 }
 
+// ============================================================
+// Video Generation State & Logic (Remotion)
+// ============================================================
+
+const videoDrawerVisible = ref(false);
+const videoArticle = ref<any>(null);
+const videoPhase = ref<'setup' | 'progress' | 'completed' | 'failed' | 'preview'>('setup');
+const videoSubmitting = ref(false);
+const videoTaskId = ref<number | null>(null);
+const videoSteps = ref<any[]>([]);
+const videoErrorMsg = ref('');
+const videoHasPreview = ref(false);
+const videoHasMp4 = ref(false);
+const videoSceneCount = ref(0);
+const videoDurationS = ref(0);
+const videoTitle = ref('');
+const videoPreviewUrl = ref('');
+const videoPreviewLoading = ref(false);
+
+let videoPollTimer: ReturnType<typeof setTimeout> | null = null;
+let videoActivePollTaskId: number | null = null;
+const VIDEO_POLL_INTERVAL_MS = 3000;
+
+function clearVideoPoll() {
+  if (videoPollTimer) {
+    clearTimeout(videoPollTimer);
+    videoPollTimer = null;
+  }
+  videoActivePollTaskId = null;
+}
+
+function openVideoDrawerForArticle(article: any) {
+  videoArticle.value = article;
+  videoDrawerVisible.value = true;
+  // If there's an existing task, restore state
+  if (article.videoTaskId) {
+    videoTaskId.value = article.videoTaskId;
+    if (article.videoStatus === 'success') {
+      videoPhase.value = 'completed';
+      // Fetch full result
+      getVideoStatus(article.videoTaskId).then(({ data }) => {
+        videoSteps.value = data.steps || [];
+        videoHasPreview.value = data.has_preview;
+        videoHasMp4.value = data.has_mp4;
+        videoSceneCount.value = data.scene_count || 0;
+        videoDurationS.value = data.total_duration_s || 0;
+        videoTitle.value = data.title || '';
+      }).catch(() => {});
+    } else if (article.videoStatus === 'failed') {
+      videoPhase.value = 'failed';
+    } else if (article.videoStatus === 'running') {
+      videoPhase.value = 'progress';
+      videoActivePollTaskId = article.videoTaskId;
+      videoPollTimer = setTimeout(() => scheduleVideoPoll(article.videoTaskId), VIDEO_POLL_INTERVAL_MS);
+    } else {
+      videoPhase.value = 'setup';
+    }
+  } else {
+    videoPhase.value = 'setup';
+    videoTaskId.value = null;
+    videoSteps.value = [];
+    videoErrorMsg.value = '';
+  }
+}
+
+async function scheduleVideoPoll(taskId: number) {
+  if (videoActivePollTaskId !== taskId) return;
+  try {
+    const { data } = await getVideoStatus(taskId);
+    if (videoActivePollTaskId !== taskId) return;
+    videoSteps.value = data.steps || [];
+    videoHasPreview.value = data.has_preview;
+    videoHasMp4.value = data.has_mp4;
+    videoSceneCount.value = data.scene_count || 0;
+    videoDurationS.value = data.total_duration_s || 0;
+    videoTitle.value = data.title || '';
+
+    if (data.status === 'success') {
+      videoPhase.value = 'completed';
+      clearVideoPoll();
+      const art = articles.value.find((a: any) => a.id === videoArticle.value?.id);
+      if (art) { art.videoStatus = 'success'; }
+    } else if (data.status === 'failed') {
+      videoPhase.value = 'failed';
+      videoErrorMsg.value = data.error || '生成失败';
+      clearVideoPoll();
+      const art = articles.value.find((a: any) => a.id === videoArticle.value?.id);
+      if (art) { art.videoStatus = 'failed'; }
+    } else {
+      videoPollTimer = setTimeout(() => scheduleVideoPoll(taskId), VIDEO_POLL_INTERVAL_MS);
+    }
+  } catch {
+    videoPollTimer = setTimeout(() => scheduleVideoPoll(taskId), VIDEO_POLL_INTERVAL_MS * 2);
+  }
+}
+
+async function startVideoGeneration() {
+  if (videoSubmitting.value || !videoArticle.value) return;
+  videoSubmitting.value = true;
+  videoErrorMsg.value = '';
+  try {
+    const { data } = await generateVideo(videoArticle.value.id);
+    const taskId = data.task_id;
+    videoTaskId.value = taskId;
+    videoPhase.value = 'progress';
+    const art = articles.value.find((a: any) => a.id === videoArticle.value.id);
+    if (art) { art.videoTaskId = taskId; art.videoStatus = 'running'; }
+    videoActivePollTaskId = taskId;
+    videoPollTimer = setTimeout(() => scheduleVideoPoll(taskId), VIDEO_POLL_INTERVAL_MS);
+  } catch (err: any) {
+    videoPhase.value = 'failed';
+    videoErrorMsg.value = err?.response?.data?.detail || '启动失败';
+  } finally {
+    videoSubmitting.value = false;
+  }
+}
+
+function openVideoPreview() {
+  if (!videoTaskId.value) return;
+  videoPreviewUrl.value = getVideoPreviewUrl(videoTaskId.value);
+  videoPreviewLoading.value = true;
+  videoPhase.value = 'preview';
+}
+
+function downloadVideo() {
+  if (!videoTaskId.value) return;
+  window.open(getVideoDownloadUrl(videoTaskId.value), '_blank');
+}
+
+function onRegenerateVideo() {
+  clearVideoPoll();
+  videoPhase.value = 'setup';
+  videoTaskId.value = null;
+  videoSteps.value = [];
+  videoErrorMsg.value = '';
+  videoHasPreview.value = false;
+  videoHasMp4.value = false;
+}
+
+function onVideoDrawerClose() {
+  if (videoPhase.value !== 'progress') {
+    clearVideoPoll();
+  }
+  videoPreviewUrl.value = '';
+}
+
 const onExtensionAction = async (action: any, article: any) => {
   if (action.key === 'slideshow_generate') {
     openSlideshowDrawerForArticle(article);
+  } else if (action.key === 'video_generate') {
+    openVideoDrawerForArticle(article);
   } else {
     // Generic extension action
     try {

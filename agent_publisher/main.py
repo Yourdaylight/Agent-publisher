@@ -236,9 +236,9 @@ async def auth_middleware(request: Request, call_next) -> Response:
     SLIDESHOW_TOKEN_PATHS = (
         "/api/extensions/slideshow/preview/",
         "/api/extensions/slideshow/chapter/",
-        "/api/extensions/slideshow/scene/",
         "/api/extensions/slideshow/timeline/",
         "/api/extensions/slideshow/status/",
+        "/api/extensions/video/preview/",   # Remotion video extension
         "/api/tasks/",  # SSE task streaming (EventSource can't send headers)
     )
     if any(path.startswith(p) for p in SLIDESHOW_TOKEN_PATHS):

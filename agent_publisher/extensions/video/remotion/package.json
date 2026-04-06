@@ -1,0 +1,26 @@
+{
+  "name": "agent-publisher-video",
+  "version": "1.0.0",
+  "description": "Remotion video composition for Agent Publisher",
+  "main": "src/index.ts",
+  "scripts": {
+    "build": "npx remotion render VideoComposition output.mp4",
+    "studio": "npx remotion studio",
+    "preview": "npx remotion studio"
+  },
+  "dependencies": {
+    "remotion": "^4.0.0",
+    "@remotion/cli": "^4.0.0",
+    "@remotion/transitions": "^4.0.0",
+    "react": "^18.0.0",
+    "react-dom": "^18.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.0.0",
+    "@types/react-dom": "^18.0.0",
+    "typescript": "^5.0.0"
+  },
+  "remotion": {
+    "entryPoint": "src/index.ts"
+  }
+}

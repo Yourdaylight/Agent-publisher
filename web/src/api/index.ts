@@ -299,4 +299,21 @@ export const getSlideshowPreviewUrl = (taskId: number): string => {
   return `/api/extensions/slideshow/preview/${taskId}?token=${encodeURIComponent(token)}`;
 };
 
+// Video (Remotion-based short video generation)
+export const generateVideo = (articleId: number) =>
+  http.post('/extensions/video/generate', { article_id: articleId });
+
+export const getVideoStatus = (taskId: number) =>
+  http.get(`/extensions/video/status/${taskId}`);
+
+export const getVideoPreviewUrl = (taskId: number): string => {
+  const token = localStorage.getItem('ap_token') || '';
+  return `/api/extensions/video/preview/${taskId}?token=${encodeURIComponent(token)}`;
+};
+
+export const getVideoDownloadUrl = (taskId: number): string => {
+  const token = localStorage.getItem('ap_token') || '';
+  return `/api/extensions/video/download/${taskId}?token=${encodeURIComponent(token)}`;
+};
+
 export default http;
