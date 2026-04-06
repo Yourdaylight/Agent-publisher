@@ -329,6 +329,27 @@ else
     exit 1
 fi
 
+# ============================================================================
+# 步骤 4.5: 安装 Remotion 视频渲染依赖 (可选)
+# ============================================================================
+step "安装 Remotion 依赖"
+
+REMOTION_DIR="$INSTALL_DIR/agent_publisher/extensions/video/remotion"
+if [[ "$HAS_NODE" == true && -f "$REMOTION_DIR/package.json" ]]; then
+    info "安装 Remotion 依赖..."
+    cd "$REMOTION_DIR"
+    if npm install; then
+        success "Remotion 依赖安装完成"
+    else
+        warn "Remotion npm install 失败，视频渲染功能将不可用"
+    fi
+    cd "$INSTALL_DIR"
+elif [[ ! -f "$REMOTION_DIR/package.json" ]]; then
+    warn "未找到 Remotion package.json，跳过安装"
+else
+    warn "无 Node.js — 跳过 Remotion 依赖安装（视频渲染功能不可用）"
+fi
+
 # Copy guide images into static directory
 if [[ -d "$INSTALL_DIR/docs/images" ]]; then
     mkdir -p "$INSTALL_DIR/agent_publisher/static/guide-images"
