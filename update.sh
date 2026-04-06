@@ -177,6 +177,24 @@ else
 fi
 
 # ============================================================================
+# 步骤 5: 冒烟测试
+# ============================================================================
+step "步骤 5: 冒烟测试"
+
+PORT_NUM=$(grep -E '^PORT=' "$INSTALL_DIR/.env" 2>/dev/null | cut -d= -f2 || echo "9099")
+ACCESS_KEY_VAL=$(grep -E '^ACCESS_KEY=' "$INSTALL_DIR/.env" 2>/dev/null | cut -d= -f2 | tr -d '"' || echo "")
+
+SMOKE_ARGS="--port ${PORT_NUM}"
+[[ -n "$ACCESS_KEY_VAL" ]] && SMOKE_ARGS="$SMOKE_ARGS --access-key $ACCESS_KEY_VAL"
+
+if bash "$INSTALL_DIR/smoke.sh" $SMOKE_ARGS; then
+    success "冒烟测试全部通过"
+else
+    warn "冒烟测试有失败项，请检查服务状态"
+    warn "手动运行: bash $INSTALL_DIR/smoke.sh $SMOKE_ARGS"
+fi
+
+# ============================================================================
 # 显示结果
 # ============================================================================
 COMMIT_FINAL=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
