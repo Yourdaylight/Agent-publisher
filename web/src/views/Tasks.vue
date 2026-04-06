@@ -10,6 +10,7 @@
       <t-select v-model="filterType" placeholder="筛选类型" clearable style="width: 180px" @change="fetchData">
         <t-option label="文章生成" value="generate" />
         <t-option label="演示文稿" value="slideshow_generate" />
+        <t-option label="短视频" value="video_generate" />
         <t-option label="批量执行" value="batch_all" />
       </t-select>
       <t-button theme="primary" @click="onBatchRun">批量执行所有 Agent</t-button>
@@ -43,6 +44,12 @@
         <div v-if="row.task_type === 'slideshow_generate' && row.status === 'success'" style="display: flex; gap: 8px" @click.stop>
           <t-button size="small" theme="primary" @click="openSlideshowPreviewById(row)">
             🎬 在线预览
+          </t-button>
+        </div>
+        <!-- Video task: show download button in list -->
+        <div v-else-if="row.task_type === 'video_generate' && row.status === 'success'" style="display: flex; gap: 8px" @click.stop>
+          <t-button size="small" theme="success" @click="downloadVideoById(row)">
+            🎥 下载 MP4
           </t-button>
         </div>
         <span v-else-if="row.result" style="font-size: 12px; color: var(--td-text-color-secondary)">
@@ -80,6 +87,19 @@
           <div style="display: flex; gap: 12px; flex-wrap: wrap">
             <t-button theme="primary" @click="openSlideshowPreviewById(detailTask)">
               在线预览演示文稿
+            </t-button>
+          </div>
+        </div>
+
+        <!-- Video quick actions -->
+        <div v-if="detailTask.task_type === 'video_generate' && detailTask.status === 'success'" style="margin-bottom: 20px">
+          <div style="font-weight: 600; margin-bottom: 12px">🎥 短视频已生成</div>
+          <div style="font-size: 13px; color: var(--td-text-color-secondary); margin-bottom: 12px">
+            {{ detailTask.result?.scene_count }} 个场景 · 约 {{ detailTask.result?.total_duration_s }} 秒 · {{ (detailTask.result?.mp4_path || '').split('/').pop() }}
+          </div>
+          <div style="display: flex; gap: 12px; flex-wrap: wrap">
+            <t-button theme="success" @click="downloadVideoById(detailTask)">
+              下载 MP4
             </t-button>
           </div>
         </div>
@@ -128,8 +148,8 @@
           <div class="llm-output" v-text="llmStreamText" />
         </div>
 
-        <!-- Final result — only for non-slideshow or failed -->
-        <div v-if="detailTask.result && detailTask.task_type !== 'slideshow_generate' && (detailTask.status === 'success' || detailTask.status === 'failed')" style="margin-top: 20px">
+        <!-- Final result — only for non-slideshow/video or failed -->
+        <div v-if="detailTask.result && !['slideshow_generate', 'video_generate'].includes(detailTask.task_type) && (detailTask.status === 'success' || detailTask.status === 'failed')" style="margin-top: 20px">
           <h4 style="margin-bottom: 8px">最终结果</h4>
           <t-alert
             :theme="detailTask.status === 'success' ? 'success' : 'error'"
@@ -139,6 +159,9 @@
         </div>
         <div v-else-if="detailTask.result?.error && detailTask.task_type === 'slideshow_generate'" style="margin-top: 20px">
           <t-alert theme="error" :message="'生成失败'" :description="detailTask.result.error" />
+        </div>
+        <div v-else-if="detailTask.result?.error && detailTask.task_type === 'video_generate'" style="margin-top: 20px">
+          <t-alert theme="error" :message="'视频生成失败'" :description="detailTask.result.error" />
         </div>
       </div>
     </t-drawer>
@@ -170,7 +193,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount } from 'vue';
-import { getTasks, batchRun, getSlideshowPreviewUrl } from '@/api';
+import { getTasks, batchRun, getSlideshowPreviewUrl, getVideoDownloadUrl } from '@/api';
 import { MessagePlugin } from 'tdesign-vue-next';
 
 const loading = ref(false);
@@ -199,8 +222,11 @@ const stepNameMap: Record<string, string> = {
   llm_outline: 'AI 生成幻灯片大纲',
   orchestrator: '拆分章节大纲',
   assembly: '组装演示文稿',
-  tts_generate: '合成语音旁白',
+  tts_generate: 'edge-tts 配音合成',
   build_html: '构建演示文稿',
+  script_generation: 'AI 脚本生成',
+  props_ready: '脚本写入完成',
+  remotion_render: 'Remotion 渲染 MP4',
 };
 
 function formatStepName(name: string): string {
@@ -225,6 +251,7 @@ const typeLabel = (t: string) => {
   const map: Record<string, string> = {
     generate: '文章生成',
     slideshow_generate: '演示文稿',
+    video_generate: '短视频',
     batch_all: '批量执行',
     batch_variants: '变体生成',
   };
@@ -246,9 +273,16 @@ const statusLabel = (s: string) => {
 const resultSummary = (row: any) => {
   const r = row.result || {};
   if (row.task_type === 'generate' && r.article_id) return `文章 #${r.article_id} 已生成`;
+  if (row.task_type === 'video_generate' && r.title) return `🎥 ${r.title} · ${r.scene_count || 0}场景`;
   if (r.error) return `失败: ${String(r.error).slice(0, 60)}`;
   return JSON.stringify(r).slice(0, 60);
 };
+
+function downloadVideoById(row: any) {
+  const taskId = row.id;
+  if (!taskId) return;
+  window.open(getVideoDownloadUrl(taskId), '_blank');
+}
 
 const stepDotClass = (status: string) => {
   if (status === 'success') return 'dot-success';

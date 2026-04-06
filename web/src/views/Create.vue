@@ -319,7 +319,10 @@
           💾 保存草稿
         </t-button>
         <t-button variant="outline" size="medium" :disabled="!form.id" @click="openSlideshow">
-          🎬 生成视频
+          🎬 演示文稿
+        </t-button>
+        <t-button variant="outline" size="medium" :disabled="!form.id" @click="openVideoGenerate">
+          🎥 生成视频
         </t-button>
         <t-button
           theme="primary"
@@ -821,10 +824,16 @@ const doGenerateCover = async () => {
   }
 };
 
-// ---- 视频生成入口 ----
+// ---- 演示文稿入口 ----
 const openSlideshow = () => {
   if (!form.value.id) { MessagePlugin.warning('请先保存文章'); return; }
   router.push(`/articles?slideshow=${form.value.id}`);
+};
+
+// ---- 视频生成入口（Remotion） ----
+const openVideoGenerate = () => {
+  if (!form.value.id) { MessagePlugin.warning('请先保存文章'); return; }
+  router.push(`/articles?video=${form.value.id}`);
 };
 
 // ---- 初始化 ----

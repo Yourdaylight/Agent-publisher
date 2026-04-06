@@ -1065,6 +1065,7 @@ import {
   getTask,
   getExtensions,
   getGroups,
+  getTasks,
   generateSlideshow,
   getSlideshowStatus,
   getSlideshowDraft,
@@ -1291,8 +1292,31 @@ const fetchData = async () => {
     if (filterGroupId.value) {
       params.group_id = filterGroupId.value;
     }
-    const res = await getArticles(params);
-    articles.value = res.data;
+    const [artRes, videoTaskRes] = await Promise.all([
+      getArticles(params),
+      getTasks({ task_type: 'video_generate' }).catch(() => ({ data: [] })),
+    ]);
+    const arts = artRes.data;
+
+    // Build map: article_id → latest video task (tasks are sorted desc by id)
+    const videoTaskMap: Record<number, any> = {};
+    for (const t of (videoTaskRes?.data || [])) {
+      const aid = (t.result || {}).article_id;
+      if (aid != null && !(aid in videoTaskMap)) {
+        videoTaskMap[Number(aid)] = t;
+      }
+    }
+
+    // Attach videoTaskId / videoStatus to each article row
+    for (const art of arts) {
+      const vt = videoTaskMap[art.id];
+      if (vt) {
+        art.videoTaskId = vt.id;
+        art.videoStatus = vt.status;
+      }
+    }
+
+    articles.value = arts;
   } catch (err) {
     console.warn('加载文章列表失败', err);
   } finally {
@@ -2273,6 +2297,17 @@ onMounted(async () => {
       try {
         const { data } = await getArticle(slideshowArticleId);
         openSlideshowDrawerForArticle(data);
+      } catch {}
+    });
+  }
+
+  // Auto-open video drawer if ?video=articleId
+  const videoArticleId = route.query.video ? Number(route.query.video) : undefined;
+  if (videoArticleId && !Number.isNaN(videoArticleId)) {
+    nextTick(async () => {
+      try {
+        const { data } = await getArticle(videoArticleId);
+        openVideoDrawerForArticle(data);
       } catch {}
     });
   }

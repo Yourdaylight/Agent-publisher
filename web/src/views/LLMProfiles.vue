@@ -10,10 +10,39 @@
       </template>
 
       <t-loading :loading="loading">
-        <div v-if="profiles.length === 0 && !loading" style="text-align: center; padding: 40px; color: var(--td-text-color-placeholder)">
+        <div v-if="profiles.length === 0 && !loading && !globalDefault" style="text-align: center; padding: 40px; color: var(--td-text-color-placeholder)">
           暂无 LLM 配置，点击右上角"新建配置"开始
         </div>
         <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px">
+          <!-- Global default from Settings -->
+          <t-card
+            v-if="globalDefault"
+            :key="'global-default'"
+            :bordered="true"
+            :style="{ borderLeft: '4px solid var(--td-success-color)', opacity: 0.95 }"
+          >
+            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px">
+              <span style="font-size: 16px">&#9889;</span>
+              <strong style="font-size: 15px">{{ globalDefault.name }}</strong>
+              <t-tag size="small" theme="success" variant="light">全局默认</t-tag>
+            </div>
+            <div style="font-size: 13px; color: var(--td-text-color-secondary); margin-bottom: 4px">
+              {{ globalDefault.provider }} / {{ globalDefault.model }}
+            </div>
+            <div v-if="globalDefault.base_url" style="font-size: 12px; color: var(--td-text-color-placeholder); margin-bottom: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap" :title="globalDefault.base_url">
+              {{ globalDefault.base_url }}
+            </div>
+            <div v-if="globalDefault.description" style="font-size: 12px; color: var(--td-text-color-placeholder); margin-bottom: 8px">
+              {{ globalDefault.description }}
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px; margin-top: 12px; font-size: 12px; color: var(--td-text-color-placeholder)">
+              <span>API Key: {{ globalDefault.api_key ? (globalDefault.api_key.length > 8 ? globalDefault.api_key.slice(0, 4) + '****' + globalDefault.api_key.slice(-4) : '****') : '(未配置)' }}</span>
+            </div>
+            <div style="margin-top: 8px; font-size: 11px; color: var(--td-text-color-disabled)">
+              此项来自全局 Settings，请在"全局配置"页面修改
+            </div>
+          </t-card>
+
           <t-card
             v-for="p in profiles"
             :key="p.id"
@@ -116,6 +145,7 @@ import {
   deleteLLMProfile,
   setDefaultLLMProfile,
   getUserInfo,
+  getSettings,
 } from '@/api';
 
 const loading = ref(false);
@@ -124,6 +154,9 @@ const profiles = ref<any[]>([]);
 const dialogVisible = ref(false);
 const editingProfile = ref<any>(null);
 const formRef = ref();
+
+// Global default LLM settings (from /api/settings)
+const globalDefault = ref<any>(null);
 
 const formData = ref({
   name: '',
@@ -148,8 +181,29 @@ const installCommand = computed(() => {
 const fetchProfiles = async () => {
   loading.value = true;
   try {
-    const res = await getLLMProfiles();
-    profiles.value = res.data;
+    const [profileRes, settingsRes] = await Promise.all([
+      getLLMProfiles().catch(() => ({ data: [] })),
+      getSettings().catch(() => null),
+    ]);
+    profiles.value = profileRes?.data || [];
+
+    // Show global default from Settings if available
+    const s = settingsRes?.data;
+    if (s && (s.default_llm_provider || s.default_llm_model)) {
+      globalDefault.value = {
+        id: -1,
+        name: '全局默认配置',
+        provider: s.default_llm_provider,
+        model: s.default_llm_model,
+        base_url: s.default_llm_base_url || '',
+        api_key: s.default_llm_api_key || '',
+        description: '来自全局配置（Settings），当前生效的默认模型',
+        is_default: true,
+        is_global: true,
+      };
+    } else {
+      globalDefault.value = null;
+    }
   } catch (e: any) {
     MessagePlugin.error('加载 LLM 配置失败');
   } finally {

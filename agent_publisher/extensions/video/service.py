@@ -1,8 +1,9 @@
-"""Video generation service — LLM script → Remotion render → MP4.
+"""Video generation service — LLM script → edge-tts → Remotion render → MP4.
 
 Pipeline:
   Phase 0: LLM generates video script (scenes JSON)
-  Phase 1: Write props JSON file for Remotion
+  Phase 1: Write props JSON + preview HTML
+  Phase 1.5: edge-tts TTS for each scene narration → mp3 + subtitle word timestamps
   Phase 2: Run `npx remotion render` to produce MP4
 """
 from __future__ import annotations
@@ -26,8 +27,11 @@ from agent_publisher.services.llm_service import LLMService
 
 logger = logging.getLogger(__name__)
 
-STORAGE_ROOT = Path("storage/video")
+STORAGE_ROOT = Path(__file__).parent.parent.parent.parent / "storage" / "video"
 REMOTION_DIR = Path(__file__).parent / "remotion"
+
+# edge-tts voice to use for Chinese narration
+TTS_VOICE = "zh-CN-XiaoxiaoNeural"
 
 
 # ---------------------------------------------------------------------------
@@ -74,6 +78,9 @@ async def run_video_pipeline(
             "scene_count": len(script.get("scenes", [])),
             "total_duration_s": script.get("total_duration_s", 0),
         })
+
+        # Phase 1.5: edge-tts — generate audio + subtitle timestamps for each scene
+        await _generate_tts(script, out_dir, task, session)
 
         # Phase 2: Render with Remotion
         mp4_path = await _render_remotion(script, out_dir, task, session)
@@ -223,6 +230,114 @@ def _build_preview_html(script: dict, *, task_id: int = 0) -> str:
   </div>
 </body>
 </html>"""
+
+
+# ---------------------------------------------------------------------------
+# Phase 1.5: edge-tts TTS + subtitle generation
+# ---------------------------------------------------------------------------
+
+async def _generate_tts(
+    script: dict,
+    out_dir: Path,
+    task: Task,
+    session: AsyncSession,
+) -> None:
+    """Generate TTS audio (MP3) and word-level subtitle timestamps for each scene.
+
+    Mutates script['scenes'] in-place, adding:
+      - audio_url: staticFile path relative to remotion project public/ dir
+      - subtitles: list of {text, start_ms, end_ms}
+
+    Audio files are written to out_dir and symlinked into the Remotion public/ dir.
+    """
+    try:
+        import edge_tts  # noqa: F401 — confirm available
+    except ImportError:
+        logger.warning("edge-tts not installed — skipping TTS (pip install edge-tts)")
+        await _record_step(task, session, "tts_generate", "skipped", {"reason": "edge-tts not installed"})
+        return
+
+    import edge_tts as _edge_tts
+
+    await _record_step(task, session, "tts_generate", "running", {})
+
+    # Remotion staticFile() resolves from the remotion/public/ directory
+    public_dir = REMOTION_DIR / "public"
+    public_dir.mkdir(exist_ok=True)
+
+    # Create a per-task subdirectory inside public/ using symlink to out_dir
+    # Remotion needs files relative to its own project root.
+    task_id_str = out_dir.name  # e.g. article_13_20260406214957
+    public_task_dir = public_dir / task_id_str
+    if not public_task_dir.exists():
+        # Symlink public/<task_dir> → actual out_dir so staticFile works
+        public_task_dir.symlink_to(out_dir)
+
+    scenes = script.get("scenes", [])
+    total_audio_ms = 0
+    success_count = 0
+
+    for scene in scenes:
+        scene_id = scene.get("scene_id", "unknown")
+        narration = scene.get("narration", "").strip()
+        if not narration:
+            continue
+
+        audio_filename = f"{scene_id}.mp3"
+        audio_path = out_dir / audio_filename
+
+        # Collect word boundaries
+        words: list[dict] = []
+
+        try:
+            communicate = _edge_tts.Communicate(narration, TTS_VOICE)
+            audio_chunks: list[bytes] = []
+
+            async for event in communicate.stream():
+                if event["type"] == "audio":
+                    audio_chunks.append(event["data"])
+                elif event["type"] in ("WordBoundary", "SentenceBoundary"):
+                    words.append({
+                        "text": event["text"],
+                        "start_ms": event["offset"] // 10000,
+                        "end_ms": (event["offset"] + event["duration"]) // 10000,
+                    })
+
+            audio_path.write_bytes(b"".join(audio_chunks))
+
+            # Duration = last word end_ms (fallback: scene duration_s)
+            duration_ms = words[-1]["end_ms"] if words else int(scene.get("duration_s", 5) * 1000)
+            total_audio_ms += duration_ms
+
+            # Inject into scene dict
+            # Remotion staticFile('article_13_xxx/scene_01.mp3') resolves to
+            # <remotion_dir>/public/article_13_xxx/scene_01.mp3
+            scene["audio_url"] = f"{task_id_str}/{audio_filename}"
+            scene["subtitles"] = words
+            success_count += 1
+
+            logger.info("TTS OK: scene=%s words=%d duration=%.1fs", scene_id, len(words), duration_ms / 1000)
+
+        except Exception as e:
+            logger.warning("TTS failed for scene %s: %s", scene_id, e)
+            # Non-fatal: continue without audio for this scene
+
+    # Re-write props.json with updated audio_url / subtitles
+    props_path = out_dir / "props.json"
+    props_path.write_text(json.dumps(script, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    await _record_step(task, session, "tts_generate", "success", {
+        "scenes_with_audio": success_count,
+        "total_scenes": len(scenes),
+        "total_audio_s": round(total_audio_ms / 1000, 1),
+    })
+    logger.info("TTS complete: %d/%d scenes, total %.1fs", success_count, len(scenes), total_audio_ms / 1000)
+
+
+def staticFile(relative_path: str) -> str:
+    """Unused — kept for reference. Remotion resolves staticFile() paths
+    relative to <remotion_dir>/public/ at render time."""
+    return relative_path
 
 
 # ---------------------------------------------------------------------------

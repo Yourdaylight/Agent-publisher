@@ -6,18 +6,42 @@ import {
   spring,
   AbsoluteFill,
   Easing,
+  Audio,
+  staticFile,
 } from "remotion";
-import { Scene } from "./types";
+import { Scene, SubtitleWord } from "./types";
 
 type SceneProps = {
   scene: Scene;
 };
 
+function getCurrentSubtitle(subtitles: SubtitleWord[], frame: number, fps: number): string {
+  const currentMs = (frame / fps) * 1000;
+  // Find the sentence segment that contains the current time
+  for (const seg of subtitles) {
+    if (currentMs >= seg.start_ms && currentMs <= seg.end_ms) {
+      return seg.text;
+    }
+  }
+  // If between segments, show the most recently ended one
+  let latest: SubtitleWord | null = null;
+  for (const seg of subtitles) {
+    if (seg.start_ms <= currentMs) {
+      latest = seg;
+    }
+  }
+  // Only show if within 500ms after the segment ended
+  if (latest && currentMs - latest.end_ms < 500) {
+    return latest.text;
+  }
+  return "";
+}
+
 export const SceneComponent: React.FC<SceneProps> = ({ scene }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
 
-  // Entrance animations — all driven by useCurrentFrame() as required by Remotion
+  // Entrance animations
   const headlineOpacity = interpolate(frame, [0, 0.5 * fps], [0, 1], {
     extrapolateRight: "clamp",
     easing: Easing.out(Easing.quad),
@@ -57,8 +81,19 @@ export const SceneComponent: React.FC<SceneProps> = ({ scene }) => {
     extrapolateRight: "clamp",
   });
 
+  // Subtitle word highlight
+  const subtitleText =
+    scene.subtitles && scene.subtitles.length > 0
+      ? getCurrentSubtitle(scene.subtitles, frame, fps)
+      : "";
+
   return (
     <AbsoluteFill style={{ background: scene.bg_gradient }}>
+      {/* TTS audio track — audio_url is a staticFile-relative path */}
+      {scene.audio_url && (
+        <Audio src={staticFile(scene.audio_url)} />
+      )}
+
       {/* Ken Burns background scale */}
       <AbsoluteFill
         style={{
@@ -72,7 +107,7 @@ export const SceneComponent: React.FC<SceneProps> = ({ scene }) => {
         style={{
           display: "flex",
           flexDirection: "column",
-          padding: "60px 48px",
+          padding: "60px 48px 60px 48px",
           fontFamily: "'PingFang SC', 'Noto Sans SC', system-ui, sans-serif",
         }}
       >
@@ -122,7 +157,6 @@ export const SceneComponent: React.FC<SceneProps> = ({ scene }) => {
             opacity: visualOpacity,
           }}
         >
-          {/* Glow ring behind icon */}
           <div
             style={{
               width: 180,
@@ -161,7 +195,6 @@ export const SceneComponent: React.FC<SceneProps> = ({ scene }) => {
             transform: `translateY(${bodyY}px)`,
           }}
         >
-          {/* Divider */}
           <div
             style={{
               width: 60,
@@ -188,6 +221,46 @@ export const SceneComponent: React.FC<SceneProps> = ({ scene }) => {
           ))}
         </div>
       </AbsoluteFill>
+
+      {/* Subtitle bar — absolutely pinned to the very bottom of the frame */}
+      {subtitleText && (
+        <div
+          style={{
+            position: "absolute",
+            bottom: 0,
+            left: 0,
+            right: 0,
+            padding: "0 40px 60px",
+            display: "flex",
+            justifyContent: "center",
+            pointerEvents: "none",
+            zIndex: 100,
+          }}
+        >
+          <div
+            style={{
+              background: "rgba(0,0,0,0.78)",
+              borderRadius: 14,
+              padding: "18px 32px",
+              maxWidth: 920,
+              textAlign: "center",
+            }}
+          >
+            <span
+              style={{
+                fontSize: 38,
+                color: "#ffffff",
+                fontWeight: 500,
+                fontFamily: "'PingFang SC', 'Noto Sans SC', system-ui, sans-serif",
+                lineHeight: 1.5,
+                letterSpacing: "0.5px",
+              }}
+            >
+              {subtitleText}
+            </span>
+          </div>
+        </div>
+      )}
     </AbsoluteFill>
   );
 };
