@@ -26,6 +26,29 @@ MAX_ATTEMPTS = 5
 BAN_DURATION = 600  # 10 minutes
 
 
+async def _record_login_log(
+    *, email: str, is_admin: bool, status: str, client_ip: str, error: str = ""
+) -> None:
+    """Record a login attempt to system_logs."""
+    try:
+        from agent_publisher.services.system_log_service import SystemLogService
+        async with async_session_factory() as session:
+            svc = SystemLogService(session)
+            await svc.record(
+                action="login",
+                target_type="account",
+                description="管理员登录" if is_admin else f"用户登录 {email}",
+                operator=email,
+                is_admin=is_admin,
+                status=status,
+                error_message=error,
+                client_ip=client_ip,
+                request_path="/api/auth/login",
+            )
+    except Exception as e:
+        logger.warning("Failed to record login log: %s", e, exc_info=True)
+
+
 def _get_client_ip(request: Request) -> str:
     forwarded = request.headers.get("x-forwarded-for")
     if forwarded:
@@ -142,9 +165,11 @@ async def login(req: LoginRequest, request: Request):
         email = req.email.strip().lower()
         if not settings.is_email_allowed(email):
             _record_failed_attempt(ip)
+            await _record_login_log(email=email, is_admin=settings.is_admin(email), status="failed", error="邮箱不在白名单", client_ip=ip)
             raise HTTPException(status_code=401, detail="该邮箱不在白名单中，请联系管理员")
         _reset_attempts(ip)
         token = _create_skill_token(email)
+        await _record_login_log(email=email, is_admin=settings.is_admin(email), status="success", client_ip=ip)
         return LoginResponse(
             token=token,
             message="Login successful",
@@ -156,9 +181,11 @@ async def login(req: LoginRequest, request: Request):
         # Admin access_key login
         if req.access_key != settings.access_key:
             _record_failed_attempt(ip)
+            await _record_login_log(email="__admin__", is_admin=True, status="failed", error="密钥错误", client_ip=ip)
             raise HTTPException(status_code=401, detail="Invalid access key")
         _reset_attempts(ip)
         token = _create_token(req.access_key)
+        await _record_login_log(email="__admin__", is_admin=True, status="success", client_ip=ip)
         return LoginResponse(
             token=token,
             message="Login successful",
@@ -166,7 +193,7 @@ async def login(req: LoginRequest, request: Request):
             is_admin=True,
         )
 
-    raise HTTPException(status_code=400, detail="Either access_key or email is required")
+
 
 
 @router.get("/verify")

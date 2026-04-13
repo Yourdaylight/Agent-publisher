@@ -24,6 +24,7 @@ const routes = [
   { path: '/settings', name: 'Settings', component: () => import('@/views/Settings.vue'), meta: { title: '全局配置', requiresAdmin: true } },
   { path: '/groups', name: 'Groups', component: () => import('@/views/Groups.vue'), meta: { title: '权限组管理', requiresAdmin: true } },
   { path: '/invite-codes', name: 'InviteCodes', component: () => import('@/views/InviteCodes.vue'), meta: { title: '邀请码管理', requiresAdmin: true } },
+  { path: '/system-logs', name: 'SystemLogs', component: () => import('@/views/SystemLogs.vue'), meta: { title: '系统日志', requiresAdmin: true } },
 ];
 
 const router = createRouter({

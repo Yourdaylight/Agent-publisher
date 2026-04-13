@@ -9,6 +9,7 @@ from sqlalchemy import select
 
 from agent_publisher.database import async_session_factory
 from agent_publisher.models.agent import Agent
+from agent_publisher.models.account import Account
 from agent_publisher.services.task_service import run_scheduled_agent
 
 logger = logging.getLogger(__name__)
@@ -16,6 +17,7 @@ logger = logging.getLogger(__name__)
 scheduler = AsyncIOScheduler()
 
 TRENDING_JOB_ID = "global_trending_refresh"
+PLATFORM_TOKEN_JOB_ID = "platform_token_refresh"
 
 
 async def run_trending_refresh() -> None:
@@ -125,6 +127,77 @@ async def run_scheduled_collection(agent_id: int) -> None:
             )
     except Exception as e:
         logger.error("Scheduled collection failed for agent %d: %s", agent_id, e, exc_info=True)
+
+
+async def refresh_platform_tokens() -> None:
+    """Refresh authorizer_access_token for platform-authorized accounts.
+
+    Runs periodically to keep tokens fresh. Only refreshes tokens that
+    will expire within the next 30 minutes.
+    """
+    from agent_publisher.config import settings
+    from datetime import datetime, timedelta, timezone
+
+    if not settings.wechat_platform_appid.strip():
+        return  # Platform not configured, skip
+
+    logger.info("Scheduler: refreshing platform tokens")
+    try:
+        async with async_session_factory() as session:
+            result = await session.execute(
+                select(Account).where(Account.auth_mode == "platform")
+            )
+            accounts = result.scalars().all()
+
+            refreshed = 0
+            for account in accounts:
+                # Check if token will expire soon
+                expires_at = account.authorizer_token_expires_at
+                if expires_at:
+                    expires_at = expires_at.replace(tzinfo=timezone.utc) if expires_at.tzinfo is None else expires_at
+                if not account.authorizer_access_token or not expires_at or expires_at < datetime.now(timezone.utc) + timedelta(minutes=30):
+                    try:
+                        from agent_publisher.services.wechat_platform_service import WeChatPlatformService
+                        token, new_expires_at = await WeChatPlatformService.refresh_authorizer_token(
+                            account.authorizer_appid, account.authorizer_refresh_token
+                        )
+                        account.authorizer_access_token = token
+                        account.authorizer_token_expires_at = new_expires_at
+                        account.access_token = token
+                        account.token_expires_at = new_expires_at
+                        refreshed += 1
+                    except Exception as e:
+                        logger.error(
+                            "Failed to refresh token for account id=%d appid=%s: %s",
+                            account.id, account.authorizer_appid, e,
+                        )
+
+            if refreshed > 0:
+                await session.commit()
+            logger.info("Scheduler: platform token refresh done — refreshed=%d/%d", refreshed, len(accounts))
+
+    except Exception as e:
+        logger.error("Scheduler: platform token refresh failed: %s", e, exc_info=True)
+
+
+def sync_platform_token_schedule() -> None:
+    """Register the platform token refresh job (every 90 minutes)."""
+    from agent_publisher.config import settings
+
+    if not settings.wechat_platform_appid.strip():
+        return  # Platform not configured, skip
+
+    if scheduler.get_job(PLATFORM_TOKEN_JOB_ID):
+        scheduler.remove_job(PLATFORM_TOKEN_JOB_ID)
+
+    scheduler.add_job(
+        refresh_platform_tokens,
+        trigger=IntervalTrigger(minutes=90),
+        id=PLATFORM_TOKEN_JOB_ID,
+        replace_existing=True,
+        name="Platform token refresh (every 90min)",
+    )
+    logger.info("Scheduled platform token refresh every 90 minutes")
 
 
 async def sync_agent_schedules() -> None:

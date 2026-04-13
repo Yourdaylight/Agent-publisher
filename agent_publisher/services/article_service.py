@@ -660,7 +660,10 @@ class ArticleService:
 
                 if result.returncode == 0 and result.stdout.strip():
                     logger.info('Markdown rendered with wenyan (theme=%s)', theme)
-                    return result.stdout.strip()
+                    from agent_publisher.services.wechat_style_service import (
+                        WeChatStyleService,
+                    )
+                    return WeChatStyleService.inject_styles(result.stdout.strip())
                 logger.warning(
                     'wenyan render failed (rc=%d): %s',
                     result.returncode,
@@ -676,8 +679,10 @@ class ArticleService:
 
     @staticmethod
     def _basic_markdown_to_html(markdown_text: str) -> str:
-        """Fallback basic Markdown to HTML conversion."""
+        """Fallback basic Markdown to HTML conversion with WeChat inline styles."""
         import re
+
+        from agent_publisher.services.wechat_style_service import WeChatStyleService
 
         html = markdown_text
 
@@ -696,6 +701,9 @@ class ArticleService:
         # Line breaks
         html = html.replace('\n\n', '</p><p>')
         html = f'<p>{html}</p>'
+
+        # Apply WeChat-compatible inline styles
+        html = WeChatStyleService.inject_styles(html)
 
         return html
 
@@ -1106,13 +1114,13 @@ class ArticleService:
             return ''
 
     async def _get_publish_html(self, article: Article) -> str:
+        from agent_publisher.services.wechat_style_service import WeChatStyleService
+
         publish_html = article.html_content
 
         # Only fall back to wenyan re-render when:
         # 1. There is no html_content at all, AND
         # 2. There is markdown content to render from
-        # Do NOT re-render if html_content exists — user-provided HTML (e.g. from
-        # skill API with inline styles) must be preserved as-is.
         if not publish_html and article.content:
             logger.info(
                 'Article %d has no html_content, rendering markdown',
@@ -1121,6 +1129,13 @@ class ArticleService:
             rendered = self._markdown_to_html(article.content)
             publish_html = rendered
             article.html_content = rendered
+            await self.session.flush()
+        elif publish_html:
+            # Safety net: inject WeChat inline styles into any existing html_content
+            # that may lack proper styling (e.g. uploaded HTML without inline styles).
+            # Tags that already have style attributes are preserved as-is.
+            publish_html = WeChatStyleService.inject_styles(publish_html)
+            article.html_content = publish_html
             await self.session.flush()
 
         return publish_html

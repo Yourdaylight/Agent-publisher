@@ -6,13 +6,15 @@
       <div class="topbar-divider"></div>
 
       <t-select
-        v-model="selectedHotspotId"
-        placeholder="选择热点话题..."
+        v-model="selectedHotspotIds"
+        placeholder="选择热点话题（可多选）..."
         size="small"
         class="topic-select"
+        multiple
         :popup-props="{ overlayStyle: { width: '400px' } }"
+        :min-collapsed-num="1"
         filterable
-        @change="onHotspotChange"
+        @change="onHotspotIdsChange"
       >
         <t-option v-for="item in trendingHotspots" :key="item.id" :value="item.id" :label="item.title" />
       </t-select>
@@ -80,6 +82,7 @@
             type="text"
             class="editor-title"
             placeholder="文章标题"
+            :disabled="generating"
           />
 
           <!-- 元信息行：摘要 + 封面图 -->
@@ -89,6 +92,7 @@
               class="editor-digest"
               rows="1"
               placeholder="摘要（选填）"
+              :disabled="generating"
             ></textarea>
             <div class="cover-row">
               <button type="button" class="cover-btn" @click="triggerCoverUpload">+ 添加封面图</button>
@@ -126,32 +130,44 @@
               class="ai-floating-bar"
               :style="{ top: aiFloatingBar.top + 'px', left: aiFloatingBar.left + 'px' }"
             >
-              <button type="button" class="fbtn" @click="aiAction('rewrite')">改写</button>
-              <button type="button" class="fbtn" @click="aiAction('expand')">扩写</button>
-              <button type="button" class="fbtn" @click="aiAction('shorten')">缩写</button>
-              <button type="button" class="fbtn fbtn-p" @click="aiAction('continue')">续写</button>
+              <button type="button" class="fbtn" :disabled="generating" @click="aiAction('rewrite')">改写</button>
+              <button type="button" class="fbtn" :disabled="generating" @click="aiAction('expand')">扩写</button>
+              <button type="button" class="fbtn" :disabled="generating" @click="aiAction('shorten')">缩写</button>
+              <button type="button" class="fbtn fbtn-p" :disabled="generating" @click="aiAction('continue')">续写</button>
             </div>
 
-            <!-- 富文本编辑器 -->
-            <div v-show="activeTab === 'rich' || !form.id">
-              <TiptapEditor ref="tiptapRef" v-model="richHtml" placeholder="开始写作，或使用右侧 AI 助手生成内容..." />
+            <!-- 生成中：展示带微信样式的预览 -->
+            <div v-if="generating && generatingHtml" class="wechat-preview-generating">
+              <div class="generating-overlay">
+                <t-loading size="medium" />
+                <span class="generating-text">{{ generationStatus || 'AI 正在生成文章...' }}</span>
+              </div>
+              <div class="preview-html" v-html="generatingHtml" />
             </div>
 
-            <!-- Markdown 模式 -->
-            <div v-if="activeTab === 'markdown'" class="raw-editor-wrap">
-              <textarea v-model="form.content" class="raw-editor" placeholder="Markdown..." />
-            </div>
+            <!-- 正常编辑模式 -->
+            <template v-else>
+              <!-- 富文本编辑器 -->
+              <div v-show="activeTab === 'rich' || !form.id">
+                <TiptapEditor ref="tiptapRef" v-model="richHtml" placeholder="开始写作，或使用右侧 AI 助手生成内容..." />
+              </div>
 
-            <!-- HTML 模式 -->
-            <div v-if="activeTab === 'html'" class="raw-editor-wrap">
-              <textarea v-model="htmlSource" class="raw-editor" placeholder="HTML..." />
-              <t-button size="small" theme="primary" style="margin-top: 8px" @click="applyHtmlToPreview">应用</t-button>
-            </div>
+              <!-- Markdown 模式 -->
+              <div v-if="activeTab === 'markdown'" class="raw-editor-wrap">
+                <textarea v-model="form.content" class="raw-editor" placeholder="Markdown..." />
+              </div>
 
-            <!-- 预览模式 -->
-            <div v-if="activeTab === 'preview'" class="preview-html-wrap">
-              <div class="preview-html" v-html="previewHtml" />
-            </div>
+              <!-- HTML 模式 -->
+              <div v-if="activeTab === 'html'" class="raw-editor-wrap">
+                <textarea v-model="htmlSource" class="raw-editor" placeholder="HTML..." />
+                <t-button size="small" theme="primary" style="margin-top: 8px" @click="applyHtmlToPreview">应用</t-button>
+              </div>
+
+              <!-- 预览模式 -->
+              <div v-if="activeTab === 'preview'" class="preview-html-wrap">
+                <div class="preview-html" v-html="previewHtml" />
+              </div>
+            </template>
           </div>
 
           <!-- 字数统计 -->
@@ -192,14 +208,20 @@
               <button
                 type="button"
                 class="ai-generate-btn"
-                :disabled="creating || hotspotLoading"
+                :disabled="creating || hotspotLoading || generating"
                 @click="doAIWrite"
               >
-                <span v-if="!creating && !hotspotLoading">AI 生成文章</span>
+                <span v-if="!creating && !hotspotLoading && !generating">AI 生成文章</span>
                 <span v-else-if="hotspotLoading">加载话题中...</span>
-                <t-loading v-else size="small" theme="dots" />
+                <template v-else>
+                  <t-loading size="small" theme="dots" />
+                  <span style="margin-left: 6px">{{ generationStatus || '生成中...' }}</span>
+                </template>
               </button>
-              <div class="ai-cost">消耗 ~3 Credits · 约30秒</div>
+              <div v-if="generating" class="ai-progress">
+                <t-progress :percentage="Math.round(generationPercent)" size="small" />
+              </div>
+              <div class="ai-cost" v-else>消耗 ~3 Credits · 约30秒</div>
             </div>
 
             <!-- 模块1b: 生成封面图 -->
@@ -385,6 +407,7 @@ const modeOptions = [
 // --- 数据源 ---
 const selectedHotspot = ref<any>(null);
 const selectedHotspotId = ref<number | undefined>(undefined);
+const selectedHotspotIds = ref<number[]>([]);
 const recentDrafts = ref<any[]>([]);
 const trendingHotspots = ref<any[]>([]);
 const agents = ref<any[]>([]);
@@ -430,6 +453,7 @@ const aiActionLoading = ref(false);
 const generating = ref(false);
 const generationStatus = ref('');
 const generationPercent = ref(0);
+const generatingHtml = ref('');  // 生成期间的微信样式预览 HTML
 let activeEventSource: EventSource | null = null;
 
 // --- Credits ---
@@ -441,6 +465,29 @@ const fetchCredits = async () => {
 const stepNameMap: Record<string, string> = {
   material_fetch: '获取素材', llm_generate: 'AI 生成中',
   save_article: '保存文章', image_generate: '生成配图',
+};
+
+/** 简单 Markdown → 带微信内联样式的 HTML（用于 AI 生成期间实时预览） */
+const simpleMarkdownToPreviewHtml = (md: string): string => {
+  let html = md;
+  // 标题
+  html = html.replace(/^######\s+(.+)$/gm, '<h6 style="font-size:14px;font-weight:700;color:#1a1a1a;margin:12px 0 6px">$1</h6>');
+  html = html.replace(/^#####\s+(.+)$/gm, '<h5 style="font-size:15px;font-weight:700;color:#1a1a1a;margin:14px 0 6px">$1</h5>');
+  html = html.replace(/^####\s+(.+)$/gm, '<h4 style="font-size:16px;font-weight:700;color:#1a1a1a;margin:16px 0 8px">$1</h4>');
+  html = html.replace(/^###\s+(.+)$/gm, '<h3 style="font-size:18px;font-weight:700;color:#1a1a1a;margin:18px 0 8px">$1</h3>');
+  html = html.replace(/^##\s+(.+)$/gm, '<h2 style="font-size:20px;font-weight:700;color:#1a1a1a;margin:20px 0 10px">$1</h2>');
+  html = html.replace(/^#\s+(.+)$/gm, '<h1 style="font-size:24px;font-weight:700;color:#1a1a1a;margin:24px 0 12px">$1</h1>');
+  // 粗体/斜体
+  html = html.replace(/\*\*(.+?)\*\*/g, '<strong style="font-weight:700;color:#111">$1</strong>');
+  html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+  // 链接
+  html = html.replace(/\[(.+?)\]\((.+?)\)/g, '<a href="$2" style="color:#07C160;text-decoration:none">$1</a>');
+  // 引用块
+  html = html.replace(/^>\s+(.+)$/gm, '<blockquote style="margin:12px 0;padding:10px 16px;border-left:4px solid #07C160;background:#f7fdf9;color:#444;border-radius:0 6px 6px 0">$1</blockquote>');
+  // 段落
+  html = html.replace(/\n\n/g, '</p><p style="font-size:16px;line-height:1.75;color:#3f3f3f;margin-bottom:1.2em">');
+  html = `<p style="font-size:16px;line-height:1.75;color:#3f3f3f;margin-bottom:1.2em">${html}</p>`;
+  return html;
 };
 
 // --- 计算属性 ---
@@ -466,9 +513,15 @@ const wordCount = computed(() => {
 });
 
 // --- Watchers ---
-watch(richHtml, (v) => { form.value.html_content = v; });
-watch(() => route.query.hotspot_id, () => loadSelectedHotspot(), { immediate: true });
-watch(() => route.query.article_id, () => fetchArticle(), { immediate: true });
+// 只有在富文本编辑模式下，richHtml 变化才回写 html_content
+// 预览模式下不回写，避免 Tiptap 的空内容覆盖后端的带样式 HTML
+watch(richHtml, (v) => {
+  if (activeTab.value === 'rich' && form.value.id) {
+    form.value.html_content = v;
+  }
+});
+// NOTE: route.query watchers with immediate:true are moved to end of file
+// to avoid TDZ (temporal dead zone) errors when functions are declared after watchers
 
 // --- 方法 ---
 
@@ -494,9 +547,24 @@ const onHotspotChange = (id: number) => {
   const item = trendingHotspots.value.find((h: any) => h.id === id);
   if (item) { selectedHotspot.value = item; generateAIAngles(item); }
 };
+/** 多选热点切换 */
+const onHotspotIdsChange = (ids: number[]) => {
+  // 使用最后选中的热点作为主热点（影响 AI 角度生成）
+  if (ids.length > 0) {
+    const lastId = ids[ids.length - 1];
+    const item = trendingHotspots.value.find((h: any) => h.id === lastId);
+    if (item) { selectedHotspot.value = item; selectedHotspotId.value = lastId; generateAIAngles(item); }
+  } else {
+    selectedHotspot.value = null;
+    selectedHotspotId.value = undefined;
+  }
+};
 const selectHotspot = (item: any) => {
   selectedHotspot.value = item;
   selectedHotspotId.value = item.id;
+  if (!selectedHotspotIds.value.includes(item.id)) {
+    selectedHotspotIds.value = [item.id];
+  }
   generateAIAngles(item);
 };
 
@@ -622,9 +690,17 @@ const fetchArticle = async () => {
     const res = await getArticle(articleId.value);
     const a = res.data;
     form.value = { id: a.id, title: a.title || '', digest: a.digest || '', content: a.content || '', html_content: a.html_content || '', cover_image_url: a.cover_image_url || '', status: a.status || 'draft' };
-    richHtml.value = a.html_content || '<p></p>';
     htmlSource.value = a.html_content || '';
-    activeTab.value = 'rich';
+    // 关键：对已有 html_content 的文章，默认切到预览模式
+    // 因为 Tiptap 编辑器会剥掉微信内联样式，导致样式丢失
+    if (a.html_content) {
+      activeTab.value = 'preview';
+      // Tiptap 不加载带样式的 HTML，避免样式被剥
+      richHtml.value = '<p></p>';
+    } else {
+      activeTab.value = 'rich';
+      richHtml.value = a.content ? `<p>${a.content}</p>` : '<p></p>';
+    }
   } catch (err: any) {
     MessagePlugin.error(err?.response?.data?.detail || '加载失败');
   }
@@ -652,8 +728,10 @@ const doAIWrite = async () => {
     return;
   }
   if (!selectedHotspot.value) {
-    if (trendingHotspots.value.length) selectHotspot(trendingHotspots.value[0]);
-    else { MessagePlugin.warning('请先选择话题'); return; }
+    if (trendingHotspots.value.length) {
+      selectHotspot(trendingHotspots.value[0]);
+      if (!selectedHotspotIds.value.length) selectedHotspotIds.value = [trendingHotspots.value[0].id];
+    } else { MessagePlugin.warning('请先选择话题'); return; }
   }
   creating.value = true;
   try {
@@ -675,16 +753,21 @@ const connectTaskSSE = (taskId: number) => {
   generating.value = true;
   generationStatus.value = '准备素材...';
   generationPercent.value = 5;
+  generatingHtml.value = '';
   richHtml.value = '';
+  let llmText = '';  // 收集 Markdown 文本
   const token = localStorage.getItem('ap_token') || '';
   const es = new EventSource(`/api/tasks/${taskId}/stream?token=${encodeURIComponent(token)}`);
   activeEventSource = es;
   es.addEventListener('llm_chunk', (e: MessageEvent) => {
     const d = JSON.parse(e.data);
     if (d.chunk) {
-      richHtml.value += d.chunk;
+      llmText += d.chunk;
       generationStatus.value = 'AI 写作中...';
       generationPercent.value = Math.min(85, generationPercent.value + 0.3);
+      // 实时更新生成预览：将 Markdown 简单渲染为预览 HTML
+      // （最终保存时后端会用 wenyan 重新渲染为微信样式 HTML）
+      generatingHtml.value = simpleMarkdownToPreviewHtml(llmText);
     }
   });
   es.addEventListener('progress', (e: MessageEvent) => {
@@ -703,6 +786,7 @@ const connectTaskSSE = (taskId: number) => {
     activeEventSource = null;
     generating.value = false;
     creating.value = false;
+    generatingHtml.value = '';
     generationPercent.value = 100;
     if (d.status === 'success' && d.result?.article_id) {
       MessagePlugin.success(`AI 已起草：${d.result.title || '文章'}`);
@@ -714,6 +798,7 @@ const connectTaskSSE = (taskId: number) => {
     activeEventSource = null;
     generating.value = false;
     creating.value = false;
+    generatingHtml.value = '';
   });
 };
 
@@ -776,13 +861,20 @@ const saveArticle = async () => {
   saving.value = true;
   try {
     const p: any = { title: form.value.title, digest: form.value.digest, cover_image_url: form.value.cover_image_url };
-    if (activeTab.value === 'markdown') p.content = form.value.content;
-    else if (activeTab.value === 'html') p.html_content = htmlSource.value;
-    else p.html_content = richHtml.value;
+    // 只发送当前活跃编辑模式的内容，避免覆盖其他模式的数据
+    if (activeTab.value === 'markdown') {
+      p.content = form.value.content;
+    } else if (activeTab.value === 'html') {
+      p.html_content = htmlSource.value;
+    } else if (activeTab.value === 'rich') {
+      p.html_content = richHtml.value;
+    }
+    // preview 模式下不发送 content/html_content，只保存元数据
     const res = await updateArticle(form.value.id, p);
-    form.value.html_content = res.data.html_content || richHtml.value;
-    richHtml.value = res.data.html_content || richHtml.value;
-    htmlSource.value = res.data.html_content || htmlSource.value;
+    if (res.data.html_content) {
+      form.value.html_content = res.data.html_content;
+      htmlSource.value = res.data.html_content;
+    }
     MessagePlugin.success('已保存');
     return true;
   } catch (err: any) {
@@ -837,6 +929,11 @@ const openVideoGenerate = () => {
 };
 
 // ---- 初始化 ----
+
+// Route watchers with immediate:true MUST be placed after all function declarations
+// to avoid TDZ errors (ReferenceError: Cannot access before initialization)
+watch(() => route.query.hotspot_id, () => loadSelectedHotspot(), { immediate: true });
+watch(() => route.query.article_id, () => fetchArticle(), { immediate: true });
 
 onMounted(async () => {
   await Promise.all([
@@ -1040,6 +1137,34 @@ onMounted(async () => {
   min-height: 280px; line-height: 1.85; font-size: 14px; color: #333;
 }
 
+/* 生成期间的微信样式预览 */
+.wechat-preview-generating {
+  position: relative;
+  min-height: 400px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #fff;
+  padding: 16px 20px;
+}
+.generating-overlay {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  margin-bottom: 12px;
+  background: linear-gradient(90deg, #f0fdf4, #ecfdf5);
+  border: 1px solid #bbf7d0;
+  border-radius: 8px;
+  color: #07C160;
+  font-size: 13px;
+}
+.generating-text {
+  font-weight: 500;
+}
+
 /* AI 浮动工具栏 */
 .ai-floating-bar {
   position: absolute; z-index: 100;
@@ -1124,6 +1249,7 @@ onMounted(async () => {
 .ai-generate-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .ai-cost { text-align: center; font-size: 11px; color: #9ca3af; margin-top: 6px; }
+.ai-progress { margin-top: 8px; }
 
 /* ---- 排版美化模块（高亮）---- */
 .beautify-card {

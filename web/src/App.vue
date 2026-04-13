@@ -72,6 +72,7 @@
             <t-menu-item value="/settings">全局配置</t-menu-item>
             <t-menu-item value="/groups">权限组</t-menu-item>
             <t-menu-item value="/invite-codes">邀请码</t-menu-item>
+            <t-menu-item value="/system-logs">系统日志</t-menu-item>
           </t-submenu>
         </template>
       </t-menu>

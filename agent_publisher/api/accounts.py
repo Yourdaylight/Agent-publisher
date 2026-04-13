@@ -95,20 +95,52 @@ async def delete_account(
 
 
 async def _ensure_token(account: Account, db: AsyncSession) -> None:
-    """Refresh access_token if expired."""
+    """Refresh access_token if expired. Supports both manual and platform auth modes."""
     now = datetime.now(tz=timezone.utc)
-    token_expired = (
-        not account.access_token
-        or not account.token_expires_at
-        or account.token_expires_at.replace(tzinfo=timezone.utc) < now
-    )
-    if token_expired:
-        token, expires_at = await WeChatService.get_access_token(
-            account.appid, account.appsecret
+
+    if account.auth_mode == "platform":
+        # 第三方平台模式：使用 authorizer_access_token
+        token_expired = (
+            not account.authorizer_access_token
+            or not account.authorizer_token_expires_at
+            or account.authorizer_token_expires_at.replace(tzinfo=timezone.utc) < now
         )
-        account.access_token = token
-        account.token_expires_at = expires_at
-        await db.commit()
+        if token_expired:
+            if not account.authorizer_refresh_token:
+                raise HTTPException(
+                    status_code=400,
+                    detail="该公众号的授权刷新令牌缺失，请重新扫码授权。",
+                )
+            try:
+                from agent_publisher.services.wechat_platform_service import WeChatPlatformService
+
+                token, expires_at = await WeChatPlatformService.refresh_authorizer_token(
+                    account.authorizer_appid, account.authorizer_refresh_token
+                )
+                account.authorizer_access_token = token
+                account.authorizer_token_expires_at = expires_at
+                account.access_token = token  # 同步到 access_token 供其他模块使用
+                account.token_expires_at = expires_at
+                await db.commit()
+            except Exception as e:
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"刷新授权令牌失败: {e}",
+                )
+    else:
+        # 原有手动模式
+        token_expired = (
+            not account.access_token
+            or not account.token_expires_at
+            or account.token_expires_at.replace(tzinfo=timezone.utc) < now
+        )
+        if token_expired:
+            token, expires_at = await WeChatService.get_access_token(
+                account.appid, account.appsecret
+            )
+            account.access_token = token
+            account.token_expires_at = expires_at
+            await db.commit()
 
 
 @router.get("/{account_id}/followers")

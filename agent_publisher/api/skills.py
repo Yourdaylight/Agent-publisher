@@ -859,6 +859,11 @@ async def skill_create_article(
         # When Markdown content is provided, always render it via wenyan,
         # even if html_content is also provided (Markdown takes precedence)
         html_content = ArticleService._markdown_to_html(content)
+    elif html_content:
+        # When only html_content is provided, inject WeChat inline styles
+        # so that unstyled HTML gets proper formatting for WeChat OA
+        from agent_publisher.services.wechat_style_service import WeChatStyleService
+        html_content = WeChatStyleService.inject_styles(html_content)
 
     article = Article(
         agent_id=data.agent_id,

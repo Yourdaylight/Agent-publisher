@@ -234,6 +234,20 @@ echo ""
 info "公网访问配置"
 CFG_SERVER_HOST=$(prompt_with_default "服务器公网域名或IP (用于微信白名单指引，留空自动检测)" "" "SERVER_HOST")
 
+# --- WeChat Platform ---
+echo ""
+info "微信第三方平台配置 (可选，配置后支持扫码授权公众号)"
+CFG_WECHAT_PLATFORM_APPID=$(prompt_with_default "第三方平台 AppID (留空跳过)" "" "WECHAT_PLATFORM_APPID")
+if [[ -n "$CFG_WECHAT_PLATFORM_APPID" ]]; then
+  CFG_WECHAT_PLATFORM_SECRET=$(prompt_secret "第三方平台 AppSecret" "" "WECHAT_PLATFORM_SECRET")
+  CFG_WECHAT_PLATFORM_TOKEN=$(prompt_with_default "消息校验 Token" "" "WECHAT_PLATFORM_TOKEN")
+  CFG_WECHAT_PLATFORM_AES_KEY=$(prompt_with_default "消息加解密 Key (43位)" "" "WECHAT_PLATFORM_AES_KEY")
+else
+  CFG_WECHAT_PLATFORM_SECRET=""
+  CFG_WECHAT_PLATFORM_TOKEN=""
+  CFG_WECHAT_PLATFORM_AES_KEY=""
+fi
+
 # --- 生成 .env ---
 info "生成 .env 配置文件..."
 
@@ -264,6 +278,12 @@ DEBUG=false
 
 # Public-facing host (domain or IP, for WeChat whitelist guide)
 SERVER_HOST=$CFG_SERVER_HOST
+
+# WeChat Third-party Platform (扫码授权公众号)
+WECHAT_PLATFORM_APPID=$CFG_WECHAT_PLATFORM_APPID
+WECHAT_PLATFORM_SECRET=$CFG_WECHAT_PLATFORM_SECRET
+WECHAT_PLATFORM_TOKEN=$CFG_WECHAT_PLATFORM_TOKEN
+WECHAT_PLATFORM_AES_KEY=$CFG_WECHAT_PLATFORM_AES_KEY
 
 # User Authentication
 EMAIL_WHITELIST=$CFG_EMAIL_WHITELIST

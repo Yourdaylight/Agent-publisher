@@ -178,6 +178,25 @@ export const createArticleFromHotspotAsync = (hotspotId: number, data: { agent_i
   http.post(`/hotspots/${hotspotId}/create-article-async`, data);
 export const deleteAgent = (id: number) => http.delete(`/agents/${id}`);
 
+// WeChat Third-party Platform (扫码授权公众号)
+export const getWechatPlatformStatus = () => http.get('/wechat-platform/status');
+export const getWechatPlatformAuthUrl = () => http.get('/wechat-platform/auth-url');
+
+// System Logs (admin only)
+export const getSystemLogs = (params?: {
+  action?: string;
+  target_type?: string;
+  operator?: string;
+  status?: string;
+  keyword?: string;
+  start_time?: string;
+  end_time?: string;
+  limit?: number;
+  offset?: number;
+}) => http.get('/system-logs', { params });
+export const getSystemLogStats = () => http.get('/system-logs/stats');
+export const cleanupSystemLogs = (days: number) => http.delete('/system-logs/cleanup', { params: { days } });
+
 // Source mode stats
 export const getSourceModeStats = () => http.get('/stats/source-modes');
 export const getTagStats = () => http.get('/stats/tags');

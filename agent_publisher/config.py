@@ -61,6 +61,15 @@ class Settings(BaseSettings):
     # Leave empty to disable. Only affects WeChatService calls.
     wechat_proxy: str = ""
 
+    # WeChat Third-party Platform (扫码授权公众号)
+    # 在微信开放平台 https://open.weixin.qq.com 注册第三方平台后获取
+    # 配置后用户可通过扫码一键授权公众号，无需手动填写 AppID/AppSecret
+    # 详见: docs/wechat-platform-setup.md
+    wechat_platform_appid: str = ""         # 第三方平台 AppID
+    wechat_platform_secret: str = ""        # 第三方平台 AppSecret
+    wechat_platform_token: str = ""         # 消息校验 Token（自定义，需与开放平台一致）
+    wechat_platform_aes_key: str = ""       # 消息加解密 Key（自定义，需与开放平台一致）
+
     # Trending hotspot auto-refresh interval in minutes (0 = disabled).
     # Default: every 60 minutes. Scheduler picks this up at startup.
     trending_refresh_interval: int = 60

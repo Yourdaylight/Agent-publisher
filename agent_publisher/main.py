@@ -33,6 +33,9 @@ from agent_publisher.api.membership import router as membership_router
 from agent_publisher.api.credits import router as credits_router
 from agent_publisher.api.tasks import router as tasks_router
 from agent_publisher.api.invite_codes import router as invite_codes_router
+from agent_publisher.api.wechat_platform import router as wechat_platform_router
+from agent_publisher.api.system_logs import router as system_logs_router
+from agent_publisher.middleware.logging_middleware import SystemLogMiddleware
 from agent_publisher.api.deps import get_db, get_current_user, UserContext
 from agent_publisher.config import settings
 from agent_publisher.models.account import Account
@@ -49,6 +52,7 @@ from agent_publisher.models.task import Task
 from agent_publisher.models.credits import CreditsBalance, CreditsTransaction  # noqa: F401
 from agent_publisher.models.group import UserGroup, UserGroupMember  # noqa: F401 – ensure tables are created
 from agent_publisher.models.invite_code import InviteCode, InviteRedemption  # noqa: F401
+from agent_publisher.models.platform_ticket import PlatformTicket  # noqa: F401 – ensure table is created
 from agent_publisher.database import engine
 from agent_publisher.models.base import Base
 from agent_publisher.extensions import registry as extension_registry
@@ -159,6 +163,10 @@ async def lifespan(app: FastAPI):
     from agent_publisher.scheduler import sync_trending_schedule
     sync_trending_schedule()
 
+    # Schedule platform token refresh (if configured)
+    from agent_publisher.scheduler import sync_platform_token_schedule
+    sync_platform_token_schedule()
+
     # Auto-install wenyan-cli if not found
     import shutil
     if not shutil.which('wenyan'):
@@ -191,6 +199,9 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Agent Publisher", version=get_version_info()["version"], lifespan=lifespan)
 
+# Register system log middleware (records write API operations)
+app.add_middleware(SystemLogMiddleware)
+
 # Public routes (no auth required)
 # Note: auth endpoints are intentionally enumerated to keep `/api/auth/me`
 # protected by the auth middleware.
@@ -205,6 +216,9 @@ PUBLIC_PREFIXES = (
     "/api/server-info",
     "/api/membership/plans",
     "/api/membership/contact",
+    "/api/wechat-platform/ticket-callback",  # WeChat pushes verify_ticket here
+    "/api/wechat-platform/event-callback",   # WeChat pushes auth events here
+    "/api/wechat-platform/auth-callback",     # WeChat redirects after scan auth
     "/assets/",
     "/favicon.ico",
 )
@@ -307,6 +321,8 @@ app.include_router(sources_router)
 app.include_router(candidate_materials_router)
 app.include_router(extensions_router)
 app.include_router(invite_codes_router)
+app.include_router(wechat_platform_router)
+app.include_router(system_logs_router)
 
 # Discover and register extensions (graceful degradation: failures only logged)
 extension_registry.discover_and_load()

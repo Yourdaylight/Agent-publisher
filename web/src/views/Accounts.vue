@@ -2,7 +2,14 @@
   <div>
     <div style="display: flex; justify-content: space-between; margin-bottom: 16px">
       <h3 style="margin: 0">公众号列表</h3>
-      <t-button theme="primary" @click="openDialog()">添加公众号</t-button>
+      <t-space>
+        <t-button theme="primary" @click="openScanAuth">
+          <template #icon><t-icon name="scan" /></template>扫码授权添加
+        </t-button>
+        <t-button theme="default" @click="openDialog()">
+          <template #icon><t-icon name="add" /></template>手动添加
+        </t-button>
+      </t-space>
     </div>
 
     <t-table :data="accounts" :columns="columns" row-key="id" :loading="loading" stripe>
@@ -164,6 +171,9 @@
         </t-card>
       </div>
     </t-drawer>
+
+    <!-- Scan Auth Dialog -->
+    <ScanAuthDialog v-model:visible="scanAuthVisible" @close="onScanAuthClose" />
   </div>
 </template>
 
@@ -171,12 +181,14 @@
 import { ref, computed, onMounted } from 'vue';
 import { getAccounts, deleteAccount, getAccountFollowers, getAccountArticleStats } from '@/api';
 import AccountForm from '@/components/AccountForm.vue';
+import ScanAuthDialog from '@/components/ScanAuthDialog.vue';
 import { MessagePlugin } from 'tdesign-vue-next';
 
 const loading = ref(false);
 const accounts = ref<any[]>([]);
 const dialogVisible = ref(false);
 const editingAccount = ref<any>(null);
+const scanAuthVisible = ref(false);
 
 // Stats data loaded inline for each account row
 const statsLoading = ref<Record<number, boolean>>({});
@@ -208,10 +220,10 @@ const disabledDate = (d: Date) => {
 // Table columns
 const columns = [
   { colKey: 'id', title: 'ID', width: 60 },
-  { colKey: 'name', title: '名称', width: 160 },
+  { colKey: 'name', title: '名称', width: 160, cell: (_h: any, { row }: any) => row.nick_name || row.name },
   { colKey: 'appid', title: 'AppID', width: 200 },
+  { colKey: 'auth_mode', title: '授权方式', width: 100, cell: (_h: any, { row }: any) => row.auth_mode === 'platform' ? '扫码授权' : '手动配置' },
   { colKey: 'followers', title: '粉丝数', width: 140 },
-  { colKey: 'ip_whitelist', title: 'IP 白名单', ellipsis: true },
   { colKey: 'created_at', title: '创建时间', width: 180, cell: (_h: any, { row }: any) => new Date(row.created_at).toLocaleString() },
   { colKey: 'op', title: '操作', width: 180 },
 ];
@@ -354,6 +366,15 @@ const onDateRangeChange = () => {
 const openDialog = (account?: any) => {
   editingAccount.value = account || null;
   dialogVisible.value = true;
+};
+
+const openScanAuth = () => {
+  scanAuthVisible.value = true;
+};
+
+const onScanAuthClose = () => {
+  // When scan auth dialog closes, refresh the list to pick up newly authorized accounts
+  fetchData();
 };
 
 const onFormSuccess = () => {
