@@ -332,7 +332,17 @@ class SourceRegistryService:
     async def _collect_trending(
         self, agent: Agent, bindings: list[AgentSourceBinding]
     ) -> list[int]:
-        """热榜采集"""
+        """热榜采集 — 使用 TrendRadar (如果启用) 或回退到 TrendingCollectorService
+        
+        当 trendradar_enabled 特性开关打开时,优先使用 TrendRadar 的 11 平台聚合。
+        如果 TrendRadar 不可用或出错,自动回退到现有的 TrendingCollectorService。
+        
+        Feature flag: settings.trendradar_enabled (default: False)
+        Fallback strategy: Try TrendRadar → catch exceptions → fall back to TrendingCollectorService
+        """
+        from agent_publisher.config import settings
+        from agent_publisher.services.trendradar_integration import get_trendradar_integration
+        
         platform_configs = []
         all_filter_keywords: list[str] = []
 
@@ -348,7 +358,33 @@ class SourceRegistryService:
 
         if not platform_configs:
             return []
-
+        
+        # Phase 1: Try TrendRadar if enabled
+        if settings.trendradar_enabled:
+            try:
+                logger.info("TrendRadar collection: attempting for agent %s (trendradar_enabled=True)", agent.name)
+                integration = get_trendradar_integration(self.session)
+                result = await integration.collect_trending_with_fallback(
+                    agent=agent,
+                    bindings=bindings,
+                )
+                logger.info(
+                    "TrendRadar collection: completed for agent %s — %d materials collected",
+                    agent.name, len(result),
+                )
+                return result
+            except Exception as e:
+                logger.warning(
+                    "TrendRadar collection failed for agent %s, falling back to TrendingCollectorService: %s",
+                    agent.name, e, exc_info=True,
+                )
+                # Fall through to TrendingCollectorService
+        
+        # Fallback: Use traditional TrendingCollectorService
+        logger.debug(
+            "TrendRadar collection: using fallback (trendradar_enabled=%s) for agent %s",
+            settings.trendradar_enabled, agent.name,
+        )
         collector = TrendingCollectorService(self.session)
         return await collector.collect(
             agent_id=agent.id,
@@ -357,6 +393,7 @@ class SourceRegistryService:
             filter_keywords=all_filter_keywords if all_filter_keywords else None,
         )
 
+    
     async def _collect_search(
         self, agent: Agent, bindings: list[AgentSourceBinding]
     ) -> list[int]:
