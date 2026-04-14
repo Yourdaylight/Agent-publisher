@@ -79,6 +79,35 @@ class Settings(BaseSettings):
     contact_wechat_id: str = ""
     contact_description: str = "当前支付能力建设中，请联系管理员微信完成开通。"
 
+    # TrendRadar Integration (Phase 1)
+    # Enable/disable TrendRadar backend for trending data collection
+    # When enabled, Agent Publisher will use TrendRadar's 11-platform aggregation
+    # instead of NewsNow API. Feature flag for gradual rollout.
+    trendradar_enabled: bool = False
+
+    # Path to TrendRadar data storage (if not using live API)
+    # Can be local SQLite path or S3 URL depending on deployment
+    trendradar_storage_path: str = ""
+
+    # TrendRadar API/service endpoint (if running as separate service)
+    trendradar_service_url: str = ""
+
+    # Which platforms to prioritize from TrendRadar (comma-separated)
+    # Default: all 11 platforms (weibo,douyin,xiaohongshu,baidu,zhihu,toutiao,bilibili,v2ex,github,newsnow,rss)
+    trendradar_platforms: str = "weibo,douyin,xiaohongshu,baidu,zhihu,toutiao,bilibili,v2ex,github,newsnow,rss"
+
+    # AI analysis integration (Phase 2 - display TrendRadar AI insights in UI)
+    trendradar_ai_analysis_enabled: bool = False
+
+    # Material pool unification (Phase 3 - unified sourcing)
+    trendradar_unified_pool_enabled: bool = False
+
+    # MCP tool integration (Phase 4 - enrichment during article generation)
+    trendradar_mcp_enabled: bool = False
+
+    # Multi-channel publishing (Phase 5 - publish to TrendRadar notification channels)
+    trendradar_multi_channel_enabled: bool = False
+
     def get_jwt_secret(self) -> str:
         return self.jwt_secret or f"jwt-{self.access_key}-secret"
 
