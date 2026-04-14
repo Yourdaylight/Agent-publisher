@@ -1,33 +1,20 @@
 """
-TrendRadar Integration Adapter - Phase 1 Implementation
+TrendRadar Integration Adapter
 
-This adapter bridges TrendRadar (trending platform aggregation) with Agent Publisher
-(content generation). It replaces the single NewsNow API with TrendRadar's 11-platform
-aggregation while maintaining backward compatibility.
-
-Architecture:
-  TrendRadar          Agent Publisher
-  (11 platforms)      (Content Generation)
-       │                     │
-       ├─ Weibo             │
-       ├─ Douyin            │ 
-       ├─ Xiaohongshu       ├─ NewsData
-       ├─ Baidu             ├─ RSS
-       ├─ Zhihu             └─ Manual
-       ├─ Toutiao                │
-       ├─ Bilibili               ↓
-       ├─ V2EX              CandidateMaterial
-       ├─ Github Trending        │
-       ├─ NewsNow                ↓
-       └─ RSS Feeds         LLM Generation
-            │
-            └─→ Unified Material Pool ←─→ CandidateMaterial
+Bridges TrendRadar (trending platform aggregation) with Agent Publisher
+(content generation). Uses TrendRadar as a Python library via trendradar_bridge.
 
 Data Flow:
-  1. TrendRadar fetches from 11 platforms
-  2. Adapter converts to CandidateMaterial format
-  3. Agent Publisher uses enriched materials
-  4. Feature flag enables gradual rollout
+  TrendRadar DataFetcher/Storage
+       │
+       ▼ (trendradar_bridge)
+  TrendRadarNewsItem
+       │
+       ▼ (this adapter: dedup → score → filter → store)
+  CandidateMaterial
+       │
+       ▼
+  LLM Generation → Article → Publish
 """
 
 from __future__ import annotations
@@ -48,9 +35,9 @@ class TrendRadarNewsItem:
     """Unified news item from TrendRadar aggregation."""
     title: str
     url: str
-    source_platform: str  # weibo, douyin, xiaohongshu, etc.
+    source_platform: str  # weibo, douyin, zhihu, baidu, toutiao, bilibili, etc.
     hot_value: float  # Normalized 0-100 hotness score
-    rank: int  # Platform-specific rank
+    rank: int  # Platform-specific rank (1-based)
     summary: Optional[str] = None
     image_url: Optional[str] = None
     timestamp: Optional[datetime] = None
@@ -60,11 +47,11 @@ class TrendRadarNewsItem:
         """Convert TrendRadar item to CandidateMaterial format."""
         return {
             "agent_id": agent_id,
-            "source_type": "trending",  # Mark as trending source
+            "source_type": "trending",
             "source_identity": f"trendradar:{self.source_platform}",
             "original_url": self.url,
             "title": self.title,
-            "summary": self.summary or self.title,
+            "summary": self.summary or self.title[:200],
             "raw_content": self._build_raw_content(),
             "quality_score": quality_score,
             "tags": self._extract_tags(),
@@ -73,37 +60,39 @@ class TrendRadarNewsItem:
                 "hot_value": self.hot_value,
                 "rank": self.rank,
                 "source": "trendradar_adapter",
+                "fetch_timestamp": datetime.now(timezone.utc).isoformat(),
                 **(self.metadata or {}),
             },
         }
 
     def _build_raw_content(self) -> str:
         """Build structured raw content from trending item."""
-        content = f"# {self.title}\n\n"
-        if self.summary:
-            content += f"## 摘要\n{self.summary}\n\n"
-        content += f"## 信息\n"
-        content += f"- 平台: {self.source_platform}\n"
-        content += f"- 热度: {self.hot_value}/100\n"
-        content += f"- 排名: #{self.rank}\n"
-        if self.image_url:
-            content += f"- 图片: {self.image_url}\n"
+        lines = [
+            f"# {self.title}\n",
+            f"## 基本信息\n",
+            f"- **平台**: {self.source_platform.capitalize()}\n",
+            f"- **热度**: {self.hot_value:.1f}/100\n",
+            f"- **排名**: #{self.rank}\n",
+        ]
         if self.timestamp:
-            content += f"- 时间: {self.timestamp.isoformat()}\n"
-        content += f"- 链接: {self.url}\n"
-        return content
+            lines.append(f"- **时间**: {self.timestamp.isoformat()}\n")
+        if self.image_url:
+            lines.append(f"- **图片**: {self.image_url}\n")
+        lines.append(f"- **链接**: {self.url}\n\n")
+        if self.summary:
+            lines.append(f"## 摘要\n{self.summary}\n")
+        return "".join(lines)
 
     def _extract_tags(self) -> List[str]:
-        """Extract tags from title and metadata."""
+        """Extract tags from item metadata."""
         tags = [self.source_platform]
-        # Add basic hotness tier
         if self.hot_value >= 80:
             tags.append("hot")
+            tags.append("trending")
         elif self.hot_value >= 50:
             tags.append("warm")
         else:
             tags.append("cool")
-        # Add rank tier
         if self.rank <= 10:
             tags.append("top10")
         elif self.rank <= 50:
@@ -114,44 +103,32 @@ class TrendRadarNewsItem:
 class TrendRadarAdapter:
     """
     Adapter for integrating TrendRadar with Agent Publisher.
-    
-    Responsibilities:
-    1. Fetch trending data from TrendRadar backend
-    2. Convert to CandidateMaterial format
-    3. Manage deduplication and quality scoring
-    4. Support feature flag for gradual rollout
+
+    Pipeline: fetch → deduplicate → score → filter → store
     """
 
     def __init__(self, db: AsyncSession, feature_flag_enabled: bool = True):
-        """
-        Initialize adapter.
-        
-        Args:
-            db: AsyncSession for database operations
-            feature_flag_enabled: Enable/disable TrendRadar integration
-        """
         self.db = db
         self.feature_flag_enabled = feature_flag_enabled
 
     async def collect_for_agent(
-        self, agent_id: int, platforms: Optional[List[str]] = None
+        self,
+        agent_id: int | None,
+        agent_name: str = "",
+        platforms: Optional[List[str]] = None,
+        filter_keywords: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """
         Collect trending materials for an agent from TrendRadar.
-        
+
         Args:
-            agent_id: Target agent ID
-            platforms: Filter by specific platforms (default: all 11)
-        
+            agent_id: Target agent ID (None for global collection)
+            agent_name: Agent name for logging
+            platforms: Filter by specific platforms (default: all)
+            filter_keywords: Keywords for agent-fit scoring
+
         Returns:
-            {
-                "status": "success|error",
-                "platforms_collected": ["weibo", "douyin", ...],
-                "new_items": count,
-                "duplicates_skipped": count,
-                "low_quality_skipped": count,
-                "error": error_message if status == "error"
-            }
+            {"status": "success|error", "new_items": int, ...}
         """
         if not self.feature_flag_enabled:
             logger.info("TrendRadar adapter disabled, skipping collection")
@@ -163,175 +140,209 @@ class TrendRadarAdapter:
                 "low_quality_skipped": 0,
             }
 
+        start_time = datetime.now(timezone.utc)
         try:
             from agent_publisher.config import settings
 
-            # TODO: Phase 1 - Implement actual TrendRadar backend call
-            # This is where we'll fetch from TrendRadar's data storage (SQLite/S3)
-            # For now, return placeholder structure
-            
+            # Determine platform list
+            if not platforms:
+                platforms = [
+                    p.strip()
+                    for p in settings.trendradar_platforms.split(",")
+                    if p.strip()
+                ]
+
             logger.info(
-                "TrendRadar: Collecting trends for agent %d (platforms=%s)",
-                agent_id,
-                platforms or "all",
+                "TrendRadar: collecting for agent=%s platforms=%s",
+                agent_name or agent_id,
+                platforms,
             )
 
-            # Step 1: Fetch from TrendRadar
-            items = await self._fetch_from_trendradar(platforms)
-            logger.info("TrendRadar: Fetched %d items", len(items))
+            # Step 1: Fetch via bridge
+            from agent_publisher.services.trendradar_bridge import (
+                fetch_trending_via_trendradar,
+            )
 
-            # Step 2: Deduplicate against existing materials
+            items = await fetch_trending_via_trendradar(
+                platform_ids=platforms,
+                trendradar_data_dir=settings.trendradar_storage_path,
+            )
+            logger.info("TrendRadar: fetched %d items", len(items))
+
+            if not items:
+                duration = (datetime.now(timezone.utc) - start_time).total_seconds()
+                return {
+                    "status": "success",
+                    "platforms_collected": platforms,
+                    "new_items": 0,
+                    "duplicates_skipped": 0,
+                    "low_quality_skipped": 0,
+                    "duration_seconds": duration,
+                }
+
+            # Step 2: Deduplicate
             dedup_result = await self._deduplicate_items(agent_id, items)
             unique_items = dedup_result["unique_items"]
             duplicates_skipped = dedup_result["duplicates_skipped"]
 
             # Step 3: Score and filter
-            scored_items = await self._score_and_filter(agent_id, unique_items)
+            scored_items = self._score_and_filter(unique_items, filter_keywords)
+            low_quality_skipped = len(unique_items) - len(scored_items)
 
-            # Step 4: Convert and store
+            # Step 4: Store
             created_count = await self._store_materials(agent_id, scored_items)
 
+            duration = (datetime.now(timezone.utc) - start_time).total_seconds()
             return {
                 "status": "success",
-                "platforms_collected": sorted(set(item.source_platform for item in items)),
+                "platforms_collected": sorted(set(i.source_platform for i in items)),
                 "new_items": created_count,
                 "duplicates_skipped": duplicates_skipped,
-                "low_quality_skipped": len(unique_items) - created_count,
+                "low_quality_skipped": low_quality_skipped,
+                "duration_seconds": duration,
             }
 
         except Exception as e:
             logger.error("TrendRadar collection failed: %s", e, exc_info=True)
+            duration = (datetime.now(timezone.utc) - start_time).total_seconds()
             return {
                 "status": "error",
                 "error": str(e),
                 "platforms_collected": [],
                 "new_items": 0,
+                "duration_seconds": duration,
             }
 
-    async def _fetch_from_trendradar(
-        self, platforms: Optional[List[str]] = None
-    ) -> List[TrendRadarNewsItem]:
-        """
-        Fetch trending items from TrendRadar backend.
-        
-        TODO: Implement actual fetching from TrendRadar (Phase 1):
-        1. Connect to TrendRadar SQLite/S3 storage
-        2. Query recent trending items (last 24h)
-        3. Filter by specified platforms (or all 11 if not specified)
-        4. Parse into TrendRadarNewsItem dataclass
-        """
-        logger.debug("Fetching from TrendRadar (platforms=%s)", platforms)
-        # Placeholder implementation
-        return []
-
     async def _deduplicate_items(
-        self, agent_id: int, items: List[TrendRadarNewsItem]
+        self,
+        agent_id: int | None,
+        items: List[TrendRadarNewsItem],
     ) -> Dict[str, Any]:
-        """
-        Check for duplicates against existing CandidateMaterial.
-        
-        Strategy:
-        - Exact URL match
-        - Title similarity (80%+ Levenshtein)
-        - Combined deduplication score
-        """
+        """Check for duplicates against existing CandidateMaterial (by URL)."""
         from agent_publisher.models.candidate_material import CandidateMaterial
 
-        existing_urls = set()
-        result = await self.db.execute(
-            select(CandidateMaterial.original_url).where(
-                CandidateMaterial.agent_id == agent_id
+        existing_urls: set[str] = set()
+        if agent_id is not None:
+            result = await self.db.execute(
+                select(CandidateMaterial.original_url).where(
+                    CandidateMaterial.agent_id == agent_id
+                )
             )
-        )
-        existing_urls = set(row[0] for row in result.all())
+            existing_urls = set(row[0] for row in result.all())
+        else:
+            # Global collection: check all recent URLs
+            result = await self.db.execute(
+                select(CandidateMaterial.original_url).where(
+                    CandidateMaterial.source_type == "trending"
+                )
+            )
+            existing_urls = set(row[0] for row in result.all())
 
-        unique_items = []
+        unique_items: list[TrendRadarNewsItem] = []
+        seen_urls: set[str] = set()
         duplicates_skipped = 0
 
         for item in items:
-            if item.url in existing_urls:
+            if item.url in existing_urls or item.url in seen_urls:
                 duplicates_skipped += 1
-                logger.debug("Skipped duplicate URL: %s", item.url)
-            else:
-                unique_items.append(item)
+                continue
+            unique_items.append(item)
+            seen_urls.add(item.url)
 
         return {
             "unique_items": unique_items,
             "duplicates_skipped": duplicates_skipped,
         }
 
-    async def _score_and_filter(
-        self, agent_id: int, items: List[TrendRadarNewsItem]
+    def _score_and_filter(
+        self,
+        items: List[TrendRadarNewsItem],
+        filter_keywords: Optional[List[str]] = None,
     ) -> List[tuple[TrendRadarNewsItem, float]]:
-        """
-        Score items based on relevance and quality.
-        
-        Scoring formula (0-1):
-        - Base hotness: hot_value / 100 (40% weight)
-        - Recency: exp(-hours_old / 24) (30% weight)
-        - Agent fit: keyword_relevance (30% weight)
-        
-        Filter: Keep items with score > 0.3
-        """
-        from agent_publisher.models.agent import Agent
+        """Score items and filter by quality threshold (0.3).
 
-        agent = await self.db.get(Agent, agent_id)
-        if not agent:
-            logger.warning("Agent %d not found for scoring", agent_id)
-            return []
+        Scoring formula:
+        - Hotness: hot_value/100 (40% weight)
+        - Rank bonus: exp(-rank/50) (30% weight)
+        - Agent fit: keyword match (30% weight)
+        """
+        scored: list[tuple[TrendRadarNewsItem, float]] = []
 
-        scored = []
         for item in items:
-            # Calculate components
             hotness_score = min(item.hot_value / 100.0, 1.0)
-            recency_score = 0.8  # TODO: Calculate based on timestamp
-            agent_fit_score = await self._calculate_agent_fit(agent, item)
+            rank_score = max(0.0, min(1.0, 1.0 - (item.rank / 100.0)))
+            agent_fit = self._calculate_agent_fit(item, filter_keywords)
 
-            # Combined score
-            final_score = (
-                hotness_score * 0.4 + recency_score * 0.3 + agent_fit_score * 0.3
-            )
+            final_score = hotness_score * 0.4 + rank_score * 0.3 + agent_fit * 0.3
 
             if final_score > 0.3:
                 scored.append((item, final_score))
-                logger.debug("Scored %s: %.2f", item.title[:50], final_score)
-            else:
-                logger.debug("Filtered (low score): %s: %.2f", item.title[:50], final_score)
 
         return sorted(scored, key=lambda x: x[1], reverse=True)
 
-    async def _calculate_agent_fit(
-        self, agent: Any, item: TrendRadarNewsItem
+    @staticmethod
+    def _calculate_agent_fit(
+        item: TrendRadarNewsItem,
+        filter_keywords: Optional[List[str]] = None,
     ) -> float:
+        """Calculate keyword-based relevance score.
+
+        Returns:
+            1.0 if any keyword matches, 0.5 if no keywords configured, 0.0 if none match.
         """
-        Calculate how well this item fits the agent's topic/keywords.
-        
-        TODO: Phase 2 - Implement semantic matching
-        For Phase 1: Return 0.5 (neutral)
-        """
-        return 0.5
+        if not filter_keywords:
+            return 0.5  # Neutral when no keywords
+
+        title_lower = item.title.lower()
+        for kw in filter_keywords:
+            if kw.lower() in title_lower:
+                return 1.0
+        return 0.0
 
     async def _store_materials(
-        self, agent_id: int, scored_items: List[tuple[TrendRadarNewsItem, float]]
+        self,
+        agent_id: int | None,
+        scored_items: List[tuple[TrendRadarNewsItem, float]],
     ) -> int:
-        """
-        Convert scored items to CandidateMaterial and store.
-        """
+        """Convert scored items to CandidateMaterial and store."""
         from agent_publisher.models.candidate_material import CandidateMaterial
 
         created = 0
         for item, score in scored_items:
             try:
-                material_data = item.to_candidate_material(agent_id, score)
-                material = CandidateMaterial(**material_data)
+                material_data = item.to_candidate_material(
+                    agent_id=agent_id or 0, quality_score=score
+                )
+                # Map 'metadata' key to 'extra_metadata' column
+                material = CandidateMaterial(
+                    agent_id=material_data.get("agent_id"),
+                    source_type=material_data["source_type"],
+                    source_identity=material_data["source_identity"],
+                    original_url=material_data["original_url"],
+                    title=material_data["title"],
+                    summary=material_data["summary"],
+                    raw_content=material_data["raw_content"],
+                    quality_score=material_data["quality_score"],
+                    tags=material_data["tags"],
+                    extra_metadata=material_data["metadata"],
+                )
                 self.db.add(material)
                 created += 1
             except Exception as e:
-                logger.error("Failed to create material from item %s: %s", item.title, e)
+                logger.error(
+                    "Failed to create material from '%s': %s",
+                    item.title[:60],
+                    e,
+                )
 
         if created > 0:
-            await self.db.commit()
-            logger.info("Created %d materials from TrendRadar", created)
+            try:
+                await self.db.commit()
+                logger.info("Created %d materials from TrendRadar", created)
+            except Exception as e:
+                logger.error("Failed to commit materials: %s", e)
+                await self.db.rollback()
+                return 0
 
         return created
 

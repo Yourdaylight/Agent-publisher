@@ -3,209 +3,245 @@ from __future__ import annotations
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from datetime import datetime, timezone
-
-from agent_publisher.services.source_registry_service import SourceRegistryService
-from agent_publisher.services.trendradar_adapter import TrendRadarNewsItem
 
 
 class TestSourceRegistryTrendRadarIntegration:
-    """Tests for TrendRadar integration in SourceRegistryService."""
+    """Tests for TrendRadar integration in SourceRegistryService._collect_trending."""
 
-    @pytest.mark.asyncio
-    async def test_collect_trending_with_trendradar_disabled(self):
-        """When feature flag disabled, uses TrendingCollectorService."""
-        db_session = AsyncMock()
+    def _make_registry(self, db_session=None):
+        from agent_publisher.services.source_registry_service import SourceRegistryService
+        return SourceRegistryService(db_session or AsyncMock())
 
-        registry = SourceRegistryService(db_session)
-
-        agent = MagicMock()
-        agent.id = 1
-        agent.name = "Test Agent"
-
+    def _make_binding(self, platform_id="weibo", filter_keywords=None):
         binding = MagicMock()
         binding.source_config = MagicMock()
-        binding.source_config.config = {"platform_id": "weibo"}
-        binding.filter_keywords = None
+        binding.source_config.config = {"platform_id": platform_id}
+        binding.source_config.is_enabled = True
+        binding.is_enabled = True
+        binding.filter_keywords = filter_keywords
+        return binding
 
-        bindings = [binding]
-
-        # Mock TrendingCollectorService
-        with patch('agent_publisher.services.source_registry_service.TrendingCollectorService') as mock_collector:
-            mock_instance = AsyncMock()
-            mock_instance.collect = AsyncMock(return_value=[1, 2, 3])
-            mock_collector.return_value = mock_instance
-
-            # Mock settings with trendradar_enabled = False
-            with patch('agent_publisher.services.source_registry_service.settings') as mock_settings:
-                mock_settings.trendradar_enabled = False
-
-                result = await registry._collect_trending(agent, bindings)
-
-                # Should call TrendingCollectorService
-                mock_collector.assert_called_once_with(db_session)
-                mock_instance.collect.assert_called_once()
-                assert result == [1, 2, 3]
+    def _make_agent(self, agent_id=1, name="Test Agent"):
+        agent = MagicMock()
+        agent.id = agent_id
+        agent.name = name
+        return agent
 
     @pytest.mark.asyncio
-    async def test_collect_trending_with_trendradar_enabled_success(self):
-        """When TrendRadar enabled and available, uses TrendRadar."""
-        db_session = AsyncMock()
+    async def test_collect_trending_uses_adapter(self):
+        """_collect_trending uses TrendRadarAdapter directly."""
+        db = AsyncMock()
+        registry = self._make_registry(db)
 
-        registry = SourceRegistryService(db_session)
+        agent = self._make_agent()
+        binding = self._make_binding("weibo")
 
-        agent = MagicMock()
-        agent.id = 1
-        agent.name = "Test Agent"
+        mock_adapter = AsyncMock()
+        mock_adapter.collect_for_agent = AsyncMock(return_value={
+            "status": "success",
+            "new_items": 3,
+            "duplicates_skipped": 1,
+            "low_quality_skipped": 0,
+            "platforms_collected": ["weibo"],
+        })
 
-        binding = MagicMock()
-        binding.source_config = MagicMock()
-        binding.source_config.config = {"platform_id": "weibo"}
-        binding.filter_keywords = None
+        # Mock the material IDs query
+        mock_result = MagicMock()
+        mock_result.all.return_value = [(10,), (11,), (12,)]
+        db.execute.return_value = mock_result
 
-        bindings = [binding]
+        with patch(
+            "agent_publisher.services.trendradar_adapter.get_trendradar_adapter",
+            new_callable=AsyncMock,
+            return_value=mock_adapter,
+        ):
+            result = await registry._collect_trending(agent, [binding])
 
-        # Mock TrendRadar integration
-        with patch('agent_publisher.services.source_registry_service.get_trendradar_integration') as mock_get_integration:
-            mock_integration = AsyncMock()
-            mock_integration.collect_trending_with_fallback = AsyncMock(return_value=[10, 11, 12])
-            mock_get_integration.return_value = mock_integration
-
-            # Mock settings with trendradar_enabled = True
-            with patch('agent_publisher.services.source_registry_service.settings') as mock_settings:
-                mock_settings.trendradar_enabled = True
-
-                result = await registry._collect_trending(agent, bindings)
-
-                # Should call TrendRadar integration
-                mock_get_integration.assert_called_once_with(db_session)
-                mock_integration.collect_trending_with_fallback.assert_called_once()
-                assert result == [10, 11, 12]
+        mock_adapter.collect_for_agent.assert_called_once_with(
+            agent_id=1,
+            agent_name="Test Agent",
+            platforms=["weibo"],
+            filter_keywords=None,
+        )
+        assert result == [10, 11, 12]
 
     @pytest.mark.asyncio
-    async def test_collect_trending_with_trendradar_error_falls_back(self):
-        """When TrendRadar fails, falls back to TrendingCollectorService."""
-        db_session = AsyncMock()
+    async def test_collect_trending_passes_filter_keywords(self):
+        """Filter keywords from bindings are passed to adapter."""
+        db = AsyncMock()
+        registry = self._make_registry(db)
 
-        registry = SourceRegistryService(db_session)
+        agent = self._make_agent()
+        binding = self._make_binding("weibo", filter_keywords=["python", "AI"])
 
-        agent = MagicMock()
-        agent.id = 1
-        agent.name = "Test Agent"
+        mock_adapter = AsyncMock()
+        mock_adapter.collect_for_agent = AsyncMock(return_value={
+            "status": "success",
+            "new_items": 1,
+            "duplicates_skipped": 0,
+            "low_quality_skipped": 0,
+            "platforms_collected": ["weibo"],
+        })
 
-        binding = MagicMock()
-        binding.source_config = MagicMock()
-        binding.source_config.config = {"platform_id": "weibo"}
-        binding.filter_keywords = None
+        mock_result = MagicMock()
+        mock_result.all.return_value = [(10,)]
+        db.execute.return_value = mock_result
 
-        bindings = [binding]
+        with patch(
+            "agent_publisher.services.trendradar_adapter.get_trendradar_adapter",
+            new_callable=AsyncMock,
+            return_value=mock_adapter,
+        ):
+            await registry._collect_trending(agent, [binding])
 
-        # Mock TrendRadar integration to fail
-        with patch('agent_publisher.services.source_registry_service.get_trendradar_integration') as mock_get_integration:
-            mock_integration = AsyncMock()
-            mock_integration.collect_trending_with_fallback = AsyncMock(
-                side_effect=Exception("TrendRadar service error")
-            )
-            mock_get_integration.return_value = mock_integration
-
-            # Mock TrendingCollectorService as fallback
-            with patch('agent_publisher.services.source_registry_service.TrendingCollectorService') as mock_collector:
-                mock_instance = AsyncMock()
-                mock_instance.collect = AsyncMock(return_value=[20, 21, 22])
-                mock_collector.return_value = mock_instance
-
-                # Mock settings with trendradar_enabled = True
-                with patch('agent_publisher.services.source_registry_service.settings') as mock_settings:
-                    mock_settings.trendradar_enabled = True
-
-                    result = await registry._collect_trending(agent, bindings)
-
-                    # Should try TrendRadar
-                    mock_get_integration.assert_called_once()
-
-                    # Should fall back to TrendingCollectorService
-                    mock_collector.assert_called_once_with(db_session)
-                    mock_instance.collect.assert_called_once()
-
-                    # Should return fallback result
-                    assert result == [20, 21, 22]
+        call_kwargs = mock_adapter.collect_for_agent.call_args[1]
+        assert call_kwargs["filter_keywords"] == ["python", "AI"]
 
     @pytest.mark.asyncio
     async def test_collect_trending_no_platform_configs(self):
         """With no platform configs, returns empty list."""
-        db_session = AsyncMock()
+        registry = self._make_registry()
 
-        registry = SourceRegistryService(db_session)
-
-        agent = MagicMock()
-        agent.id = 1
-        agent.name = "Test Agent"
-
+        agent = self._make_agent()
         binding = MagicMock()
         binding.source_config = MagicMock()
         binding.source_config.config = {}  # No platform_id
         binding.filter_keywords = None
 
-        bindings = [binding]
-
-        result = await registry._collect_trending(agent, bindings)
-
-        # Should return empty list
+        result = await registry._collect_trending(agent, [binding])
         assert result == []
 
     @pytest.mark.asyncio
-    async def test_collect_trending_preserves_filter_keywords(self):
-        """Filter keywords are passed through to collector."""
-        db_session = AsyncMock()
+    async def test_collect_trending_handles_error(self):
+        """On adapter error, returns empty list."""
+        db = AsyncMock()
+        registry = self._make_registry(db)
 
-        registry = SourceRegistryService(db_session)
+        agent = self._make_agent()
+        binding = self._make_binding("weibo")
 
-        agent = MagicMock()
-        agent.id = 1
-        agent.name = "Test Agent"
+        mock_adapter = AsyncMock()
+        mock_adapter.collect_for_agent = AsyncMock(return_value={
+            "status": "error",
+            "error": "Connection failed",
+            "new_items": 0,
+            "platforms_collected": [],
+        })
 
-        binding = MagicMock()
-        binding.source_config = MagicMock()
-        binding.source_config.config = {"platform_id": "weibo"}
-        binding.filter_keywords = ["python", "programming"]
+        with patch(
+            "agent_publisher.services.trendradar_adapter.get_trendradar_adapter",
+            new_callable=AsyncMock,
+            return_value=mock_adapter,
+        ):
+            result = await registry._collect_trending(agent, [binding])
 
-        bindings = [binding]
+        assert result == []
 
-        # Mock TrendingCollectorService
-        with patch('agent_publisher.services.source_registry_service.TrendingCollectorService') as mock_collector:
-            mock_instance = AsyncMock()
-            mock_instance.collect = AsyncMock(return_value=[1, 2, 3])
-            mock_collector.return_value = mock_instance
+    @pytest.mark.asyncio
+    async def test_collect_trending_multiple_bindings(self):
+        """Collects from multiple platform bindings."""
+        db = AsyncMock()
+        registry = self._make_registry(db)
 
-            # Mock settings with trendradar_enabled = False
-            with patch('agent_publisher.services.source_registry_service.settings') as mock_settings:
-                mock_settings.trendradar_enabled = False
+        agent = self._make_agent()
+        bindings = [
+            self._make_binding("weibo"),
+            self._make_binding("zhihu"),
+            self._make_binding("bilibili"),
+        ]
 
-                result = await registry._collect_trending(agent, bindings)
+        mock_adapter = AsyncMock()
+        mock_adapter.collect_for_agent = AsyncMock(return_value={
+            "status": "success",
+            "new_items": 5,
+            "duplicates_skipped": 0,
+            "low_quality_skipped": 0,
+            "platforms_collected": ["weibo", "zhihu", "bilibili"],
+        })
 
-                # Check that filter_keywords were passed
-                call_kwargs = mock_instance.collect.call_args[1]
-                assert "filter_keywords" in call_kwargs
-                assert call_kwargs["filter_keywords"] == ["python", "programming"]
+        mock_result = MagicMock()
+        mock_result.all.return_value = [(1,), (2,), (3,), (4,), (5,)]
+        db.execute.return_value = mock_result
+
+        with patch(
+            "agent_publisher.services.trendradar_adapter.get_trendradar_adapter",
+            new_callable=AsyncMock,
+            return_value=mock_adapter,
+        ):
+            result = await registry._collect_trending(agent, bindings)
+
+        call_kwargs = mock_adapter.collect_for_agent.call_args[1]
+        assert sorted(call_kwargs["platforms"]) == ["bilibili", "weibo", "zhihu"]
+        assert len(result) == 5
+
+
+class TestCollectAllTrending:
+    """Tests for global trending refresh via collect_all_trending."""
+
+    @pytest.mark.asyncio
+    async def test_collect_all_trending_uses_adapter(self):
+        """collect_all_trending uses TrendRadarAdapter."""
+        db = AsyncMock()
+
+        from agent_publisher.services.source_registry_service import SourceRegistryService
+        registry = SourceRegistryService(db)
+
+        # Mock list_sources to return some trending sources
+        mock_source = MagicMock()
+        mock_source.config = {"platform_id": "weibo"}
+        registry.list_sources = AsyncMock(return_value=[mock_source])
+
+        mock_adapter = AsyncMock()
+        mock_adapter.collect_for_agent = AsyncMock(return_value={
+            "status": "success",
+            "new_items": 10,
+            "duplicates_skipped": 3,
+            "platforms_collected": ["weibo"],
+        })
+
+        with patch(
+            "agent_publisher.services.trendradar_adapter.get_trendradar_adapter",
+            new_callable=AsyncMock,
+            return_value=mock_adapter,
+        ):
+            result = await registry.collect_all_trending()
+
+        assert result["new_items"] == 10
+        assert result["duplicate_items"] == 3
+        mock_adapter.collect_for_agent.assert_called_once()
+        call_kwargs = mock_adapter.collect_for_agent.call_args[1]
+        assert call_kwargs["agent_id"] is None
+        assert call_kwargs["agent_name"] == "global_trending"
+
+    @pytest.mark.asyncio
+    async def test_collect_all_trending_no_sources(self):
+        """No enabled sources returns empty result."""
+        db = AsyncMock()
+
+        from agent_publisher.services.source_registry_service import SourceRegistryService
+        registry = SourceRegistryService(db)
+        registry.list_sources = AsyncMock(return_value=[])
+
+        result = await registry.collect_all_trending()
+        assert result["platforms_collected"] == []
+        assert result["new_items"] == 0
+
+
+class TestCollectForAgent:
+    """Tests for full collect_for_agent dispatch."""
 
     @pytest.mark.asyncio
     async def test_collect_for_agent_includes_trending(self):
-        """collect_for_agent includes trending in results."""
-        db_session = AsyncMock()
+        """collect_for_agent dispatches trending to _collect_trending."""
+        db = AsyncMock()
 
-        registry = SourceRegistryService(db_session)
-
-        # Mock the methods
-        registry.list_agent_bindings = AsyncMock(return_value=[])
-        registry._collect_rss = AsyncMock(return_value=[])
-        registry._collect_trending = AsyncMock(return_value=[1, 2, 3])
-        registry._collect_search = AsyncMock(return_value=[])
+        from agent_publisher.services.source_registry_service import SourceRegistryService
+        registry = SourceRegistryService(db)
 
         agent = MagicMock()
         agent.id = 1
         agent.name = "Test Agent"
 
-        # Create mock bindings
         binding = MagicMock()
         binding.is_enabled = True
         binding.source_config = MagicMock()
@@ -213,93 +249,10 @@ class TestSourceRegistryTrendRadarIntegration:
         binding.source_config.is_enabled = True
 
         registry.list_agent_bindings = AsyncMock(return_value=[binding])
+        registry._collect_trending = AsyncMock(return_value=[1, 2, 3])
 
         result = await registry.collect_for_agent(agent)
 
-        # Should have trending key
         assert "trending" in result
         assert result["trending"] == [1, 2, 3]
-
-
-class TestLoggingAndMonitoring:
-    """Tests for logging and monitoring during collection."""
-
-    @pytest.mark.asyncio
-    async def test_logs_collection_path_when_trendradar_enabled(self):
-        """Logs indicate which collection path is used."""
-        db_session = AsyncMock()
-
-        registry = SourceRegistryService(db_session)
-
-        agent = MagicMock()
-        agent.id = 1
-        agent.name = "Test Agent"
-
-        binding = MagicMock()
-        binding.source_config = MagicMock()
-        binding.source_config.config = {"platform_id": "weibo"}
-        binding.filter_keywords = None
-
-        bindings = [binding]
-
-        # Mock logger to capture calls
-        with patch('agent_publisher.services.source_registry_service.logger') as mock_logger:
-            with patch('agent_publisher.services.source_registry_service.get_trendradar_integration') as mock_get_integration:
-                mock_integration = AsyncMock()
-                mock_integration.collect_trending_with_fallback = AsyncMock(return_value=[1, 2])
-                mock_get_integration.return_value = mock_integration
-
-                with patch('agent_publisher.services.source_registry_service.settings') as mock_settings:
-                    mock_settings.trendradar_enabled = True
-
-                    await registry._collect_trending(agent, bindings)
-
-                    # Should log info messages
-                    assert mock_logger.info.called
-                    log_calls = [str(call) for call in mock_logger.info.call_args_list]
-                    # Check for TrendRadar-specific logging
-                    assert any("TrendRadar" in str(call) for call in log_calls)
-
-    @pytest.mark.asyncio
-    async def test_logs_warning_on_trendradar_failure(self):
-        """Logs warning when TrendRadar fails and falls back."""
-        db_session = AsyncMock()
-
-        registry = SourceRegistryService(db_session)
-
-        agent = MagicMock()
-        agent.id = 1
-        agent.name = "Test Agent"
-
-        binding = MagicMock()
-        binding.source_config = MagicMock()
-        binding.source_config.config = {"platform_id": "weibo"}
-        binding.filter_keywords = None
-
-        bindings = [binding]
-
-        with patch('agent_publisher.services.source_registry_service.logger') as mock_logger:
-            with patch('agent_publisher.services.source_registry_service.get_trendradar_integration') as mock_get_integration:
-                mock_integration = AsyncMock()
-                mock_integration.collect_trending_with_fallback = AsyncMock(
-                    side_effect=Exception("TrendRadar failed")
-                )
-                mock_get_integration.return_value = mock_integration
-
-                with patch('agent_publisher.services.source_registry_service.TrendingCollectorService') as mock_collector:
-                    mock_instance = AsyncMock()
-                    mock_instance.collect = AsyncMock(return_value=[1])
-                    mock_collector.return_value = mock_instance
-
-                    with patch('agent_publisher.services.source_registry_service.settings') as mock_settings:
-                        mock_settings.trendradar_enabled = True
-
-                        await registry._collect_trending(agent, bindings)
-
-                        # Should log warning about failure
-                        assert mock_logger.warning.called
-
-
-# Run all tests
-if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
+        registry._collect_trending.assert_called_once()

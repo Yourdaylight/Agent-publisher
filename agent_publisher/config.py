@@ -83,7 +83,7 @@ class Settings(BaseSettings):
     # Enable/disable TrendRadar backend for trending data collection
     # When enabled, Agent Publisher will use TrendRadar's 11-platform aggregation
     # instead of NewsNow API. Feature flag for gradual rollout.
-    trendradar_enabled: bool = False
+    trendradar_enabled: bool = True
 
     # Path to TrendRadar data storage (if not using live API)
     # Can be local SQLite path or S3 URL depending on deployment

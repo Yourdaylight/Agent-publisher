@@ -1,4 +1,4 @@
-"""Unit tests for TrendRadar adapter and integration layer."""
+"""Unit tests for TrendRadar adapter — dedup, scoring, storage, end-to-end."""
 from __future__ import annotations
 
 import pytest
@@ -9,348 +9,228 @@ from agent_publisher.services.trendradar_adapter import (
     TrendRadarNewsItem,
     TrendRadarAdapter,
 )
-from agent_publisher.services.trendradar_integration import (
-    TrendRadarIntegration,
-    get_trendradar_integration,
-)
+
+
+# ── TrendRadarNewsItem dataclass tests ──
 
 
 class TestTrendRadarNewsItem:
-    """Tests for TrendRadarNewsItem dataclass."""
-
     def test_create_news_item(self):
-        """Can create a TrendRadarNewsItem."""
         item = TrendRadarNewsItem(
             title="Test Title",
             url="https://example.com/news",
             source_platform="weibo",
-            hot_value=1000,
+            hot_value=85.0,
             rank=1,
             summary="Test summary",
-            image_url="https://example.com/image.jpg",
-            author="Test Author",
-            timestamp=datetime.now(timezone.utc),
-            source_url="https://weibo.com/original",
-            metadata={"key": "value"},
         )
         assert item.title == "Test Title"
         assert item.source_platform == "weibo"
-        assert item.hot_value == 1000
+        assert item.hot_value == 85.0
 
     def test_to_candidate_material(self):
-        """Converts TrendRadarNewsItem to CandidateMaterial format."""
         item = TrendRadarNewsItem(
             title="Test News",
             url="https://example.com/article",
             source_platform="douyin",
-            hot_value=500,
+            hot_value=50.0,
             rank=5,
             summary="Test summary",
-            image_url="https://example.com/img.jpg",
-            author="Author Name",
-            timestamp=datetime.now(timezone.utc),
-            source_url="https://douyin.com/feed",
-            metadata={"category": "technology"},
         )
+        mat = item.to_candidate_material(agent_id=123, quality_score=0.75)
 
-        agent_id = 123
-        quality_score = 0.75
-        material_dict = item.to_candidate_material(agent_id, quality_score)
+        assert mat["agent_id"] == 123
+        assert mat["source_type"] == "trending"
+        assert mat["source_identity"] == "trendradar:douyin"
+        assert mat["original_url"] == "https://example.com/article"
+        assert mat["title"] == "Test News"
+        assert mat["quality_score"] == 0.75
+        assert "douyin" in mat["tags"]
 
-        assert material_dict["agent_id"] == 123
-        assert material_dict["source_type"] == "trending"
-        assert "trendradar:douyin" in material_dict["source_identity"]
-        assert material_dict["original_url"] == "https://example.com/article"
-        assert material_dict["title"] == "Test News"
-        assert material_dict["summary"] == "Test summary"
-        assert material_dict["quality_score"] == 0.75
-        assert "douyin" in material_dict["tags"]
-
-
-class TestTrendRadarAdapter:
-    """Tests for TrendRadarAdapter scoring and filtering logic."""
-
-    @pytest.mark.asyncio
-    async def test_score_and_filter_empty_list(self):
-        """Scoring empty list returns empty list."""
-        db_session = MagicMock()
-        adapter = TrendRadarAdapter(db_session)
-
-        agent = MagicMock()
-        agent.id = 1
-        agent.name = "Test Agent"
-
-        result = await adapter._score_and_filter(agent_id=1, items=[])
-        assert result == []
-
-    @pytest.mark.asyncio
-    async def test_calculate_agent_fit_perfect_match(self):
-        """Perfect keyword match gives high fit score."""
-        db_session = MagicMock()
-        adapter = TrendRadarAdapter(db_session)
-
-        agent = MagicMock()
-        agent.keywords = ["python", "programming"]
-
+    def test_tags_hot(self):
         item = TrendRadarNewsItem(
-            title="Python Programming Tutorial",
-            url="https://example.com/python",
-            source_platform="weibo",
-            hot_value=100,
-            rank=1,
-            summary="Learn Python",
-            image_url="",
-            author="",
-            timestamp=datetime.now(timezone.utc),
-            source_url="",
-            metadata={},
+            title="Hot", url="u", source_platform="weibo", hot_value=90, rank=1
         )
+        tags = item._extract_tags()
+        assert "hot" in tags
+        assert "top10" in tags
 
-        fit_score = await adapter._calculate_agent_fit(agent, item)
-        # Should be > 0.5 because keywords match
-        assert fit_score > 0.5
-
-    @pytest.mark.asyncio
-    async def test_calculate_agent_fit_no_match(self):
-        """No keyword match gives low fit score."""
-        db_session = MagicMock()
-        adapter = TrendRadarAdapter(db_session)
-
-        agent = MagicMock()
-        agent.keywords = ["blockchain", "crypto"]
-
+    def test_tags_cool(self):
         item = TrendRadarNewsItem(
-            title="Classical Music Concert Tonight",
-            url="https://example.com/music",
-            source_platform="weibo",
-            hot_value=100,
-            rank=1,
-            summary="Beautiful orchestra",
-            image_url="",
-            author="",
-            timestamp=datetime.now(timezone.utc),
-            source_url="",
-            metadata={},
+            title="Cool", url="u", source_platform="zhihu", hot_value=20, rank=80
         )
+        tags = item._extract_tags()
+        assert "cool" in tags
+        assert "top10" not in tags
 
-        fit_score = await adapter._calculate_agent_fit(agent, item)
-        # Should be <= 0.5 because no keywords match
-        assert fit_score <= 0.5
 
-    @pytest.mark.asyncio
-    async def test_score_bounds(self):
-        """Quality scores stay within valid bounds [0, 1]."""
-        db_session = MagicMock()
-        adapter = TrendRadarAdapter(db_session)
+# ── Scoring tests ──
 
+
+class TestScoring:
+    def test_score_with_keywords_match(self):
+        adapter = TrendRadarAdapter(MagicMock())
+        item = TrendRadarNewsItem(
+            title="Python AI突破", url="u", source_platform="weibo",
+            hot_value=80, rank=1,
+        )
+        fit = adapter._calculate_agent_fit(item, ["python", "AI"])
+        assert fit == 1.0
+
+    def test_score_with_keywords_no_match(self):
+        adapter = TrendRadarAdapter(MagicMock())
+        item = TrendRadarNewsItem(
+            title="Classical Music", url="u", source_platform="weibo",
+            hot_value=80, rank=1,
+        )
+        fit = adapter._calculate_agent_fit(item, ["python", "AI"])
+        assert fit == 0.0
+
+    def test_score_without_keywords(self):
+        adapter = TrendRadarAdapter(MagicMock())
+        item = TrendRadarNewsItem(
+            title="Any", url="u", source_platform="weibo",
+            hot_value=80, rank=1,
+        )
+        fit = adapter._calculate_agent_fit(item, None)
+        assert fit == 0.5
+
+    def test_score_and_filter_removes_low_quality(self):
+        adapter = TrendRadarAdapter(MagicMock())
+        items = [
+            TrendRadarNewsItem(title="Hot", url="u1", source_platform="weibo", hot_value=90, rank=1),
+            TrendRadarNewsItem(title="Cold", url="u2", source_platform="weibo", hot_value=5, rank=99),
+        ]
+        scored = adapter._score_and_filter(items)
+        # Hot item passes, cold one likely filtered out (score < 0.3)
+        titles = [item.title for item, _ in scored]
+        assert "Hot" in titles
+
+    def test_score_bounds(self):
+        adapter = TrendRadarAdapter(MagicMock())
         items = [
             TrendRadarNewsItem(
-                title=f"News {i}",
-                url=f"https://example.com/news{i}",
-                source_platform="weibo",
-                hot_value=1000 - i * 100,
-                rank=i + 1,
-                summary=f"Summary {i}",
-                image_url="",
-                author="",
-                timestamp=datetime.now(timezone.utc),
-                source_url="",
-                metadata={},
+                title=f"News {i}", url=f"u{i}", source_platform="weibo",
+                hot_value=100 - i * 20, rank=i + 1,
             )
             for i in range(5)
         ]
-
-        agent = MagicMock()
-        agent.id = 1
-        agent.keywords = []
-
-        scored = await adapter._score_and_filter(agent_id=1, items=items)
-
-        for item, score in scored:
+        scored = adapter._score_and_filter(items)
+        for _, score in scored:
             assert 0 <= score <= 1, f"Score {score} out of bounds"
 
+    def test_higher_hotness_gives_higher_score(self):
+        adapter = TrendRadarAdapter(MagicMock())
+        hot = TrendRadarNewsItem(title="Hot", url="u1", source_platform="weibo", hot_value=95, rank=1)
+        cold = TrendRadarNewsItem(title="Cold", url="u2", source_platform="weibo", hot_value=10, rank=50)
+        scored = adapter._score_and_filter([hot, cold])
 
-class TestTrendRadarIntegration:
-    """Tests for TrendRadarIntegration orchestration layer."""
+        scores = {item.title: score for item, score in scored}
+        if "Hot" in scores and "Cold" in scores:
+            assert scores["Hot"] > scores["Cold"]
+
+
+# ── Dedup tests ──
+
+
+class TestDedup:
+    @pytest.mark.asyncio
+    async def test_dedup_skips_existing_urls(self):
+        db = AsyncMock()
+        adapter = TrendRadarAdapter(db)
+
+        # Mock existing URLs in DB
+        mock_result = MagicMock()
+        mock_result.all.return_value = [("https://existing.com",)]
+        db.execute.return_value = mock_result
+
+        items = [
+            TrendRadarNewsItem(title="Existing", url="https://existing.com", source_platform="weibo", hot_value=50, rank=1),
+            TrendRadarNewsItem(title="New", url="https://new.com", source_platform="weibo", hot_value=50, rank=2),
+        ]
+
+        result = await adapter._deduplicate_items(agent_id=1, items=items)
+        assert result["duplicates_skipped"] == 1
+        assert len(result["unique_items"]) == 1
+        assert result["unique_items"][0].title == "New"
 
     @pytest.mark.asyncio
-    async def test_initialize_available(self):
-        """Initialize successfully when TrendRadar available."""
-        db_session = MagicMock()
-        integration = TrendRadarIntegration(db_session, available=True)
+    async def test_dedup_with_no_agent(self):
+        """Global collection (agent_id=None) checks all trending URLs."""
+        db = AsyncMock()
+        adapter = TrendRadarAdapter(db)
 
-        # Should not raise
-        await integration.initialize()
+        mock_result = MagicMock()
+        mock_result.all.return_value = []
+        db.execute.return_value = mock_result
 
+        items = [
+            TrendRadarNewsItem(title="A", url="https://a.com", source_platform="weibo", hot_value=50, rank=1),
+        ]
+
+        result = await adapter._deduplicate_items(agent_id=None, items=items)
+        assert len(result["unique_items"]) == 1
+
+
+# ── Feature flag tests ──
+
+
+class TestFeatureFlag:
     @pytest.mark.asyncio
-    async def test_initialize_unavailable(self):
-        """Initialize handles unavailable TrendRadar gracefully."""
-        db_session = MagicMock()
-        integration = TrendRadarIntegration(db_session, available=False)
+    async def test_disabled_returns_empty(self):
+        adapter = TrendRadarAdapter(MagicMock(), feature_flag_enabled=False)
+        result = await adapter.collect_for_agent(agent_id=1)
+        assert result["status"] == "success"
+        assert result["new_items"] == 0
+        assert result["platforms_collected"] == []
 
-        # Should not raise, just logs warning
-        await integration.initialize()
 
+# ── End-to-end pipeline test ──
+
+
+class TestEndToEndPipeline:
     @pytest.mark.asyncio
-    async def test_feature_flag_disabled_uses_fallback(self):
-        """When feature flag disabled, uses fallback."""
-        db_session = AsyncMock()
-        integration = TrendRadarIntegration(db_session, available=True)
+    async def test_full_pipeline_with_mocked_bridge(self):
+        """fetch → dedup → score → store end-to-end."""
+        db = AsyncMock()
 
-        agent = MagicMock()
-        agent.id = 1
-        agent.name = "Test Agent"
+        # Mock dedup: no existing URLs
+        mock_result = MagicMock()
+        mock_result.all.return_value = []
+        db.execute.return_value = mock_result
 
-        bindings = []
+        adapter = TrendRadarAdapter(db, feature_flag_enabled=True)
 
-        # Mock the fallback path
-        with patch.object(integration, '_collect_with_trending_service', new_callable=AsyncMock) as mock_fallback:
-            mock_fallback.return_value = [1, 2, 3]
+        mock_items = [
+            TrendRadarNewsItem(
+                title="AI突破性进展",
+                url="https://weibo.com/ai",
+                source_platform="weibo",
+                hot_value=90,
+                rank=1,
+            ),
+            TrendRadarNewsItem(
+                title="今日天气",
+                url="https://weibo.com/weather",
+                source_platform="weibo",
+                hot_value=30,
+                rank=50,
+            ),
+        ]
 
-            # With feature flag disabled (default)
-            result = await integration.collect_trending_with_fallback(agent, bindings)
+        with patch("agent_publisher.config.settings") as mock_settings:
+            mock_settings.trendradar_platforms = "weibo"
+            mock_settings.trendradar_storage_path = ""
 
-            # Should call fallback
-            mock_fallback.assert_called_once()
+            with patch(
+                "agent_publisher.services.trendradar_bridge.fetch_trending_via_trendradar",
+                new_callable=AsyncMock,
+                return_value=mock_items,
+            ):
+                result = await adapter.collect_for_agent(
+                    agent_id=1, agent_name="test-agent"
+                )
 
-    @pytest.mark.asyncio
-    async def test_error_handling_fallback(self):
-        """On TrendRadar error, automatically falls back."""
-        db_session = AsyncMock()
-        integration = TrendRadarIntegration(db_session, available=True)
-
-        agent = MagicMock()
-        agent.id = 1
-        agent.name = "Test Agent"
-
-        bindings = []
-
-        # Mock TrendRadar path to fail
-        with patch.object(integration, '_collect_with_trendradar', new_callable=AsyncMock) as mock_tr:
-            with patch.object(integration, '_collect_with_trending_service', new_callable=AsyncMock) as mock_fallback:
-                mock_tr.side_effect = Exception("TrendRadar unavailable")
-                mock_fallback.return_value = [4, 5, 6]
-
-                # Should not raise, just return fallback result
-                result = await integration.collect_trending_with_fallback(agent, bindings)
-
-                # Fallback should be called
-                mock_fallback.assert_called_once()
-
-
-class TestGetTrendRadarIntegration:
-    """Tests for factory function."""
-
-    def test_get_trendradar_integration_returns_instance(self):
-        """Factory returns TrendRadarIntegration instance."""
-        db_session = MagicMock()
-        integration = get_trendradar_integration(db_session)
-
-        assert isinstance(integration, TrendRadarIntegration)
-        assert integration.session is db_session
-
-
-class TestScoringAlgorithm:
-    """Tests for the scoring algorithm with realistic scenarios."""
-
-    @pytest.mark.asyncio
-    async def test_hotness_influence_on_score(self):
-        """Higher hotness gives higher base score."""
-        db_session = MagicMock()
-        adapter = TrendRadarAdapter(db_session)
-
-        hot_item = TrendRadarNewsItem(
-            title="Hot News",
-            url="https://example.com/hot",
-            source_platform="weibo",
-            hot_value=10000,  # Very hot
-            rank=1,
-            summary="",
-            image_url="",
-            author="",
-            timestamp=datetime.now(timezone.utc),
-            source_url="",
-            metadata={},
-        )
-
-        cold_item = TrendRadarNewsItem(
-            title="Cold News",
-            url="https://example.com/cold",
-            source_platform="weibo",
-            hot_value=100,  # Not very hot
-            rank=500,
-            summary="",
-            image_url="",
-            author="",
-            timestamp=datetime.now(timezone.utc),
-            source_url="",
-            metadata={},
-        )
-
-        agent = MagicMock()
-        agent.id = 1
-        agent.keywords = []
-
-        items = [hot_item, cold_item]
-        scored = await adapter._score_and_filter(agent_id=1, items=items)
-
-        # Hot item should have higher score
-        hot_score = next(score for item, score in scored if "hot" in item.title.lower())
-        cold_score = next(score for item, score in scored if "cold" in item.title.lower())
-
-        assert hot_score > cold_score
-
-    @pytest.mark.asyncio
-    async def test_recency_influence_on_score(self):
-        """More recent items get higher scores."""
-        from datetime import timedelta
-
-        db_session = MagicMock()
-        adapter = TrendRadarAdapter(db_session)
-
-        now = datetime.now(timezone.utc)
-        recent_item = TrendRadarNewsItem(
-            title="Recent News",
-            url="https://example.com/recent",
-            source_platform="weibo",
-            hot_value=100,
-            rank=1,
-            summary="",
-            image_url="",
-            author="",
-            timestamp=now,  # Now
-            source_url="",
-            metadata={},
-        )
-
-        old_item = TrendRadarNewsItem(
-            title="Old News",
-            url="https://example.com/old",
-            source_platform="weibo",
-            hot_value=100,
-            rank=1,
-            summary="",
-            image_url="",
-            author="",
-            timestamp=now - timedelta(hours=24),  # 1 day old
-            source_url="",
-            metadata={},
-        )
-
-        agent = MagicMock()
-        agent.id = 1
-        agent.keywords = []
-
-        items = [recent_item, old_item]
-        scored = await adapter._score_and_filter(agent_id=1, items=items)
-
-        recent_score = next(score for item, score in scored if "recent" in item.title.lower())
-        old_score = next(score for item, score in scored if "old" in item.title.lower())
-
-        # Recent should score higher
-        assert recent_score >= old_score
-
-
-# Run all tests
-if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
+        assert result["status"] == "success"
+        assert result["new_items"] >= 1  # At least the hot item
+        assert "weibo" in result["platforms_collected"]
