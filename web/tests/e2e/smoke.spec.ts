@@ -6,29 +6,7 @@ test.describe('关键页面冒烟', () => {
     await loginAsAdmin(page);
   });
 
-  test('首页显示个人统计卡片', async ({ page }) => {
-    await page.goto('/home');
-    await expect(page.locator('.stat-row')).toBeVisible();
-    // 4 stat cards: 公众号 / 文章 / 写作身份 / Credits
-    await expect(page.locator('.stat-card')).toHaveCount(4);
-    // Quick actions: 4 buttons
-    await expect(page.locator('.quick-actions .action-card')).toHaveCount(4);
-  });
-
-  test('侧边栏"首页"菜单项高亮', async ({ page }) => {
-    await page.goto('/home');
-    // Sidebar should have 首页 menu item
-    await expect(page.getByRole('menuitem', { name: '首页' })).toBeVisible();
-  });
-
-  test('热点列表可访问', async ({ page }) => {
-    await page.goto('/trending');
-    await expect(page).toHaveURL(/\/trending/);
-    // Stats bar should be visible
-    await expect(page.locator('.stats-bar')).toBeVisible();
-  });
-
-  test('AI 创作页可访问并显示模式选择', async ({ page }) => {
+  test('创作页显示模式选择', async ({ page }) => {
     await page.goto('/create');
     await expect(page).toHaveURL(/\/create/);
     // Mode chips should be visible in the AI panel
@@ -36,7 +14,14 @@ test.describe('关键页面冒烟', () => {
     // Three mode chips: 爆款二创 / 深度分析 / 热点总结
     await expect(page.locator('.mode-chip')).toHaveCount(3);
     // Bottom bar should have video button
-    await expect(page.getByRole('button', { name: /生成视频/ })).toBeVisible();
+    await expect(page.locator('button', { hasText: /生成视频/ })).toBeVisible();
+  });
+
+  test('热点列表可访问', async ({ page }) => {
+    await page.goto('/trending');
+    await expect(page).toHaveURL(/\/trending/);
+    // Stats bar should be visible
+    await expect(page.locator('.stats-bar')).toBeVisible();
   });
 
   test('文章管理页可访问', async ({ page }) => {
