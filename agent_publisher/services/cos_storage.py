@@ -14,6 +14,7 @@ Usage:
         url = await storage.upload(content, filename, content_type)
         await storage.delete(key)
 """
+
 from __future__ import annotations
 
 import logging
@@ -43,6 +44,7 @@ class CosStorage:
 
         try:
             from qcloud_cos import CosConfig, CosS3Client  # type: ignore
+
             config = CosConfig(
                 Region=self.region,
                 SecretId=secret_id,
@@ -52,7 +54,8 @@ class CosStorage:
             self._client = CosS3Client(config)
             logger.info(
                 "CosStorage enabled: bucket=%s region=%s",
-                self.bucket, self.region,
+                self.bucket,
+                self.region,
             )
         except ImportError:
             logger.warning(
@@ -82,13 +85,14 @@ class CosStorage:
         if not self.enabled or not self._client:
             raise RuntimeError("CosStorage is not enabled")
 
-        ext = Path(filename).suffix or (
-            mimetypes.guess_extension(content_type or "") or ".bin"
-        )
+        ext = Path(filename).suffix or (mimetypes.guess_extension(content_type or "") or ".bin")
         key = f"{prefix}/{uuid.uuid4().hex}{ext}"
-        resolved_ct = content_type or mimetypes.guess_type(filename)[0] or "application/octet-stream"
+        resolved_ct = (
+            content_type or mimetypes.guess_type(filename)[0] or "application/octet-stream"
+        )
 
         import asyncio
+
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(
             None,
@@ -111,6 +115,7 @@ class CosStorage:
             return
 
         import asyncio
+
         loop = asyncio.get_event_loop()
         try:
             await loop.run_in_executor(
@@ -130,6 +135,7 @@ class CosStorage:
             return self._build_url(key)
 
         import asyncio
+
         loop = asyncio.get_event_loop()
         url = await loop.run_in_executor(
             None,

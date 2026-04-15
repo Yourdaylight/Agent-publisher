@@ -1,8 +1,8 @@
 """Unit tests for TrendRadar adapter — dedup, scoring, storage, end-to-end."""
+
 from __future__ import annotations
 
 import pytest
-from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from agent_publisher.services.trendradar_adapter import (
@@ -71,8 +71,11 @@ class TestScoring:
     def test_score_with_keywords_match(self):
         adapter = TrendRadarAdapter(MagicMock())
         item = TrendRadarNewsItem(
-            title="Python AI突破", url="u", source_platform="weibo",
-            hot_value=80, rank=1,
+            title="Python AI突破",
+            url="u",
+            source_platform="weibo",
+            hot_value=80,
+            rank=1,
         )
         fit = adapter._calculate_agent_fit(item, ["python", "AI"])
         assert fit == 1.0
@@ -80,8 +83,11 @@ class TestScoring:
     def test_score_with_keywords_no_match(self):
         adapter = TrendRadarAdapter(MagicMock())
         item = TrendRadarNewsItem(
-            title="Classical Music", url="u", source_platform="weibo",
-            hot_value=80, rank=1,
+            title="Classical Music",
+            url="u",
+            source_platform="weibo",
+            hot_value=80,
+            rank=1,
         )
         fit = adapter._calculate_agent_fit(item, ["python", "AI"])
         assert fit == 0.0
@@ -89,8 +95,11 @@ class TestScoring:
     def test_score_without_keywords(self):
         adapter = TrendRadarAdapter(MagicMock())
         item = TrendRadarNewsItem(
-            title="Any", url="u", source_platform="weibo",
-            hot_value=80, rank=1,
+            title="Any",
+            url="u",
+            source_platform="weibo",
+            hot_value=80,
+            rank=1,
         )
         fit = adapter._calculate_agent_fit(item, None)
         assert fit == 0.5
@@ -98,8 +107,12 @@ class TestScoring:
     def test_score_and_filter_removes_low_quality(self):
         adapter = TrendRadarAdapter(MagicMock())
         items = [
-            TrendRadarNewsItem(title="Hot", url="u1", source_platform="weibo", hot_value=90, rank=1),
-            TrendRadarNewsItem(title="Cold", url="u2", source_platform="weibo", hot_value=5, rank=99),
+            TrendRadarNewsItem(
+                title="Hot", url="u1", source_platform="weibo", hot_value=90, rank=1
+            ),
+            TrendRadarNewsItem(
+                title="Cold", url="u2", source_platform="weibo", hot_value=5, rank=99
+            ),
         ]
         scored = adapter._score_and_filter(items)
         # Hot item passes, cold one likely filtered out (score < 0.3)
@@ -110,8 +123,11 @@ class TestScoring:
         adapter = TrendRadarAdapter(MagicMock())
         items = [
             TrendRadarNewsItem(
-                title=f"News {i}", url=f"u{i}", source_platform="weibo",
-                hot_value=100 - i * 20, rank=i + 1,
+                title=f"News {i}",
+                url=f"u{i}",
+                source_platform="weibo",
+                hot_value=100 - i * 20,
+                rank=i + 1,
             )
             for i in range(5)
         ]
@@ -121,8 +137,12 @@ class TestScoring:
 
     def test_higher_hotness_gives_higher_score(self):
         adapter = TrendRadarAdapter(MagicMock())
-        hot = TrendRadarNewsItem(title="Hot", url="u1", source_platform="weibo", hot_value=95, rank=1)
-        cold = TrendRadarNewsItem(title="Cold", url="u2", source_platform="weibo", hot_value=10, rank=50)
+        hot = TrendRadarNewsItem(
+            title="Hot", url="u1", source_platform="weibo", hot_value=95, rank=1
+        )
+        cold = TrendRadarNewsItem(
+            title="Cold", url="u2", source_platform="weibo", hot_value=10, rank=50
+        )
         scored = adapter._score_and_filter([hot, cold])
 
         scores = {item.title: score for item, score in scored}
@@ -145,8 +165,16 @@ class TestDedup:
         db.execute.return_value = mock_result
 
         items = [
-            TrendRadarNewsItem(title="Existing", url="https://existing.com", source_platform="weibo", hot_value=50, rank=1),
-            TrendRadarNewsItem(title="New", url="https://new.com", source_platform="weibo", hot_value=50, rank=2),
+            TrendRadarNewsItem(
+                title="Existing",
+                url="https://existing.com",
+                source_platform="weibo",
+                hot_value=50,
+                rank=1,
+            ),
+            TrendRadarNewsItem(
+                title="New", url="https://new.com", source_platform="weibo", hot_value=50, rank=2
+            ),
         ]
 
         result = await adapter._deduplicate_items(agent_id=1, items=items)
@@ -165,7 +193,9 @@ class TestDedup:
         db.execute.return_value = mock_result
 
         items = [
-            TrendRadarNewsItem(title="A", url="https://a.com", source_platform="weibo", hot_value=50, rank=1),
+            TrendRadarNewsItem(
+                title="A", url="https://a.com", source_platform="weibo", hot_value=50, rank=1
+            ),
         ]
 
         result = await adapter._deduplicate_items(agent_id=None, items=items)
@@ -227,9 +257,7 @@ class TestEndToEndPipeline:
                 new_callable=AsyncMock,
                 return_value=mock_items,
             ):
-                result = await adapter.collect_for_agent(
-                    agent_id=1, agent_name="test-agent"
-                )
+                result = await adapter.collect_for_agent(agent_id=1, agent_name="test-agent")
 
         assert result["status"] == "success"
         assert result["new_items"] >= 1  # At least the hot item

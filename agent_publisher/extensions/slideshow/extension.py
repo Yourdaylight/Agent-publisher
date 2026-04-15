@@ -3,6 +3,7 @@
 v3: No Playwright, no ffmpeg, no TTS dependencies.
 Outputs independent chapter HTML files + browser player.
 """
+
 from __future__ import annotations
 
 from agent_publisher.extensions._base import Extension

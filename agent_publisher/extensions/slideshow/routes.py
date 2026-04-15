@@ -12,6 +12,7 @@ Endpoints:
 
 Note: Video generation is handled by the video extension (Remotion-based).
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -49,7 +50,9 @@ def _validate_file_path(file_path: str | None, must_exist: bool = True) -> Path 
         return None
     resolved = Path(file_path).resolve()
     if not resolved.is_relative_to(_SLIDESHOW_STORAGE_ROOT):
-        logger.warning("Path traversal blocked: %s is outside %s", file_path, _SLIDESHOW_STORAGE_ROOT)
+        logger.warning(
+            "Path traversal blocked: %s is outside %s", file_path, _SLIDESHOW_STORAGE_ROOT
+        )
         return None
     if must_exist and not resolved.exists():
         return None
@@ -59,6 +62,7 @@ def _validate_file_path(file_path: str | None, must_exist: bool = True) -> Path 
 # ---------------------------------------------------------------------------
 # Auth helpers (unchanged from v2)
 # ---------------------------------------------------------------------------
+
 
 async def _resolve_user(
     request: Request,
@@ -118,6 +122,7 @@ async def _verify_task_ownership(
 # Request schemas
 # ---------------------------------------------------------------------------
 
+
 class SlideshowRequest(BaseModel):
     article_id: int
     skip_review: bool = False
@@ -131,6 +136,7 @@ class DraftConfirmRequest(BaseModel):
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
+
 
 @router.post("/generate")
 async def generate_slideshow(
@@ -295,6 +301,7 @@ async def get_timeline(
 # Draft review endpoints
 # ---------------------------------------------------------------------------
 
+
 @router.get("/draft/{task_id}")
 async def get_draft(
     task_id: int,
@@ -358,6 +365,7 @@ async def confirm_draft(
     elif body.slides:
         # Legacy: convert slides to orchestrator format
         from agent_publisher.extensions.slideshow.service import _slides_to_orchestrator
+
         orchestrator_output = _slides_to_orchestrator(body.slides)
     else:
         # Use the original orchestrator output
@@ -365,9 +373,7 @@ async def confirm_draft(
         if not orchestrator_output:
             raise HTTPException(400, "No orchestrator_output or slides provided")
 
-    asyncio.create_task(
-        _execute_from_draft(task_id, article_id, orchestrator_output)
-    )
+    asyncio.create_task(_execute_from_draft(task_id, article_id, orchestrator_output))
 
     chapter_count = len(orchestrator_output.get("chapters", []))
     return {"task_id": task_id, "status": "running", "chapter_count": chapter_count}
@@ -396,9 +402,7 @@ async def skip_draft(
     if not article_id or not orchestrator_output:
         raise HTTPException(400, "Missing article_id or orchestrator_output in task")
 
-    asyncio.create_task(
-        _execute_from_draft(task_id, article_id, orchestrator_output)
-    )
+    asyncio.create_task(_execute_from_draft(task_id, article_id, orchestrator_output))
 
     chapter_count = len(orchestrator_output.get("chapters", []))
     return {"task_id": task_id, "status": "running", "chapter_count": chapter_count}
@@ -408,10 +412,12 @@ async def skip_draft(
 # Background task executors
 # ---------------------------------------------------------------------------
 
+
 async def _execute_full_pipeline(task_id: int, article_id: int) -> None:
     """Full pipeline: orchestrator + parallel chapters + assembly."""
     async with async_session_factory() as session:
         from agent_publisher.extensions.slideshow.service import run_chapter_pipeline
+
         await run_chapter_pipeline(task_id, article_id, session)
 
 
@@ -419,13 +425,13 @@ async def _execute_outline_only(task_id: int, article_id: int) -> None:
     """Phase 0 only: generate orchestrator output, stop at draft_ready."""
     async with async_session_factory() as session:
         from agent_publisher.extensions.slideshow.service import run_generate_outline
+
         await run_generate_outline(task_id, article_id, session)
 
 
-async def _execute_from_draft(
-    task_id: int, article_id: int, orchestrator_output: dict
-) -> None:
+async def _execute_from_draft(task_id: int, article_id: int, orchestrator_output: dict) -> None:
     """Phase 1+2: from confirmed orchestrator output."""
     async with async_session_factory() as session:
         from agent_publisher.extensions.slideshow.service import run_pipeline_from_draft
+
         await run_pipeline_from_draft(task_id, article_id, orchestrator_output, session)

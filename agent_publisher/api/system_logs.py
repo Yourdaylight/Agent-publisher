@@ -1,14 +1,13 @@
 """System logs API — query and manage structured operation logs."""
+
 from __future__ import annotations
 
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agent_publisher.api.deps import get_db, get_current_user, require_admin, UserContext
-from agent_publisher.models.system_log import SystemLog
 from agent_publisher.schemas.system_log import SystemLogOut, SystemLogStats
 from agent_publisher.services.system_log_service import SystemLogService
 

@@ -11,7 +11,9 @@ logger = logging.getLogger(__name__)
 
 class LLMAdapter(ABC):
     @abstractmethod
-    async def generate(self, model: str, api_key: str, messages: list[dict], base_url: str = "") -> str: ...
+    async def generate(
+        self, model: str, api_key: str, messages: list[dict], base_url: str = ""
+    ) -> str: ...
 
     async def generate_stream(
         self, model: str, api_key: str, messages: list[dict], base_url: str = ""
@@ -22,7 +24,9 @@ class LLMAdapter(ABC):
 
 
 class ClaudeAdapter(LLMAdapter):
-    async def generate(self, model: str, api_key: str, messages: list[dict], base_url: str = "") -> str:
+    async def generate(
+        self, model: str, api_key: str, messages: list[dict], base_url: str = ""
+    ) -> str:
         import anthropic
 
         client = anthropic.AsyncAnthropic(api_key=api_key)
@@ -44,7 +48,9 @@ class ClaudeAdapter(LLMAdapter):
 
 
 class OpenAIAdapter(LLMAdapter):
-    async def generate(self, model: str, api_key: str, messages: list[dict], base_url: str = "") -> str:
+    async def generate(
+        self, model: str, api_key: str, messages: list[dict], base_url: str = ""
+    ) -> str:
         from openai import AsyncOpenAI
 
         client = AsyncOpenAI(api_key=api_key, base_url=base_url or None)
@@ -57,9 +63,7 @@ class OpenAIAdapter(LLMAdapter):
         from openai import AsyncOpenAI
 
         client = AsyncOpenAI(api_key=api_key, base_url=base_url or None)
-        stream = await client.chat.completions.create(
-            model=model, messages=messages, stream=True
-        )
+        stream = await client.chat.completions.create(model=model, messages=messages, stream=True)
         async for chunk in stream:
             delta = chunk.choices[0].delta if chunk.choices else None
             if delta and delta.content:
@@ -71,7 +75,9 @@ class MiniMaxAdapter(LLMAdapter):
 
     BASE_URL = "https://api.minimax.chat/v1"
 
-    async def generate(self, model: str, api_key: str, messages: list[dict], base_url: str = "") -> str:
+    async def generate(
+        self, model: str, api_key: str, messages: list[dict], base_url: str = ""
+    ) -> str:
         headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
@@ -95,7 +101,9 @@ _ADAPTERS: dict[str, LLMAdapter] = {
 
 class LLMService:
     @staticmethod
-    async def generate(provider: str, model: str, api_key: str, messages: list[dict], base_url: str = "") -> str:
+    async def generate(
+        provider: str, model: str, api_key: str, messages: list[dict], base_url: str = ""
+    ) -> str:
         """Unified LLM call entry point. Routes to the appropriate provider adapter."""
         adapter = _ADAPTERS.get(provider)
         if not adapter:
@@ -116,8 +124,7 @@ class LLMService:
 
     # Output format instruction appended when not present in the prompt
     OUTPUT_FORMAT = (
-        "请按以下格式输出：\n"
-        "---TITLE---\n文章标题\n---DIGEST---\n摘要\n---CONTENT---\nMarkdown正文"
+        "请按以下格式输出：\n---TITLE---\n文章标题\n---DIGEST---\n摘要\n---CONTENT---\nMarkdown正文"
     )
 
     @staticmethod

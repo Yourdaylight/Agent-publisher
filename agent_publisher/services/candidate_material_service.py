@@ -2,13 +2,11 @@ from __future__ import annotations
 
 import hashlib
 import logging
-from datetime import datetime
 
 from sqlalchemy import and_, select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agent_publisher.models.candidate_material import CandidateMaterial
-from agent_publisher.models.agent import Agent
 from agent_publisher.schemas.candidate_material import (
     CandidateMaterialCreate,
     CandidateMaterialListParams,
@@ -92,19 +90,15 @@ class CandidateMaterialService:
     async def _check_duplicate(self, url: str, title: str) -> bool:
         """Check if a material with the same URL or very similar title already exists."""
         if url:
-            url_hash = hashlib.md5(url.encode()).hexdigest()
-            stmt = select(CandidateMaterial).where(
-                CandidateMaterial.original_url == url
-            ).limit(1)
+            hashlib.md5(url.encode()).hexdigest()
+            stmt = select(CandidateMaterial).where(CandidateMaterial.original_url == url).limit(1)
             result = await self.session.execute(stmt)
             if result.scalars().first():
                 return True
 
         # Simple title-based duplicate check (exact match)
         if title:
-            stmt = select(CandidateMaterial).where(
-                CandidateMaterial.title == title
-            ).limit(1)
+            stmt = select(CandidateMaterial).where(CandidateMaterial.title == title).limit(1)
             result = await self.session.execute(stmt)
             if result.scalars().first():
                 return True
@@ -197,10 +191,7 @@ class CandidateMaterialService:
 
         # Post-filter by tags (JSON contains) – done in Python for SQLite compat
         if params.tags:
-            items = [
-                m for m in items
-                if m.tags and all(t in m.tags for t in params.tags)
-            ]
+            items = [m for m in items if m.tags and all(t in m.tags for t in params.tags)]
 
         return items, total
 

@@ -9,6 +9,7 @@ No Playwright, no ffmpeg, no TTS dependencies.
 Note: Video generation has been migrated to agent_publisher/extensions/video/
       which uses Remotion for proper video rendering.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -46,6 +47,7 @@ STORAGE_ROOT = Path("storage/slideshow")
 # Main entry: full chapter pipeline
 # ---------------------------------------------------------------------------
 
+
 async def run_chapter_pipeline(
     task_id: int,
     article_id: int,
@@ -77,12 +79,8 @@ async def run_chapter_pipeline(
 
         # Slideshow mode: horizontal 1920×1080
         orchestrator_output = await _run_orchestrator(article, task, session)
-        chapter_results = await _run_chapters_parallel(
-            orchestrator_output, article, task, session
-        )
-        result = await _assemble(
-            orchestrator_output, chapter_results, out_dir, task, session
-        )
+        chapter_results = await _run_chapters_parallel(orchestrator_output, article, task, session)
+        result = await _assemble(orchestrator_output, chapter_results, out_dir, task, session)
         task.status = "success"
         task.result = {
             "article_id": article_id,
@@ -104,6 +102,7 @@ async def run_chapter_pipeline(
 # ---------------------------------------------------------------------------
 # Draft review flow (Phase 0 only → pause → Phase 1+2)
 # ---------------------------------------------------------------------------
+
 
 async def run_generate_outline(
     task_id: int,
@@ -139,7 +138,8 @@ async def run_generate_outline(
         await session.commit()
         logger.info(
             "Slideshow orchestrator ready: task=%d chapters=%d",
-            task_id, len(orchestrator_output.get("chapters", [])),
+            task_id,
+            len(orchestrator_output.get("chapters", [])),
         )
 
     except Exception as exc:
@@ -168,16 +168,12 @@ async def run_pipeline_from_draft(
 
     try:
         # Phase 1: Parallel chapters
-        chapter_results = await _run_chapters_parallel(
-            orchestrator_output, article, task, session
-        )
+        chapter_results = await _run_chapters_parallel(orchestrator_output, article, task, session)
 
         # Phase 2: Assembly
         timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
         out_dir = STORAGE_ROOT / f"article_{article_id}_{timestamp}"
-        result = await _assemble(
-            orchestrator_output, chapter_results, out_dir, task, session
-        )
+        result = await _assemble(orchestrator_output, chapter_results, out_dir, task, session)
 
         # Done
         task.status = "success"
@@ -189,7 +185,8 @@ async def run_pipeline_from_draft(
         await session.commit()
         logger.info(
             "Slideshow pipeline from draft complete: task=%d chapters=%d",
-            task_id, result["chapter_count"],
+            task_id,
+            result["chapter_count"],
         )
 
     except Exception as exc:
@@ -225,6 +222,7 @@ async def run_pipeline_from_slides(
 # Phase 0: Orchestrator
 # ---------------------------------------------------------------------------
 
+
 async def _run_orchestrator(
     article: Article,
     task: Task,
@@ -256,10 +254,16 @@ async def _run_orchestrator(
     for i, ch in enumerate(chapters):
         if "chapter_id" not in ch:
             ch["chapter_id"] = f"ch_{i + 1:02d}"
-    await _record_step(task, session, "orchestrator", "success", {
-        "chapter_count": len(chapters),
-        "total_slides": sum(ch.get("slide_count", 2) for ch in chapters),
-    })
+    await _record_step(
+        task,
+        session,
+        "orchestrator",
+        "success",
+        {
+            "chapter_count": len(chapters),
+            "total_slides": sum(ch.get("slide_count", 2) for ch in chapters),
+        },
+    )
 
     return result
 
@@ -267,6 +271,7 @@ async def _run_orchestrator(
 # ---------------------------------------------------------------------------
 # Phase 1: Parallel chapter generation
 # ---------------------------------------------------------------------------
+
 
 async def _run_chapters_parallel(
     orchestrator_output: dict,
@@ -331,37 +336,46 @@ async def _run_chapters_parallel(
                     "slides": slides,
                 }
                 async with step_lock:
-                    await _record_step(task, session, step_name, "success", {
-                        "slide_count": len(slides),
-                    })
+                    await _record_step(
+                        task,
+                        session,
+                        step_name,
+                        "success",
+                        {
+                            "slide_count": len(slides),
+                        },
+                    )
 
             except Exception as exc:
                 logger.error("Chapter %s generation failed: %s", chapter_id, exc)
                 errors.append(f"{chapter_id}: {exc}")
                 async with step_lock:
-                    await _record_step(task, session, step_name, "failed", {
-                        "error": str(exc),
-                    })
+                    await _record_step(
+                        task,
+                        session,
+                        step_name,
+                        "failed",
+                        {
+                            "error": str(exc),
+                        },
+                    )
 
     # Run all chapters concurrently
-    tasks = [
-        _generate_one(i, ch)
-        for i, ch in enumerate(chapters)
-    ]
+    tasks = [_generate_one(i, ch) for i, ch in enumerate(chapters)]
     await asyncio.gather(*tasks, return_exceptions=True)
 
     # Filter out failed chapters
     successful = [r for r in results if r is not None]
 
     if not successful:
-        raise ValueError(
-            f"所有章节生成均失败: {'; '.join(errors)}"
-        )
+        raise ValueError(f"所有章节生成均失败: {'; '.join(errors)}")
 
     if errors:
         logger.warning(
             "Some chapters failed (%d/%d): %s",
-            len(errors), total, "; ".join(errors),
+            len(errors),
+            total,
+            "; ".join(errors),
         )
 
     return successful
@@ -370,6 +384,7 @@ async def _run_chapters_parallel(
 # ---------------------------------------------------------------------------
 # Phase 2: Assembly
 # ---------------------------------------------------------------------------
+
 
 async def _assemble(
     orchestrator_output: dict,
@@ -404,14 +419,16 @@ async def _assemble(
         )
         html_path.write_text(html, encoding="utf-8")
 
-        chapter_entries.append({
-            "chapter_id": chapter_id,
-            "title": ch["title"],
-            "purpose": ch.get("purpose", ""),
-            "slides": ch["slides"],
-            "slide_count": len(ch["slides"]),
-            "html_file": f"chapters/{html_filename}",
-        })
+        chapter_entries.append(
+            {
+                "chapter_id": chapter_id,
+                "title": ch["title"],
+                "purpose": ch.get("purpose", ""),
+                "slides": ch["slides"],
+                "slide_count": len(ch["slides"]),
+                "html_file": f"chapters/{html_filename}",
+            }
+        )
 
     # Build timeline.json
     timeline = build_timeline_json(
@@ -431,10 +448,16 @@ async def _assemble(
     concat_path = out_dir / "concat.html"
     concat_path.write_text(concat_html, encoding="utf-8")
 
-    await _record_step(task, session, "assembly", "success", {
-        "chapter_count": len(chapter_entries),
-        "output_dir": str(out_dir),
-    })
+    await _record_step(
+        task,
+        session,
+        "assembly",
+        "success",
+        {
+            "chapter_count": len(chapter_entries),
+            "output_dir": str(out_dir),
+        },
+    )
 
     return {
         "output_dir": str(out_dir),
@@ -457,6 +480,7 @@ async def _assemble(
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+
 async def _call_llm(messages: list[dict]) -> str:
     """Call the default LLM and return raw text."""
     provider = settings.default_llm_provider
@@ -464,9 +488,7 @@ async def _call_llm(messages: list[dict]) -> str:
     api_key = settings.default_llm_api_key
     base_url = settings.default_llm_base_url
 
-    return await LLMService.generate(
-        provider, model, api_key, messages, base_url=base_url
-    )
+    return await LLMService.generate(provider, model, api_key, messages, base_url=base_url)
 
 
 def _parse_json(raw: str) -> Any:
@@ -505,17 +527,19 @@ def _flatten_orchestrator_to_draft(orchestrator_output: dict) -> list[dict]:
     """Convert orchestrator output to a flat slides-like draft for backward compat."""
     draft = []
     for ch in orchestrator_output.get("chapters", []):
-        draft.append({
-            "slide_id": ch.get("chapter_id", ""),
-            "layout": "title",
-            "title": ch.get("title", ""),
-            "content": {
-                "subtitle": ch.get("purpose", ""),
-            },
-            "notes": f"章节要点：{'、'.join(ch.get('key_points', []))}",
-            "duration": 5,
-            "_chapter_spec": ch,  # Preserve full spec for later use
-        })
+        draft.append(
+            {
+                "slide_id": ch.get("chapter_id", ""),
+                "layout": "title",
+                "title": ch.get("title", ""),
+                "content": {
+                    "subtitle": ch.get("purpose", ""),
+                },
+                "notes": f"章节要点：{'、'.join(ch.get('key_points', []))}",
+                "duration": 5,
+                "_chapter_spec": ch,  # Preserve full spec for later use
+            }
+        )
     return draft
 
 
@@ -527,15 +551,17 @@ def _slides_to_orchestrator(slides: list[dict]) -> dict:
         if spec:
             chapters.append(spec)
         else:
-            chapters.append({
-                "chapter_id": f"ch_{i + 1:02d}",
-                "title": slide.get("title", f"Section {i + 1}"),
-                "purpose": "core",
-                "key_points": [],
-                "suggested_layouts": [slide.get("layout", "bullets")],
-                "content_excerpt": slide.get("notes", ""),
-                "slide_count": 2,
-            })
+            chapters.append(
+                {
+                    "chapter_id": f"ch_{i + 1:02d}",
+                    "title": slide.get("title", f"Section {i + 1}"),
+                    "purpose": "core",
+                    "key_points": [],
+                    "suggested_layouts": [slide.get("layout", "bullets")],
+                    "content_excerpt": slide.get("notes", ""),
+                    "slide_count": 2,
+                }
+            )
 
     return {
         "title": slides[0].get("title", "Presentation") if slides else "Presentation",

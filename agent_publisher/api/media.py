@@ -9,6 +9,7 @@ When COS is active:
 - Download endpoint redirects to the public COS URL instead of serving locally
 - `source_kind` = "cos" is stored so article_service can tell COS URLs apart
 """
+
 from __future__ import annotations
 
 import logging
@@ -23,7 +24,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from agent_publisher.api.deps import get_db, get_current_user, UserContext
-from agent_publisher.config import settings
 from agent_publisher.models.media import MediaAsset
 from agent_publisher.services.cos_storage import get_cos_storage
 
@@ -36,9 +36,17 @@ UPLOAD_DIR = Path(os.environ.get("MEDIA_UPLOAD_DIR", "data/uploads"))
 
 # Allowed MIME types (images + documents)
 ALLOWED_TYPES = {
-    "image/png", "image/jpeg", "image/jpg", "image/gif", "image/webp",
-    "image/svg+xml", "image/bmp", "image/tiff",
-    "text/markdown", "text/plain", "text/x-markdown",
+    "image/png",
+    "image/jpeg",
+    "image/jpg",
+    "image/gif",
+    "image/webp",
+    "image/svg+xml",
+    "image/bmp",
+    "image/tiff",
+    "text/markdown",
+    "text/plain",
+    "text/x-markdown",
 }
 
 MAX_FILE_SIZE = 20 * 1024 * 1024  # 20MB
@@ -63,16 +71,16 @@ def _serialize_media_asset(asset: MediaAsset) -> dict:
         }
         for mapping in sorted(asset.wechat_mappings, key=lambda item: item.account_id)
     ]
-    latest_upload_status = ''
+    latest_upload_status = ""
     if wechat_mappings:
         latest_upload_status = (
-            'failed'
-            if any(mapping["upload_status"] == 'failed' for mapping in wechat_mappings)
-            else 'processing'
-            if any(mapping["upload_status"] == 'processing' for mapping in wechat_mappings)
-            else 'success'
-            if all(mapping["upload_status"] == 'success' for mapping in wechat_mappings)
-            else 'pending'
+            "failed"
+            if any(mapping["upload_status"] == "failed" for mapping in wechat_mappings)
+            else "processing"
+            if any(mapping["upload_status"] == "processing" for mapping in wechat_mappings)
+            else "success"
+            if all(mapping["upload_status"] == "success" for mapping in wechat_mappings)
+            else "pending"
         )
     return {
         "id": asset.id,
@@ -97,7 +105,11 @@ async def _get_media_with_ownership(
     media_id: int, user: UserContext, db: AsyncSession
 ) -> MediaAsset:
     """Fetch a media asset and verify ownership."""
-    stmt = select(MediaAsset).options(selectinload(MediaAsset.wechat_mappings)).where(MediaAsset.id == media_id)
+    stmt = (
+        select(MediaAsset)
+        .options(selectinload(MediaAsset.wechat_mappings))
+        .where(MediaAsset.id == media_id)
+    )
     result = await db.execute(stmt)
     asset = result.scalar_one_or_none()
     if not asset:
@@ -133,7 +145,9 @@ async def upload_media(
     content = await file.read()
     file_size = len(content)
     if file_size > MAX_FILE_SIZE:
-        raise HTTPException(status_code=400, detail=f"File too large ({file_size} bytes). Max: {MAX_FILE_SIZE}")
+        raise HTTPException(
+            status_code=400, detail=f"File too large ({file_size} bytes). Max: {MAX_FILE_SIZE}"
+        )
     if file_size == 0:
         raise HTTPException(status_code=400, detail="Empty file")
 
@@ -152,21 +166,23 @@ async def upload_media(
         if cos_key:
             asset = MediaAsset(
                 filename=original_filename,
-                stored_filename=cos_key,   # COS object key
+                stored_filename=cos_key,  # COS object key
                 content_type=content_type,
                 file_size=file_size,
                 tags=tag_list,
                 description=description,
                 owner_email=user.email,
                 source_kind="cos",
-                source_url=cos_url,        # public URL — usable in WeChat HTML directly
+                source_url=cos_url,  # public URL — usable in WeChat HTML directly
             )
             db.add(asset)
             await db.commit()
             await db.refresh(asset)
             logger.info(
                 "Media uploaded to COS: id=%d key=%s size=%d",
-                asset.id, cos_key, file_size,
+                asset.id,
+                cos_key,
+                file_size,
             )
             return _serialize_media_asset(asset)
 
@@ -190,7 +206,9 @@ async def upload_media(
     await db.commit()
     await db.refresh(asset)
 
-    logger.info("Media uploaded (local): id=%d filename=%s size=%d", asset.id, original_filename, file_size)
+    logger.info(
+        "Media uploaded (local): id=%d filename=%s size=%d", asset.id, original_filename, file_size
+    )
     return _serialize_media_asset(asset)
 
 
@@ -199,7 +217,9 @@ async def list_media(
     tag: str = Query("", description="Filter by tag"),
     source_kind: str = Query("", description="Filter by source kind"),
     article_id: int | None = Query(None, description="Filter by article ID"),
-    account_id: int | None = Query(None, description="Filter by account ID in WeChat upload mappings"),
+    account_id: int | None = Query(
+        None, description="Filter by account ID in WeChat upload mappings"
+    ),
     upload_status: str = Query("", description="Filter by WeChat upload status"),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
@@ -279,6 +299,7 @@ async def download_media(
 
     # Local disk fallback
     from fastapi.responses import FileResponse
+
     file_path = (UPLOAD_DIR / asset.stored_filename).resolve()
     if not file_path.is_relative_to(UPLOAD_DIR.resolve()):
         raise HTTPException(status_code=403, detail="Access denied")

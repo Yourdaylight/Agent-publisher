@@ -7,6 +7,7 @@ Tests the complete flow from a high level using mocks:
 4. Trend visualization
 5. Article creation flow
 """
+
 from __future__ import annotations
 
 import pytest
@@ -39,7 +40,7 @@ def _make_trendradar_item(
             "ranks": [rank],
             "first_time": "09:00",
             "last_time": "15:30",
-        }
+        },
     )
 
 
@@ -112,11 +113,11 @@ class TestPlatformExtraction:
     def test_platform_tags_are_added(self):
         """Items are tagged with their source platform."""
         platforms = ["weibo", "douyin", "zhihu", "toutiao", "bilibili"]
-        
+
         for platform in platforms:
             item = _make_trendradar_item(source_platform=platform)
             material = item.to_candidate_material(agent_id=1, quality_score=0.5)
-            
+
             assert platform in material["tags"], f"Platform {platform} not in tags"
 
     def test_metadata_platform_field(self):
@@ -133,10 +134,10 @@ class TestHotValueScaling:
     def test_hot_value_ranges_to_quality_scores(self):
         """Hot value (0-100) scales correctly to quality_score (0-1)."""
         test_cases = [
-            (100.0, 1.0),    # Max hotness
-            (50.0, 0.5),     # Mid hotness
-            (0.0, 0.0),      # No hotness
-            (85.0, 0.85),    # Common case
+            (100.0, 1.0),  # Max hotness
+            (50.0, 0.5),  # Mid hotness
+            (0.0, 0.0),  # No hotness
+            (85.0, 0.85),  # Common case
         ]
 
         for hot_value, expected_score in test_cases:
@@ -184,7 +185,7 @@ class TestTrendPointGeneration:
         """Without historical data, trend points are synthetic from quality_score."""
         quality_score = 0.75
         base = max(quality_score, 0.1)
-        
+
         # Synthetic formula from hotspots.py
         synthetic_points = [
             {"label": "24h前", "score": round(base * 0.42, 3)},
@@ -192,7 +193,7 @@ class TestTrendPointGeneration:
             {"label": "6h前", "score": round(base * 0.84, 3)},
             {"label": "当前", "score": round(base, 3)},
         ]
-        
+
         # Verify structure
         assert len(synthetic_points) == 4
         assert all("label" in p and "score" in p for p in synthetic_points)
@@ -203,7 +204,7 @@ class TestTrendPointGeneration:
         """If trend_history exists in metadata, use it instead of synthetic."""
         item = _make_trendradar_item()
         material = item.to_candidate_material(1, 0.75)
-        
+
         # Add historical data
         historical = [
             {"timestamp": "2026-04-14T09:00:00Z", "score": 0.42},
@@ -212,7 +213,7 @@ class TestTrendPointGeneration:
             {"timestamp": "2026-04-14T18:00:00Z", "score": 0.72},
         ]
         material["metadata"]["trend_history"] = historical
-        
+
         # API logic would check for this and prefer historical
         assert "trend_history" in material["metadata"]
         assert len(material["metadata"]["trend_history"]) == 4
@@ -236,7 +237,7 @@ class TestFilteringSemantics:
 
         # Filter to weibo only
         filtered = [i for i in items if i.source_platform == "weibo"]
-        
+
         assert len(filtered) == 2
         assert all(i.source_platform == "weibo" for i in filtered)
 
@@ -251,7 +252,7 @@ class TestFilteringSemantics:
         # Filter to weibo OR douyin
         target_platforms = ["weibo", "douyin"]
         filtered = [i for i in items if i.source_platform in target_platforms]
-        
+
         assert len(filtered) == 2
         assert all(i.source_platform in target_platforms for i in filtered)
 
@@ -266,11 +267,8 @@ class TestFilteringSemantics:
 
         # Filter: 0.6 <= score <= 0.9
         heat_min, heat_max = 0.6, 0.9
-        filtered = [
-            i for i in items 
-            if heat_min <= (i.hot_value / 100.0) <= heat_max
-        ]
-        
+        filtered = [i for i in items if heat_min <= (i.hot_value / 100.0) <= heat_max]
+
         assert len(filtered) == 2  # 90 and 70
         assert all(heat_min <= (i.hot_value / 100.0) <= heat_max for i in filtered)
 
@@ -284,11 +282,8 @@ class TestFilteringSemantics:
 
         # Search for "AI"
         keyword = "ai"
-        filtered = [
-            i for i in items 
-            if keyword.lower() in i.title.lower()
-        ]
-        
+        filtered = [i for i in items if keyword.lower() in i.title.lower()]
+
         assert len(filtered) == 2
         assert all(keyword.lower() in i.title.lower() for i in filtered)
 
@@ -296,19 +291,13 @@ class TestFilteringSemantics:
         """Multiple filters work together (AND logic)."""
         items = [
             _make_trendradar_item(
-                title="Python AI on Weibo", 
-                source_platform="weibo", 
-                hot_value=85
+                title="Python AI on Weibo", source_platform="weibo", hot_value=85
             ),
             _make_trendradar_item(
-                title="Python Guide on Douyin",
-                source_platform="douyin",
-                hot_value=70
+                title="Python Guide on Douyin", source_platform="douyin", hot_value=70
             ),
             _make_trendradar_item(
-                title="Random News on Weibo",
-                source_platform="weibo",
-                hot_value=40
+                title="Random News on Weibo", source_platform="weibo", hot_value=40
             ),
         ]
 
@@ -316,14 +305,17 @@ class TestFilteringSemantics:
         platform = "weibo"
         keyword = "python"
         heat_min = 0.7
-        
+
         filtered = [
-            i for i in items
-            if (i.source_platform == platform and
-                keyword.lower() in i.title.lower() and
-                (i.hot_value / 100.0) >= heat_min)
+            i
+            for i in items
+            if (
+                i.source_platform == platform
+                and keyword.lower() in i.title.lower()
+                and (i.hot_value / 100.0) >= heat_min
+            )
         ]
-        
+
         assert len(filtered) == 1
         assert filtered[0].title == "Python AI on Weibo"
 
@@ -351,13 +343,13 @@ class TestPaginationSemantics:
     def test_pagination_total_count(self):
         """Total count is available separately from paginated results."""
         items = [_make_trendradar_item() for i in range(100)]
-        
+
         total = len(items)
         limit = 20
         offset = 0
-        
-        page = items[offset:offset+limit]
-        
+
+        page = items[offset : offset + limit]
+
         assert len(page) == limit
         assert total == 100
         # Response structure: {items: [...], total: 100, limit: 20, offset: 0}
@@ -486,7 +478,7 @@ class TestArticleCreationFromHotspot:
         #   "task_id": 123,
         #   "hotspot_title": "..."
         # }
-        
+
         # Frontend polls via SSE or task status endpoint
         task_response = {
             "ok": True,

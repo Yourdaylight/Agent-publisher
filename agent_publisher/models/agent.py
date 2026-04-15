@@ -21,7 +21,9 @@ class Agent(Base):
     name: Mapped[str] = mapped_column(String(100))
     topic: Mapped[str] = mapped_column(String(200))
     description: Mapped[str] = mapped_column(Text, default="")
-    account_id: Mapped[int | None] = mapped_column(ForeignKey("accounts.id"), nullable=True, default=None)
+    account_id: Mapped[int | None] = mapped_column(
+        ForeignKey("accounts.id"), nullable=True, default=None
+    )
     rss_sources: Mapped[list | None] = mapped_column(JSON, default=list)
 
     # Agent role: collector / processor / publisher / full_pipeline
@@ -49,9 +51,7 @@ class Agent(Base):
     schedule_cron: Mapped[str] = mapped_column(String(50), default="0 8 * * *")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     is_builtin: Mapped[bool] = mapped_column(Boolean, default=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     account: Mapped["Account"] = relationship(back_populates="agents")  # noqa: F821
     articles: Mapped[list["Article"]] = relationship(back_populates="agent")  # noqa: F821

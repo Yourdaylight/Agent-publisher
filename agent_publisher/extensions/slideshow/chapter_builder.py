@@ -5,6 +5,7 @@ Replaces reveal_builder.py. Produces:
   - concat.html           (iframe player)
   - timeline.json          (metadata)
 """
+
 from __future__ import annotations
 
 import json
@@ -47,6 +48,7 @@ def _adapt_theme_css(css: str) -> str:
     .reveal .slides section hN → .slide hN
     """
     import re
+
     # Replace .reveal .slides section with .slide
     css = re.sub(r"\.reveal\s+\.slides\s+section", ".slide", css)
     # Also handle .slide-layout-- selectors (already correct, no change needed)
@@ -74,6 +76,7 @@ def _extract_charts(slides: list[dict]) -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def build_chapter_html(
     chapter_id: str,
@@ -121,13 +124,15 @@ def build_concat_html(timeline: dict, *, task_id: int = 0) -> str:
 
     chapters_for_js = []
     for ch in timeline.get("chapters", []):
-        chapters_for_js.append({
-            "chapter_id": ch["chapter_id"],
-            "title": ch["title"],
-            "slide_count": ch["slide_count"],
-            "html_file": ch["html_file"],
-            "notes": ch.get("notes_combined", ""),
-        })
+        chapters_for_js.append(
+            {
+                "chapter_id": ch["chapter_id"],
+                "title": ch["title"],
+                "slide_count": ch["slide_count"],
+                "html_file": ch["html_file"],
+                "notes": ch.get("notes_combined", ""),
+            }
+        )
 
     template = env.get_template("concat.html.j2")
     html = template.render(
@@ -165,29 +170,29 @@ def build_timeline_json(
         total_duration += ch_duration
 
         # Combine all notes for the chapter
-        notes_combined = " ".join(
-            s.get("notes", "") for s in slides if s.get("notes")
-        )
+        notes_combined = " ".join(s.get("notes", "") for s in slides if s.get("notes"))
 
-        chapter_entries.append({
-            "chapter_id": ch["chapter_id"],
-            "title": ch["title"],
-            "purpose": ch.get("purpose", ""),
-            "slide_count": len(slides),
-            "duration": ch_duration,
-            "html_file": ch["html_file"],
-            "notes_combined": notes_combined,
-            "slides": [
-                {
-                    "slide_id": s.get("slide_id", f"slide_{i}"),
-                    "title": s.get("title", ""),
-                    "layout": s.get("layout", "bullets"),
-                    "duration": s.get("duration", 6),
-                    "notes": s.get("notes", ""),
-                }
-                for i, s in enumerate(slides)
-            ],
-        })
+        chapter_entries.append(
+            {
+                "chapter_id": ch["chapter_id"],
+                "title": ch["title"],
+                "purpose": ch.get("purpose", ""),
+                "slide_count": len(slides),
+                "duration": ch_duration,
+                "html_file": ch["html_file"],
+                "notes_combined": notes_combined,
+                "slides": [
+                    {
+                        "slide_id": s.get("slide_id", f"slide_{i}"),
+                        "title": s.get("title", ""),
+                        "layout": s.get("layout", "bullets"),
+                        "duration": s.get("duration", 6),
+                        "notes": s.get("notes", ""),
+                    }
+                    for i, s in enumerate(slides)
+                ],
+            }
+        )
 
     return {
         "title": title,
@@ -197,4 +202,3 @@ def build_timeline_json(
         "total_duration": total_duration,
         "chapters": chapter_entries,
     }
-

@@ -97,8 +97,10 @@ class TestNewsListAlwaysIncluded:
         # Simulate what article_service does: append mode text to prompt_text
         prompt = "Write a cool article\n\n创作模式：爆款二创。基于以下素材进行二次创作"
         msgs = LLMService.build_article_messages(
-            topic="AI", news_list="Important material content",
-            prompt_template=prompt, agent_description=""
+            topic="AI",
+            news_list="Important material content",
+            prompt_template=prompt,
+            agent_description="",
         )
         assert "Important material content" in msgs[1]["content"]
         assert "爆款二创" in msgs[1]["content"]
@@ -119,7 +121,9 @@ class TestNewsListAlwaysIncluded:
 
     def test_output_format_not_duplicated(self):
         """Output format not duplicated if template already includes it."""
-        template = "Write about {news_list}\n---TITLE---\n标题\n---DIGEST---\n摘要\n---CONTENT---\n正文"
+        template = (
+            "Write about {news_list}\n---TITLE---\n标题\n---DIGEST---\n摘要\n---CONTENT---\n正文"
+        )
         msgs = LLMService.build_article_messages("AI", "news", template, "")
         assert msgs[1]["content"].count("---TITLE---") == 1
 

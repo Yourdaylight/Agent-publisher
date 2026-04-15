@@ -5,6 +5,7 @@ TDD Red-Green-Refactor cycle:
 2. GREEN: Write minimal code to pass
 3. REFACTOR: Clean up while keeping tests green
 """
+
 from __future__ import annotations
 
 import pytest
@@ -33,8 +34,8 @@ class TestInjectStylesParagraph:
         """If a tag already has a style attribute, don't overwrite it."""
         html = '<p style="color: red; font-size: 20px;">Custom</p>'
         result = WeChatStyleService.inject_styles(html)
-        assert 'color: red' in result
-        assert 'font-size: 20px' in result
+        assert "color: red" in result
+        assert "font-size: 20px" in result
         # Should NOT add duplicate font-size
         assert result.count("font-size") == 1
 
@@ -52,12 +53,15 @@ class TestInjectStylesParagraph:
 class TestInjectStylesHeadings:
     """Headings should get appropriate sizes and styles."""
 
-    @pytest.mark.parametrize("tag,expected_size", [
-        ("h1", "24px"),
-        ("h2", "22px"),
-        ("h3", "20px"),
-        ("h4", "18px"),
-    ])
+    @pytest.mark.parametrize(
+        "tag,expected_size",
+        [
+            ("h1", "24px"),
+            ("h2", "22px"),
+            ("h3", "20px"),
+            ("h4", "18px"),
+        ],
+    )
     def test_heading_gets_correct_font_size(self, tag, expected_size):
         html = f"<{tag}>Title</{tag}>"
         result = WeChatStyleService.inject_styles(html)
@@ -218,7 +222,7 @@ class TestInjectStylesEdgeCases:
         assert result.count("style=") >= 8  # h1, 4x p, blockquote, ul, img at minimum
         assert "font-size: 16px" in result  # paragraphs
         assert "font-size: 24px" in result  # h1
-        assert "color: #07C160" in result   # link or blockquote border
+        assert "color: #07C160" in result  # link or blockquote border
 
 
 # ---------------------------------------------------------------------------

@@ -6,6 +6,7 @@ Endpoints:
   GET  /preview/{task_id} — Serve static HTML preview
   GET  /download/{task_id} — Download rendered MP4
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -86,6 +87,7 @@ async def _verify_task_ownership(task: Task, email: str, is_admin: bool, db: Asy
 # Request schemas
 # ---------------------------------------------------------------------------
 
+
 class VideoRequest(BaseModel):
     article_id: int
 
@@ -93,6 +95,7 @@ class VideoRequest(BaseModel):
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
+
 
 @router.post("/generate")
 async def generate_video(
@@ -240,7 +243,9 @@ async def get_props(
 # Background task executor
 # ---------------------------------------------------------------------------
 
+
 async def _execute_pipeline(task_id: int, article_id: int) -> None:
     async with async_session_factory() as session:
         from agent_publisher.extensions.video.service import run_video_pipeline
+
         await run_video_pipeline(task_id, article_id, session)

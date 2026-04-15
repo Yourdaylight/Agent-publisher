@@ -17,9 +17,7 @@ from agent_publisher.services.task_service import TaskService
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
 
-async def _get_task_with_ownership(
-    task_id: int, user: UserContext, db: AsyncSession
-) -> Task:
+async def _get_task_with_ownership(task_id: int, user: UserContext, db: AsyncSession) -> Task:
     """Fetch a task and verify ownership through Agent -> Account chain."""
     task = await db.get(Task, task_id)
     if not task:
@@ -46,8 +44,12 @@ async def list_tasks(
         # via task.result.article_id → article → agent → account.owner_email
         # For simplicity: include tasks with agent_id via JOIN, plus slideshow tasks
         # owned by current user (checked via result JSON in Python after fetch)
-        stmt_agent = select(Task).order_by(Task.id.desc()).join(Agent).join(Account).where(
-            Account.owner_email == user.email
+        stmt_agent = (
+            select(Task)
+            .order_by(Task.id.desc())
+            .join(Agent)
+            .join(Account)
+            .where(Account.owner_email == user.email)
         )
         if status:
             stmt_agent = stmt_agent.where(Task.status == status)
@@ -66,6 +68,7 @@ async def list_tasks(
 
         # Filter slideshow tasks by ownership through result.article_id
         from agent_publisher.models.article import Article
+
         owned_slideshow = []
         for t in slideshow_tasks_all:
             article_id = (t.result or {}).get("article_id")
@@ -197,7 +200,6 @@ async def batch_run(
         tasks = await task_svc.run_batch_all()
         return {
             "results": [
-                {"agent_id": t.agent_id, "task_id": t.id, "status": t.status}
-                for t in tasks
+                {"agent_id": t.agent_id, "task_id": t.id, "status": t.status} for t in tasks
             ]
         }

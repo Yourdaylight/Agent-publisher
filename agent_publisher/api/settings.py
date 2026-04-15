@@ -1,9 +1,10 @@
 """Global settings API: manage LLM, image generation, and other configurations at runtime."""
+
 from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from agent_publisher.api.deps import get_current_user, require_admin, UserContext
@@ -79,10 +80,14 @@ async def get_settings(_: UserContext = Depends(_require_admin_user)):
     return AllSettings(
         default_llm_provider=settings.default_llm_provider,
         default_llm_model=settings.default_llm_model,
-        default_llm_api_key=_mask(settings.default_llm_api_key) if settings.default_llm_api_key else "",
+        default_llm_api_key=_mask(settings.default_llm_api_key)
+        if settings.default_llm_api_key
+        else "",
         default_llm_base_url=settings.default_llm_base_url,
         tencent_secret_id=_mask(settings.tencent_secret_id) if settings.tencent_secret_id else "",
-        tencent_secret_key=_mask(settings.tencent_secret_key) if settings.tencent_secret_key else "",
+        tencent_secret_key=_mask(settings.tencent_secret_key)
+        if settings.tencent_secret_key
+        else "",
         access_key_masked=_mask(settings.access_key),
         contact_wechat_qr=settings.contact_wechat_qr,
         contact_wechat_id=settings.contact_wechat_id,
@@ -93,7 +98,9 @@ async def get_settings(_: UserContext = Depends(_require_admin_user)):
 
 
 @router.put("/llm")
-async def update_llm_settings(req: LLMSettingsUpdate, _: UserContext = Depends(_require_admin_user)):
+async def update_llm_settings(
+    req: LLMSettingsUpdate, _: UserContext = Depends(_require_admin_user)
+):
     """Update default LLM settings at runtime. Admin only."""
     if req.default_llm_provider is not None:
         settings.default_llm_provider = req.default_llm_provider
@@ -103,12 +110,18 @@ async def update_llm_settings(req: LLMSettingsUpdate, _: UserContext = Depends(_
         settings.default_llm_api_key = req.default_llm_api_key
     if req.default_llm_base_url is not None:
         settings.default_llm_base_url = req.default_llm_base_url
-    logger.info("LLM settings updated: provider=%s model=%s", settings.default_llm_provider, settings.default_llm_model)
+    logger.info(
+        "LLM settings updated: provider=%s model=%s",
+        settings.default_llm_provider,
+        settings.default_llm_model,
+    )
     return {"message": "LLM settings updated"}
 
 
 @router.put("/image")
-async def update_image_settings(req: ImageSettingsUpdate, _: UserContext = Depends(_require_admin_user)):
+async def update_image_settings(
+    req: ImageSettingsUpdate, _: UserContext = Depends(_require_admin_user)
+):
     """Update Tencent Cloud image generation settings at runtime. Admin only."""
     if req.tencent_secret_id is not None:
         settings.tencent_secret_id = req.tencent_secret_id
@@ -119,7 +132,9 @@ async def update_image_settings(req: ImageSettingsUpdate, _: UserContext = Depen
 
 
 @router.put("/membership-contact")
-async def update_membership_contact_settings(req: MembershipContactSettingsUpdate, _: UserContext = Depends(_require_admin_user)):
+async def update_membership_contact_settings(
+    req: MembershipContactSettingsUpdate, _: UserContext = Depends(_require_admin_user)
+):
     """Update membership contact / QR placeholder settings. Admin only."""
     if req.contact_wechat_qr is not None:
         settings.contact_wechat_qr = req.contact_wechat_qr
@@ -132,22 +147,30 @@ async def update_membership_contact_settings(req: MembershipContactSettingsUpdat
 
 
 @router.put("/proxy")
-async def update_wechat_proxy(req: WeChatProxyUpdate, _: UserContext = Depends(_require_admin_user)):
+async def update_wechat_proxy(
+    req: WeChatProxyUpdate, _: UserContext = Depends(_require_admin_user)
+):
     """Update WeChat API HTTP proxy at runtime. Admin only.
 
     Set to an empty string to disable the proxy.
     Only affects calls to the WeChat API (api.weixin.qq.com).
     """
     proxy = req.wechat_proxy.strip()
-    if proxy and not (proxy.startswith("http://") or proxy.startswith("https://") or proxy.startswith("socks5://")):
-        raise HTTPException(status_code=400, detail="代理地址格式无效，应以 http://、https:// 或 socks5:// 开头")
+    if proxy and not (
+        proxy.startswith("http://") or proxy.startswith("https://") or proxy.startswith("socks5://")
+    ):
+        raise HTTPException(
+            status_code=400, detail="代理地址格式无效，应以 http://、https:// 或 socks5:// 开头"
+        )
     settings.wechat_proxy = proxy
     logger.info("WeChat proxy updated: %s", proxy or "(disabled)")
     return {"message": "WeChat proxy updated", "wechat_proxy": proxy}
 
 
 @router.put("/trending")
-async def update_trending_settings(req: TrendingRefreshUpdate, _: UserContext = Depends(_require_admin_user)):
+async def update_trending_settings(
+    req: TrendingRefreshUpdate, _: UserContext = Depends(_require_admin_user)
+):
     """Update trending hotspot auto-refresh interval. Admin only.
 
     interval_minutes=0 disables automatic refresh.
@@ -157,8 +180,13 @@ async def update_trending_settings(req: TrendingRefreshUpdate, _: UserContext = 
         raise HTTPException(status_code=400, detail="interval_minutes 不能为负数")
     settings.trending_refresh_interval = req.interval_minutes
     from agent_publisher.scheduler import sync_trending_schedule
+
     sync_trending_schedule(req.interval_minutes)
-    msg = f"热榜每 {req.interval_minutes} 分钟自动刷新" if req.interval_minutes > 0 else "热榜自动刷新已禁用"
+    msg = (
+        f"热榜每 {req.interval_minutes} 分钟自动刷新"
+        if req.interval_minutes > 0
+        else "热榜自动刷新已禁用"
+    )
     logger.info("Trending refresh interval updated: %d minutes", req.interval_minutes)
     return {"message": msg, "interval_minutes": req.interval_minutes}
 

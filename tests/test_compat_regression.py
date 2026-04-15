@@ -6,6 +6,7 @@ Verifies that:
 - Old response fields remain available
 - Schema models validate correctly
 """
+
 from __future__ import annotations
 
 import sys
@@ -18,33 +19,37 @@ import pytest
 # ---------------------------------------------------------------------------
 # Third-party stubs
 # ---------------------------------------------------------------------------
-credential_module = types.ModuleType('tencentcloud.common.credential')
+credential_module = types.ModuleType("tencentcloud.common.credential")
 credential_module.Credential = object
-client_profile_module = types.ModuleType('tencentcloud.common.profile.client_profile')
+client_profile_module = types.ModuleType("tencentcloud.common.profile.client_profile")
 client_profile_module.ClientProfile = object
-http_profile_module = types.ModuleType('tencentcloud.common.profile.http_profile')
+http_profile_module = types.ModuleType("tencentcloud.common.profile.http_profile")
 http_profile_module.HttpProfile = object
-aiart_client_module = types.ModuleType('tencentcloud.aiart.v20221229.aiart_client')
+aiart_client_module = types.ModuleType("tencentcloud.aiart.v20221229.aiart_client")
 aiart_client_module.AiartClient = object
-models_module = types.ModuleType('tencentcloud.aiart.v20221229.models')
+models_module = types.ModuleType("tencentcloud.aiart.v20221229.models")
 models_module.SubmitTextToImageJobRequest = object
 models_module.QueryTextToImageJobRequest = object
-feedparser_module = types.ModuleType('feedparser')
+feedparser_module = types.ModuleType("feedparser")
 feedparser_module.parse = lambda *_args, **_kwargs: SimpleNamespace(entries=[], feed={})
 
-sys.modules.setdefault('tencentcloud', types.ModuleType('tencentcloud'))
-sys.modules.setdefault('tencentcloud.common', types.ModuleType('tencentcloud.common'))
-sys.modules.setdefault('tencentcloud.common.profile', types.ModuleType('tencentcloud.common.profile'))
-sys.modules.setdefault('tencentcloud.aiart', types.ModuleType('tencentcloud.aiart'))
-sys.modules.setdefault('tencentcloud.aiart.v20221229', types.ModuleType('tencentcloud.aiart.v20221229'))
-sys.modules['feedparser'] = feedparser_module
-sys.modules['tencentcloud.common.credential'] = credential_module
-sys.modules['tencentcloud.common.profile.client_profile'] = client_profile_module
-sys.modules['tencentcloud.common.profile.http_profile'] = http_profile_module
-sys.modules['tencentcloud.aiart.v20221229.aiart_client'] = aiart_client_module
-sys.modules['tencentcloud.aiart.v20221229.models'] = models_module
+sys.modules.setdefault("tencentcloud", types.ModuleType("tencentcloud"))
+sys.modules.setdefault("tencentcloud.common", types.ModuleType("tencentcloud.common"))
+sys.modules.setdefault(
+    "tencentcloud.common.profile", types.ModuleType("tencentcloud.common.profile")
+)
+sys.modules.setdefault("tencentcloud.aiart", types.ModuleType("tencentcloud.aiart"))
+sys.modules.setdefault(
+    "tencentcloud.aiart.v20221229", types.ModuleType("tencentcloud.aiart.v20221229")
+)
+sys.modules["feedparser"] = feedparser_module
+sys.modules["tencentcloud.common.credential"] = credential_module
+sys.modules["tencentcloud.common.profile.client_profile"] = client_profile_module
+sys.modules["tencentcloud.common.profile.http_profile"] = http_profile_module
+sys.modules["tencentcloud.aiart.v20221229.aiart_client"] = aiart_client_module
+sys.modules["tencentcloud.aiart.v20221229.models"] = models_module
 
-from agent_publisher.schemas.article import (
+from agent_publisher.schemas.article import (  # noqa: E402
     AccountScopedPublishResult,
     ArticlePublishRelationOut,
     ArticlePublishRequest,
@@ -57,6 +62,7 @@ from agent_publisher.schemas.article import (
 # ===========================================================================
 # 1. Schema backward compatibility tests
 # ===========================================================================
+
 
 class TestArticlePublishRequestCompat:
     """Verify publish request accepts both old and new shapes."""
@@ -93,19 +99,19 @@ class TestArticlePublishResponseCompat:
         resp = ArticlePublishResponse(
             ok=True,
             article_id=1,
-            overall_status='success',
-            media_id='MEDIA_123',
+            overall_status="success",
+            media_id="MEDIA_123",
             target_account_ids=[1],
             results=[
                 AccountScopedPublishResult(
                     account_id=1,
-                    account_name='Test',
-                    status='success',
-                    wechat_media_id='MEDIA_123',
+                    account_name="Test",
+                    status="success",
+                    wechat_media_id="MEDIA_123",
                 ),
             ],
         )
-        assert resp.media_id == 'MEDIA_123'
+        assert resp.media_id == "MEDIA_123"
         assert resp.ok is True
         assert len(resp.results) == 1
 
@@ -113,20 +119,26 @@ class TestArticlePublishResponseCompat:
         resp = ArticlePublishResponse(
             ok=False,
             article_id=2,
-            overall_status='failed',
-            media_id='',
+            overall_status="failed",
+            media_id="",
             target_account_ids=[1, 2],
             results=[
                 AccountScopedPublishResult(
-                    account_id=1, account_name='A', status='failed', error='network err',
+                    account_id=1,
+                    account_name="A",
+                    status="failed",
+                    error="network err",
                 ),
                 AccountScopedPublishResult(
-                    account_id=2, account_name='B', status='failed', error='auth err',
+                    account_id=2,
+                    account_name="B",
+                    status="failed",
+                    error="auth err",
                 ),
             ],
         )
         assert resp.ok is False
-        assert resp.overall_status == 'failed'
+        assert resp.overall_status == "failed"
 
 
 class TestArticleSyncResponseCompat:
@@ -136,18 +148,20 @@ class TestArticleSyncResponseCompat:
         resp = ArticleSyncResponse(
             ok=False,
             article_id=3,
-            overall_status='skipped',
-            sync_status='skipped',
+            overall_status="skipped",
+            sync_status="skipped",
             target_account_ids=[5],
             results=[
                 AccountScopedPublishResult(
-                    account_id=5, account_name='C', status='skipped',
-                    error='Draft media_id not found for this account',
+                    account_id=5,
+                    account_name="C",
+                    status="skipped",
+                    error="Draft media_id not found for this account",
                 ),
             ],
         )
-        assert resp.sync_status == 'skipped'
-        assert resp.results[0].status == 'skipped'
+        assert resp.sync_status == "skipped"
+        assert resp.results[0].status == "skipped"
 
 
 class TestArticlePublishRelationOutCompat:
@@ -161,34 +175,34 @@ class TestArticlePublishRelationOutCompat:
             id=1,
             article_id=10,
             account_id=2,
-            account_name='Test Account',
-            wechat_media_id='M123',
-            publish_status='success',
-            sync_status='synced',
-            last_error='',
+            account_name="Test Account",
+            wechat_media_id="M123",
+            publish_status="success",
+            sync_status="synced",
+            last_error="",
             last_published_at=now,
             last_synced_at=now,
             created_at=now,
             updated_at=now,
         )
-        assert out.account_name == 'Test Account'
-        assert out.publish_status == 'success'
+        assert out.account_name == "Test Account"
+        assert out.publish_status == "success"
 
 
 # ===========================================================================
 # 2. Legacy migration script logic test
 # ===========================================================================
 
+
 @pytest.mark.asyncio
 async def test_migrate_creates_relations_for_legacy_articles():
     """Verify migration creates ArticlePublishRelation for articles with wechat_media_id."""
-    from unittest.mock import patch
 
     # Mock the database imports inside the migrate function
     fake_article = SimpleNamespace(
         id=100,
         agent_id=10,
-        wechat_media_id='LEGACY_MEDIA_1',
+        wechat_media_id="LEGACY_MEDIA_1",
         published_at=None,
     )
     fake_agent = SimpleNamespace(id=10, account_id=5)
@@ -212,10 +226,10 @@ async def test_migrate_creates_relations_for_legacy_articles():
 
     summary = await migrate(session, dry_run=False)
 
-    assert summary['total_articles'] == 1
-    assert summary['created'] == 1
-    assert summary['skipped'] == 0
-    assert summary['errors'] == 0
+    assert summary["total_articles"] == 1
+    assert summary["created"] == 1
+    assert summary["skipped"] == 0
+    assert summary["errors"] == 0
     session.add.assert_called_once()
     session.commit.assert_awaited_once()
 
@@ -226,7 +240,7 @@ async def test_migrate_skips_articles_with_existing_relations():
     fake_article = SimpleNamespace(
         id=200,
         agent_id=20,
-        wechat_media_id='LEGACY_MEDIA_2',
+        wechat_media_id="LEGACY_MEDIA_2",
         published_at=None,
     )
     existing_relation = SimpleNamespace(
@@ -250,9 +264,9 @@ async def test_migrate_skips_articles_with_existing_relations():
 
     summary = await migrate(session, dry_run=False)
 
-    assert summary['total_articles'] == 1
-    assert summary['created'] == 0
-    assert summary['skipped'] == 1
+    assert summary["total_articles"] == 1
+    assert summary["created"] == 0
+    assert summary["skipped"] == 1
     session.add.assert_not_called()
 
 
@@ -262,7 +276,7 @@ async def test_migrate_dry_run_does_not_commit():
     fake_article = SimpleNamespace(
         id=300,
         agent_id=30,
-        wechat_media_id='LEGACY_MEDIA_3',
+        wechat_media_id="LEGACY_MEDIA_3",
         published_at=None,
     )
     fake_agent = SimpleNamespace(id=30, account_id=8)
@@ -284,7 +298,7 @@ async def test_migrate_dry_run_does_not_commit():
 
     summary = await migrate(session, dry_run=True)
 
-    assert summary['created'] == 1
+    assert summary["created"] == 1
     session.add.assert_not_called()  # Dry run should not add
     session.commit.assert_not_awaited()  # Dry run should not commit
 
@@ -295,7 +309,7 @@ async def test_migrate_handles_missing_agent():
     fake_article = SimpleNamespace(
         id=400,
         agent_id=40,
-        wechat_media_id='LEGACY_MEDIA_4',
+        wechat_media_id="LEGACY_MEDIA_4",
         published_at=None,
     )
 
@@ -315,13 +329,14 @@ async def test_migrate_handles_missing_agent():
 
     summary = await migrate(session, dry_run=False)
 
-    assert summary['errors'] == 1
-    assert summary['created'] == 0
+    assert summary["errors"] == 1
+    assert summary["created"] == 0
 
 
 # ===========================================================================
 # 3. Default target account fallback regression
 # ===========================================================================
+
 
 @pytest.mark.asyncio
 async def test_resolve_defaults_when_no_target_ids():
@@ -330,7 +345,7 @@ async def test_resolve_defaults_when_no_target_ids():
 
     service = ArticleService(session=AsyncMock())
     agent = SimpleNamespace(account_id=7)
-    account = SimpleNamespace(id=7, name='Default')
+    account = SimpleNamespace(id=7, name="Default")
 
     service.session.get = AsyncMock(return_value=account)
 
@@ -346,7 +361,7 @@ async def test_resolve_defaults_when_empty_list():
 
     service = ArticleService(session=AsyncMock())
     agent = SimpleNamespace(account_id=3)
-    account = SimpleNamespace(id=3, name='Fallback')
+    account = SimpleNamespace(id=3, name="Fallback")
 
     service.session.get = AsyncMock(return_value=account)
 

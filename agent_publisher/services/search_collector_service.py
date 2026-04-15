@@ -4,6 +4,7 @@ This module defines the base interface and a stub implementation for the
 independent web search collection mode. When an Agent has source_mode =
 'independent_search', this adapter is used to collect materials.
 """
+
 from __future__ import annotations
 
 import logging
@@ -11,7 +12,6 @@ from abc import ABC, abstractmethod
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from agent_publisher.schemas.candidate_material import CandidateMaterialCreate
 from agent_publisher.services.candidate_material_service import CandidateMaterialService
 
 logger = logging.getLogger(__name__)

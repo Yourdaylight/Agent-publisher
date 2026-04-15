@@ -103,7 +103,9 @@ async def manual_activate_membership(
     require_admin(user)
     svc = MembershipService(db)
     try:
-        membership = await svc.activate_membership(data.user_email, data.plan_name, data.duration_days)
+        membership = await svc.activate_membership(
+            data.user_email, data.plan_name, data.duration_days
+        )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     return {

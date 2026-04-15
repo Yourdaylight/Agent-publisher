@@ -3,6 +3,7 @@
 Stores structured operation logs for audit and debugging.
 Supports both SQLite (default) and ClickHouse (when configured).
 """
+
 from __future__ import annotations
 
 from datetime import datetime

@@ -1,4 +1,5 @@
 """Extensions metadata API — lists all loaded extensions."""
+
 from __future__ import annotations
 
 from fastapi import APIRouter

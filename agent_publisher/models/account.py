@@ -19,14 +19,10 @@ class Account(Base):
     ip_whitelist: Mapped[str] = mapped_column(String(500), default="")
     access_token: Mapped[str] = mapped_column(String(600), default="")
     token_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     # 第三方平台扫码授权模式
-    auth_mode: Mapped[str] = mapped_column(
-        String(20), default="manual"
-    )  # "manual" | "platform"
+    auth_mode: Mapped[str] = mapped_column(String(20), default="manual")  # "manual" | "platform"
     authorizer_appid: Mapped[str] = mapped_column(String(100), default="")
     authorizer_refresh_token: Mapped[str] = mapped_column(String(200), default="")
     authorizer_access_token: Mapped[str] = mapped_column(String(600), default="")

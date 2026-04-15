@@ -1,4 +1,5 @@
 """Integration tests for TrendRadar collection flow in source_registry_service."""
+
 from __future__ import annotations
 
 import pytest
@@ -10,6 +11,7 @@ class TestSourceRegistryTrendRadarIntegration:
 
     def _make_registry(self, db_session=None):
         from agent_publisher.services.source_registry_service import SourceRegistryService
+
         return SourceRegistryService(db_session or AsyncMock())
 
     def _make_binding(self, platform_id="weibo", filter_keywords=None):
@@ -37,13 +39,15 @@ class TestSourceRegistryTrendRadarIntegration:
         binding = self._make_binding("weibo")
 
         mock_adapter = AsyncMock()
-        mock_adapter.collect_for_agent = AsyncMock(return_value={
-            "status": "success",
-            "new_items": 3,
-            "duplicates_skipped": 1,
-            "low_quality_skipped": 0,
-            "platforms_collected": ["weibo"],
-        })
+        mock_adapter.collect_for_agent = AsyncMock(
+            return_value={
+                "status": "success",
+                "new_items": 3,
+                "duplicates_skipped": 1,
+                "low_quality_skipped": 0,
+                "platforms_collected": ["weibo"],
+            }
+        )
 
         # Mock the material IDs query
         mock_result = MagicMock()
@@ -75,13 +79,15 @@ class TestSourceRegistryTrendRadarIntegration:
         binding = self._make_binding("weibo", filter_keywords=["python", "AI"])
 
         mock_adapter = AsyncMock()
-        mock_adapter.collect_for_agent = AsyncMock(return_value={
-            "status": "success",
-            "new_items": 1,
-            "duplicates_skipped": 0,
-            "low_quality_skipped": 0,
-            "platforms_collected": ["weibo"],
-        })
+        mock_adapter.collect_for_agent = AsyncMock(
+            return_value={
+                "status": "success",
+                "new_items": 1,
+                "duplicates_skipped": 0,
+                "low_quality_skipped": 0,
+                "platforms_collected": ["weibo"],
+            }
+        )
 
         mock_result = MagicMock()
         mock_result.all.return_value = [(10,)]
@@ -121,12 +127,14 @@ class TestSourceRegistryTrendRadarIntegration:
         binding = self._make_binding("weibo")
 
         mock_adapter = AsyncMock()
-        mock_adapter.collect_for_agent = AsyncMock(return_value={
-            "status": "error",
-            "error": "Connection failed",
-            "new_items": 0,
-            "platforms_collected": [],
-        })
+        mock_adapter.collect_for_agent = AsyncMock(
+            return_value={
+                "status": "error",
+                "error": "Connection failed",
+                "new_items": 0,
+                "platforms_collected": [],
+            }
+        )
 
         with patch(
             "agent_publisher.services.trendradar_adapter.get_trendradar_adapter",
@@ -151,13 +159,15 @@ class TestSourceRegistryTrendRadarIntegration:
         ]
 
         mock_adapter = AsyncMock()
-        mock_adapter.collect_for_agent = AsyncMock(return_value={
-            "status": "success",
-            "new_items": 5,
-            "duplicates_skipped": 0,
-            "low_quality_skipped": 0,
-            "platforms_collected": ["weibo", "zhihu", "bilibili"],
-        })
+        mock_adapter.collect_for_agent = AsyncMock(
+            return_value={
+                "status": "success",
+                "new_items": 5,
+                "duplicates_skipped": 0,
+                "low_quality_skipped": 0,
+                "platforms_collected": ["weibo", "zhihu", "bilibili"],
+            }
+        )
 
         mock_result = MagicMock()
         mock_result.all.return_value = [(1,), (2,), (3,), (4,), (5,)]
@@ -184,6 +194,7 @@ class TestCollectAllTrending:
         db = AsyncMock()
 
         from agent_publisher.services.source_registry_service import SourceRegistryService
+
         registry = SourceRegistryService(db)
 
         # Mock list_sources to return some trending sources
@@ -192,12 +203,14 @@ class TestCollectAllTrending:
         registry.list_sources = AsyncMock(return_value=[mock_source])
 
         mock_adapter = AsyncMock()
-        mock_adapter.collect_for_agent = AsyncMock(return_value={
-            "status": "success",
-            "new_items": 10,
-            "duplicates_skipped": 3,
-            "platforms_collected": ["weibo"],
-        })
+        mock_adapter.collect_for_agent = AsyncMock(
+            return_value={
+                "status": "success",
+                "new_items": 10,
+                "duplicates_skipped": 3,
+                "platforms_collected": ["weibo"],
+            }
+        )
 
         with patch(
             "agent_publisher.services.trendradar_adapter.get_trendradar_adapter",
@@ -219,6 +232,7 @@ class TestCollectAllTrending:
         db = AsyncMock()
 
         from agent_publisher.services.source_registry_service import SourceRegistryService
+
         registry = SourceRegistryService(db)
         registry.list_sources = AsyncMock(return_value=[])
 
@@ -236,6 +250,7 @@ class TestCollectForAgent:
         db = AsyncMock()
 
         from agent_publisher.services.source_registry_service import SourceRegistryService
+
         registry = SourceRegistryService(db)
 
         agent = MagicMock()

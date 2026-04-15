@@ -8,6 +8,7 @@ Usage:
   from agent_publisher.services.system_log_service import SystemLogService
   await SystemLogService.record(action="publish", target_type="article", ...)
 """
+
 from __future__ import annotations
 
 import json
@@ -107,8 +108,7 @@ class SystemLogService:
             stmt = stmt.where(SystemLog.timestamp <= end_time)
         if keyword:
             stmt = stmt.where(
-                SystemLog.description.contains(keyword)
-                | SystemLog.error_message.contains(keyword)
+                SystemLog.description.contains(keyword) | SystemLog.error_message.contains(keyword)
             )
 
         stmt = stmt.limit(limit).offset(offset)

@@ -20,9 +20,9 @@ class Settings(BaseSettings):
     #               leave empty to use default COS URL.
     cos_secret_id: str = ""
     cos_secret_key: str = ""
-    cos_bucket: str = ""        # e.g. "my-bucket-1250000000"
+    cos_bucket: str = ""  # e.g. "my-bucket-1250000000"
     cos_region: str = "ap-beijing"
-    cos_base_url: str = ""      # optional CDN domain prefix
+    cos_base_url: str = ""  # optional CDN domain prefix
 
     # Default LLM
     default_llm_provider: str = "openai"
@@ -65,10 +65,10 @@ class Settings(BaseSettings):
     # 在微信开放平台 https://open.weixin.qq.com 注册第三方平台后获取
     # 配置后用户可通过扫码一键授权公众号，无需手动填写 AppID/AppSecret
     # 详见: docs/wechat-platform-setup.md
-    wechat_platform_appid: str = ""         # 第三方平台 AppID
-    wechat_platform_secret: str = ""        # 第三方平台 AppSecret
-    wechat_platform_token: str = ""         # 消息校验 Token（自定义，需与开放平台一致）
-    wechat_platform_aes_key: str = ""       # 消息加解密 Key（自定义，需与开放平台一致）
+    wechat_platform_appid: str = ""  # 第三方平台 AppID
+    wechat_platform_secret: str = ""  # 第三方平台 AppSecret
+    wechat_platform_token: str = ""  # 消息校验 Token（自定义，需与开放平台一致）
+    wechat_platform_aes_key: str = ""  # 消息加解密 Key（自定义，需与开放平台一致）
 
     # Trending hotspot auto-refresh interval in minutes (0 = disabled).
     # Default: every 60 minutes. Scheduler picks this up at startup.
@@ -94,7 +94,9 @@ class Settings(BaseSettings):
 
     # Which platforms to prioritize from TrendRadar (comma-separated)
     # Default: all 11 platforms (weibo,douyin,xiaohongshu,baidu,zhihu,toutiao,bilibili,v2ex,github,newsnow,rss)
-    trendradar_platforms: str = "weibo,douyin,xiaohongshu,baidu,zhihu,toutiao,bilibili,v2ex,github,newsnow,rss"
+    trendradar_platforms: str = (
+        "weibo,douyin,xiaohongshu,baidu,zhihu,toutiao,bilibili,v2ex,github,newsnow,rss"
+    )
 
     # AI analysis integration (Phase 2 - display TrendRadar AI insights in UI)
     trendradar_ai_analysis_enabled: bool = False
@@ -122,6 +124,7 @@ class Settings(BaseSettings):
         if self.server_host:
             return self.server_host
         import socket
+
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             s.settimeout(2)

@@ -5,6 +5,7 @@ Two modes:
   A. Storage read: read from TrendRadar's local SQLite if trendradar_data_dir is set
   B. Live fetch: call DataFetcher.crawl_websites() for fresh data (fallback or default)
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -14,7 +15,6 @@ from typing import Any
 
 from trendradar.crawler.fetcher import DataFetcher
 from trendradar.storage.manager import StorageManager
-from trendradar.storage.base import convert_crawl_results_to_news_data
 
 from agent_publisher.services.trendradar_adapter import TrendRadarNewsItem
 
@@ -136,25 +136,27 @@ def _live_fetch_sync(platform_ids: list[str]) -> list[TrendRadarNewsItem]:
             mobile_url = data.get("mobileUrl", "")
 
             # count = number of ranks (how many times it appeared in one crawl)
-            count = len(ranks) if ranks else 1
+            len(ranks) if ranks else 1
             hot_value = max(0.0, min(100.0, 100.0 * math.exp(-0.05 * (rank - 1))))
 
-            items.append(TrendRadarNewsItem(
-                title=title,
-                url=url,
-                source_platform=source_id,
-                hot_value=hot_value,
-                rank=rank,
-                summary=None,
-                image_url=None,
-                timestamp=None,
-                metadata={
-                    "mobile_url": mobile_url,
-                    "ranks": ranks,
-                    "platform_name": platform_name,
-                    "source": "trendradar_live_fetch",
-                },
-            ))
+            items.append(
+                TrendRadarNewsItem(
+                    title=title,
+                    url=url,
+                    source_platform=source_id,
+                    hot_value=hot_value,
+                    rank=rank,
+                    summary=None,
+                    image_url=None,
+                    timestamp=None,
+                    metadata={
+                        "mobile_url": mobile_url,
+                        "ranks": ranks,
+                        "platform_name": platform_name,
+                        "source": "trendradar_live_fetch",
+                    },
+                )
+            )
 
     if failed_ids:
         logger.warning("TrendRadar live fetch failed for platforms: %s", failed_ids)
@@ -228,9 +230,7 @@ async def fetch_trending_via_trendradar(
 
     # Try storage read first (if configured)
     if trendradar_data_dir:
-        items = await asyncio.to_thread(
-            _storage_read_sync, platform_ids, trendradar_data_dir
-        )
+        items = await asyncio.to_thread(_storage_read_sync, platform_ids, trendradar_data_dir)
         if items is not None:
             return items
         logger.info("TrendRadar storage empty, falling back to live fetch")

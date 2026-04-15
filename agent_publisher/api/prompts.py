@@ -48,7 +48,9 @@ async def list_prompts(
     user: UserContext = Depends(get_current_user),
 ):
     svc = PromptTemplateService(db)
-    templates = await svc.list_templates(None if user.is_admin else user.email, category=category, keyword=keyword)
+    templates = await svc.list_templates(
+        None if user.is_admin else user.email, category=category, keyword=keyword
+    )
     return [
         PromptTemplateOut(
             id=item.id,
@@ -120,7 +122,9 @@ async def update_prompt(
     if not item:
         raise HTTPException(status_code=404, detail="Prompt template not found")
     if item.is_builtin and not user.is_admin:
-        raise HTTPException(status_code=403, detail="Built-in prompt template can only be edited by admin")
+        raise HTTPException(
+            status_code=403, detail="Built-in prompt template can only be edited by admin"
+        )
     if item.owner_email and item.owner_email != user.email and not user.is_admin:
         raise HTTPException(status_code=403, detail="Access denied")
     updates = data.model_dump(exclude_none=True)

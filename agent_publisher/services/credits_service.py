@@ -161,12 +161,12 @@ class CreditsService:
     async def get_monthly_stats(self, user_email: str) -> dict:
         """Get current month consumption stats."""
         from datetime import datetime, timezone
+
         now = datetime.now(timezone.utc)
         month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
         result = await self.session.execute(
-            select(CreditsTransaction)
-            .where(
+            select(CreditsTransaction).where(
                 CreditsTransaction.user_email == user_email,
                 CreditsTransaction.credits_amount < 0,
                 CreditsTransaction.created_at >= month_start,

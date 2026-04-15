@@ -56,25 +56,27 @@ class MiniMaxImageService:
             raise RuntimeError("mmx CLI not installed. Run: npm install -g mmx-cli")
 
         out_dir = tempfile.mkdtemp(prefix="mmx-img-")
-        result = await asyncio.to_thread(
-            self._run_generate, prompt, aspect_ratio, out_dir
-        )
+        result = await asyncio.to_thread(self._run_generate, prompt, aspect_ratio, out_dir)
         return result
 
-    def _run_generate(
-        self, prompt: str, aspect_ratio: str, out_dir: str
-    ) -> str:
+    def _run_generate(self, prompt: str, aspect_ratio: str, out_dir: str) -> str:
         """Synchronous wrapper that calls mmx CLI."""
         import subprocess
 
         cmd = [
             self._mmx_bin,
-            "image", "generate",
-            "--prompt", prompt,
-            "--aspect-ratio", aspect_ratio,
-            "--out-dir", out_dir,
-            "--output", "json",
-            "--region", self.region,
+            "image",
+            "generate",
+            "--prompt",
+            prompt,
+            "--aspect-ratio",
+            aspect_ratio,
+            "--out-dir",
+            out_dir,
+            "--output",
+            "json",
+            "--region",
+            self.region,
         ]
 
         logger.info("MiniMax image generate: aspect=%s prompt=%.60s...", aspect_ratio, prompt)

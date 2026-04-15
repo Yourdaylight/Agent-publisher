@@ -1,8 +1,8 @@
 """数据源注册中心 — SourceConfig CRUD + Agent 绑定 + 采集编排"""
+
 from __future__ import annotations
 
 import logging
-from typing import Sequence
 
 from sqlalchemy import and_, delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -156,8 +156,6 @@ class SourceRegistryService:
         )
         result = await self.session.execute(stmt)
         return result.scalars().first()
-        logger.info("Bound agent %d to source %d", agent_id, data.source_config_id)
-        return binding
 
     async def unbind_agent(self, agent_id: int, source_config_id: int) -> bool:
         """解绑 Agent 与数据源"""
@@ -211,7 +209,9 @@ class SourceRegistryService:
 
         # 获取所有启用的绑定
         bindings = await self.list_agent_bindings(agent.id)
-        enabled_bindings = [b for b in bindings if b.is_enabled and b.source_config and b.source_config.is_enabled]
+        enabled_bindings = [
+            b for b in bindings if b.is_enabled and b.source_config and b.source_config.is_enabled
+        ]
 
         if not enabled_bindings:
             logger.info("No enabled source bindings for agent %s", agent.name)
@@ -244,7 +244,8 @@ class SourceRegistryService:
         total = sum(len(ids) for ids in results.values())
         logger.info(
             "Collected %d total materials for agent %s: %s",
-            total, agent.name,
+            total,
+            agent.name,
             {k: len(v) for k, v in results.items()},
         )
         return results
@@ -254,7 +255,7 @@ class SourceRegistryService:
 
         Uses TrendRadar adapter for data fetching.
         """
-        from agent_publisher.services.trendradar_adapter import TrendRadarAdapter, get_trendradar_adapter
+        from agent_publisher.services.trendradar_adapter import get_trendradar_adapter
 
         sources = await self.list_sources(source_type="trending", is_enabled=True)
         seen_platforms: set[str] = set()
@@ -287,9 +288,7 @@ class SourceRegistryService:
             "duplicate_items": result.get("duplicates_skipped", 0),
         }
 
-    async def _collect_rss(
-        self, agent: Agent, bindings: list[AgentSourceBinding]
-    ) -> list[int]:
+    async def _collect_rss(self, agent: Agent, bindings: list[AgentSourceBinding]) -> list[int]:
         """RSS 采集 — 复用已有 RssCollectorAdapter"""
         from agent_publisher.services.rss_service import RssCollectorAdapter
 
@@ -298,10 +297,12 @@ class SourceRegistryService:
             cfg = binding.source_config.config or {}
             url = cfg.get("url", "")
             if url:
-                rss_sources.append({
-                    "url": url,
-                    "name": binding.source_config.display_name,
-                })
+                rss_sources.append(
+                    {
+                        "url": url,
+                        "name": binding.source_config.display_name,
+                    }
+                )
 
         if not rss_sources:
             return []
@@ -317,7 +318,7 @@ class SourceRegistryService:
         self, agent: Agent, bindings: list[AgentSourceBinding]
     ) -> list[int]:
         """热榜采集 — 使用 TrendRadar adapter 获取热点数据。"""
-        from agent_publisher.services.trendradar_adapter import TrendRadarAdapter, get_trendradar_adapter
+        from agent_publisher.services.trendradar_adapter import get_trendradar_adapter
 
         platform_ids: list[str] = []
         all_filter_keywords: list[str] = []
@@ -346,7 +347,8 @@ class SourceRegistryService:
         if result["status"] != "success":
             logger.error(
                 "TrendRadar collection failed for agent %s: %s",
-                agent.name, result.get("error", "unknown"),
+                agent.name,
+                result.get("error", "unknown"),
             )
             return []
 
@@ -366,10 +368,7 @@ class SourceRegistryService:
         db_result = await self.session.execute(stmt)
         return [row[0] for row in db_result.all()]
 
-    
-    async def _collect_search(
-        self, agent: Agent, bindings: list[AgentSourceBinding]
-    ) -> list[int]:
+    async def _collect_search(self, agent: Agent, bindings: list[AgentSourceBinding]) -> list[int]:
         """搜索采集 — 复用已有 SearchCollector"""
         from agent_publisher.services.search_collector_service import get_search_collector
 

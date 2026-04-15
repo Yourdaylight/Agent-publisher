@@ -46,9 +46,7 @@ BUILTIN_AGENT: dict = {
 
 async def init_builtin_agent(session: AsyncSession) -> None:
     """Ensure the built-in agent exists. Does NOT overwrite user edits."""
-    result = await session.execute(
-        select(Agent).where(Agent.is_builtin.is_(True))
-    )
+    result = await session.execute(select(Agent).where(Agent.is_builtin.is_(True)))
     existing = result.scalar_one_or_none()
     if existing is not None:
         logger.debug("Built-in agent already exists (id=%s), skipping.", existing.id)

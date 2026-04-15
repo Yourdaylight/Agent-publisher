@@ -3,6 +3,7 @@
 Records write operations (POST/PUT/PATCH/DELETE) with operator info extracted
 from the auth middleware. Read operations (GET) are not logged to avoid noise.
 """
+
 from __future__ import annotations
 
 import logging
@@ -23,7 +24,7 @@ SKIP_PREFIXES = (
     "/api/server-info",
     "/api/stats",
     "/api/system-logs",  # Don't log the log queries themselves
-    "/api/tasks/",       # SSE streams
+    "/api/tasks/",  # SSE streams
     "/api/extensions/",  # Extension polling
     "/assets/",
     "/favicon.ico",
@@ -163,17 +164,33 @@ class SystemLogMiddleware(BaseHTTPMiddleware):
 def _build_description(action: str, target_type: str, method: str, path: str) -> str:
     """Build a human-readable description for the log entry."""
     action_names = {
-        "create": "创建", "update": "更新", "delete": "删除",
-        "publish": "发布", "sync": "同步", "generate": "生成",
-        "auth_scan": "扫码授权", "collect": "采集", "consume": "消耗",
-        "add_member": "添加成员", "remove_member": "移除成员",
+        "create": "创建",
+        "update": "更新",
+        "delete": "删除",
+        "publish": "发布",
+        "sync": "同步",
+        "generate": "生成",
+        "auth_scan": "扫码授权",
+        "collect": "采集",
+        "consume": "消耗",
+        "add_member": "添加成员",
+        "remove_member": "移除成员",
     }
     target_names = {
-        "account": "公众号", "agent": "Agent", "article": "文章",
-        "source": "数据源", "settings": "配置", "task": "任务",
-        "media": "素材", "invite_code": "邀请码", "group": "权限组",
-        "llm_profile": "LLM 配置", "prompt": "提示词", "style_preset": "风格预设",
-        "credits": "Credits", "order": "订单",
+        "account": "公众号",
+        "agent": "Agent",
+        "article": "文章",
+        "source": "数据源",
+        "settings": "配置",
+        "task": "任务",
+        "media": "素材",
+        "invite_code": "邀请码",
+        "group": "权限组",
+        "llm_profile": "LLM 配置",
+        "prompt": "提示词",
+        "style_preset": "风格预设",
+        "credits": "Credits",
+        "order": "订单",
     }
 
     act_text = action_names.get(action, action)
@@ -195,7 +212,10 @@ def _extract_target_id(path: str, target_type: str) -> str:
             return part
     # Try UUID-like segments
     import re
-    uuid_pattern = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', re.I)
+
+    uuid_pattern = re.compile(
+        r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I
+    )
     for part in reversed(parts):
         if uuid_pattern.match(part):
             return part

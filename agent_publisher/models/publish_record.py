@@ -19,9 +19,7 @@ class PublishRecord(Base):
     status: Mapped[str] = mapped_column(String(20), default="success")  # success / failed
     operator: Mapped[str] = mapped_column(String(200), default="admin")  # email or 'admin'
     error_message: Mapped[str] = mapped_column(Text, default="")
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     article: Mapped["Article"] = relationship(back_populates="publish_records")  # noqa: F821
     account: Mapped["Account | None"] = relationship(back_populates="publish_records")  # noqa: F821

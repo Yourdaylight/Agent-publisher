@@ -41,13 +41,7 @@ from agent_publisher.config import settings
 from agent_publisher.models.account import Account
 from agent_publisher.models.agent import Agent
 from agent_publisher.models.article import Article
-from agent_publisher.models.llm_profile import LLMProfile
 from agent_publisher.models.media import MediaAsset
-from agent_publisher.models.style_preset import StylePreset
-from agent_publisher.models.prompt_template import PromptTemplate
-from agent_publisher.models.membership_plan import MembershipPlan
-from agent_publisher.models.user_membership import UserMembership
-from agent_publisher.models.order import Order
 from agent_publisher.models.task import Task
 from agent_publisher.models.credits import CreditsBalance, CreditsTransaction  # noqa: F401
 from agent_publisher.models.group import UserGroup, UserGroupMember  # noqa: F401 – ensure tables are created
@@ -108,16 +102,22 @@ async def _auto_migrate_sqlite(conn):
                 for c in cols:
                     col_type = str(c["type"])
                     name = c["name"]
-                    nullable_part = "" if c.get("nullable", True) or name == "account_id" else " NOT NULL"
-                    default_part = f" DEFAULT {c['default']}" if c.get("default") is not None else ""
+                    nullable_part = (
+                        "" if c.get("nullable", True) or name == "account_id" else " NOT NULL"
+                    )
+                    default_part = (
+                        f" DEFAULT {c['default']}" if c.get("default") is not None else ""
+                    )
                     pk = " PRIMARY KEY" if name == "id" else ""
                     col_defs.append(f"{name} {col_type}{pk}{nullable_part}{default_part}")
                 col_list = ", ".join(col_defs)
                 col_names = ", ".join(c["name"] for c in cols)
-                sync_conn.execute(sa.text(f"ALTER TABLE agents RENAME TO _agents_old"))
+                sync_conn.execute(sa.text("ALTER TABLE agents RENAME TO _agents_old"))
                 sync_conn.execute(sa.text(f"CREATE TABLE agents ({col_list})"))
-                sync_conn.execute(sa.text(f"INSERT INTO agents ({col_names}) SELECT {col_names} FROM _agents_old"))
-                sync_conn.execute(sa.text(f"DROP TABLE _agents_old"))
+                sync_conn.execute(
+                    sa.text(f"INSERT INTO agents ({col_names}) SELECT {col_names} FROM _agents_old")
+                )
+                sync_conn.execute(sa.text("DROP TABLE _agents_old"))
 
     await conn.run_sync(_do_migrate)
 
@@ -137,6 +137,7 @@ async def lifespan(app: FastAPI):
     from agent_publisher.services.style_preset_service import StylePresetService
     from agent_publisher.services.prompt_template_service import PromptTemplateService
     from agent_publisher.services.membership_service import MembershipService
+
     async with async_session_factory() as session:
         sps = StylePresetService(session)
         await sps.init_builtin_presets()
@@ -147,11 +148,13 @@ async def lifespan(app: FastAPI):
 
     # Initialize built-in agent(s)
     from agent_publisher.services.agent_init_service import init_builtin_agent
+
     async with async_session_factory() as session:
         await init_builtin_agent(session)
 
     # Seed default trending platform sources
     from agent_publisher.services.source_registry_service import SourceRegistryService
+
     async with async_session_factory() as session:
         registry = SourceRegistryService(session)
         seeded = await registry.seed_default_sources()
@@ -161,28 +164,36 @@ async def lifespan(app: FastAPI):
     logger.info("Starting Agent Publisher scheduler...")
     await sync_agent_schedules()
     from agent_publisher.scheduler import sync_trending_schedule
+
     sync_trending_schedule()
 
     # Schedule platform token refresh (if configured)
     from agent_publisher.scheduler import sync_platform_token_schedule
+
     sync_platform_token_schedule()
 
     # Auto-install wenyan-cli if not found
     import shutil
-    if not shutil.which('wenyan'):
+
+    if not shutil.which("wenyan"):
         logger.info("wenyan-cli not found, attempting auto-install via npm...")
         import subprocess
+
         try:
             result = subprocess.run(
-                ['npm', 'install', '-g', '@wenyan-md/cli'],
-                capture_output=True, text=True, timeout=120,
+                ["npm", "install", "-g", "@wenyan-md/cli"],
+                capture_output=True,
+                text=True,
+                timeout=120,
             )
             if result.returncode == 0:
                 logger.info("wenyan-cli installed successfully.")
             else:
                 logger.warning("wenyan-cli install failed: %s", result.stderr[:500])
         except FileNotFoundError:
-            logger.warning("npm not found — wenyan-cli auto-install skipped. Install Node.js to enable typesetting.")
+            logger.warning(
+                "npm not found — wenyan-cli auto-install skipped. Install Node.js to enable typesetting."
+            )
         except subprocess.TimeoutExpired:
             logger.warning("wenyan-cli install timed out.")
         except Exception as e:
@@ -217,8 +228,8 @@ PUBLIC_PREFIXES = (
     "/api/membership/plans",
     "/api/membership/contact",
     "/api/wechat-platform/ticket-callback",  # WeChat pushes verify_ticket here
-    "/api/wechat-platform/event-callback",   # WeChat pushes auth events here
-    "/api/wechat-platform/auth-callback",     # WeChat redirects after scan auth
+    "/api/wechat-platform/event-callback",  # WeChat pushes auth events here
+    "/api/wechat-platform/auth-callback",  # WeChat redirects after scan auth
     "/assets/",
     "/favicon.ico",
 )
@@ -252,15 +263,17 @@ async def auth_middleware(request: Request, call_next) -> Response:
         "/api/extensions/slideshow/chapter/",
         "/api/extensions/slideshow/timeline/",
         "/api/extensions/slideshow/status/",
-        "/api/extensions/video/preview/",   # Remotion video extension
+        "/api/extensions/video/preview/",  # Remotion video extension
         "/api/extensions/video/download/",  # MP4 download (window.open can't send Bearer header)
-        "/api/extensions/video/status/",    # Video status polling
+        "/api/extensions/video/status/",  # Video status polling
         "/api/tasks/",  # SSE task streaming (EventSource can't send headers)
     )
     if any(path.startswith(p) for p in SLIDESHOW_TOKEN_PATHS):
         auth_header = request.headers.get("authorization", "")
         query_token = request.query_params.get("token", "")
-        effective_token = (auth_header[7:] if auth_header.startswith("Bearer ") else None) or query_token
+        effective_token = (
+            auth_header[7:] if auth_header.startswith("Bearer ") else None
+        ) or query_token
         if effective_token:
             # Validate and inject identity so route handler can use request.state
             if "|" in effective_token:
@@ -366,22 +379,44 @@ async def stats(
         media = (await db.execute(select(func.count(MediaAsset.id)))).scalar() or 0
     else:
         # Normal user: filter by owner_email chain
-        accounts = (await db.execute(
-            select(func.count(Account.id)).where(Account.owner_email == user.email)
-        )).scalar() or 0
-        agents = (await db.execute(
-            select(func.count(Agent.id)).join(Account).where(Account.owner_email == user.email)
-        )).scalar() or 0
-        articles = (await db.execute(
-            select(func.count(Article.id)).join(Agent).join(Account).where(Account.owner_email == user.email)
-        )).scalar() or 0
-        tasks = (await db.execute(
-            select(func.count(Task.id)).join(Agent).join(Account).where(Account.owner_email == user.email)
-        )).scalar() or 0
-        media = (await db.execute(
-            select(func.count(MediaAsset.id)).where(MediaAsset.owner_email == user.email)
-        )).scalar() or 0
-    return {"accounts": accounts, "agents": agents, "articles": articles, "tasks": tasks, "media": media}
+        accounts = (
+            await db.execute(
+                select(func.count(Account.id)).where(Account.owner_email == user.email)
+            )
+        ).scalar() or 0
+        agents = (
+            await db.execute(
+                select(func.count(Agent.id)).join(Account).where(Account.owner_email == user.email)
+            )
+        ).scalar() or 0
+        articles = (
+            await db.execute(
+                select(func.count(Article.id))
+                .join(Agent)
+                .join(Account)
+                .where(Account.owner_email == user.email)
+            )
+        ).scalar() or 0
+        tasks = (
+            await db.execute(
+                select(func.count(Task.id))
+                .join(Agent)
+                .join(Account)
+                .where(Account.owner_email == user.email)
+            )
+        ).scalar() or 0
+        media = (
+            await db.execute(
+                select(func.count(MediaAsset.id)).where(MediaAsset.owner_email == user.email)
+            )
+        ).scalar() or 0
+    return {
+        "accounts": accounts,
+        "agents": agents,
+        "articles": articles,
+        "tasks": tasks,
+        "media": media,
+    }
 
 
 @app.get("/api/stats/source-modes")
@@ -390,6 +425,7 @@ async def source_mode_stats(
     user: UserContext = Depends(get_current_user),
 ):
     from agent_publisher.services.governance_service import GovernanceService
+
     svc = GovernanceService(db)
     # Admin sees global stats; regular users see only their own
     owner_email = None if user.is_admin else user.email
@@ -402,6 +438,7 @@ async def tag_stats(
     user: UserContext = Depends(get_current_user),
 ):
     from agent_publisher.services.governance_service import GovernanceService
+
     svc = GovernanceService(db)
     owner_email = None if user.is_admin else user.email
     return await svc.get_tag_stats(owner_email=owner_email)
@@ -414,6 +451,7 @@ async def intake_trend(
     user: UserContext = Depends(get_current_user),
 ):
     from agent_publisher.services.governance_service import GovernanceService
+
     svc = GovernanceService(db)
     owner_email = None if user.is_admin else user.email
     return await svc.get_daily_intake_trend(days, owner_email=owner_email)
@@ -459,6 +497,7 @@ if STATIC_DIR.is_dir():
             return FileResponse(file)
         return FileResponse(STATIC_DIR / "index.html")
 else:
+
     @app.get("/")
     async def root():
         info = get_version_info()

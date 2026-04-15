@@ -19,9 +19,7 @@ class TaskService:
     def __init__(self, session: AsyncSession):
         self.session = session
 
-    async def create_task(
-        self, agent_id: int | None, task_type: str
-    ) -> Task:
+    async def create_task(self, agent_id: int | None, task_type: str) -> Task:
         task = Task(
             agent_id=agent_id,
             task_type=task_type,
@@ -128,9 +126,7 @@ class TaskService:
         await self.session.commit()
 
         # Fire background execution
-        asyncio.create_task(
-            _execute_batch_variants(task.id, source_article_id, combinations)
-        )
+        asyncio.create_task(_execute_batch_variants(task.id, source_article_id, combinations))
         return task
 
 
@@ -264,7 +260,9 @@ async def _execute_batch_variants(
                     except Exception as e:
                         logger.error(
                             "Variant generation failed (agent=%d, style=%s): %s",
-                            agent_id, style_id, e,
+                            agent_id,
+                            style_id,
+                            e,
                         )
                         subtasks[index]["status"] = "failed"
                         subtasks[index]["error"] = str(e)
@@ -303,5 +301,7 @@ async def _execute_batch_variants(
 
         logger.info(
             "Batch variant task %d finished: %d succeeded, %d failed",
-            task_id, succeeded, failed,
+            task_id,
+            succeeded,
+            failed,
         )

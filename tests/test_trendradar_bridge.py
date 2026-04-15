@@ -1,8 +1,8 @@
 """Tests for TrendRadar bridge — converts TrendRadar data models to Agent-Publisher format."""
+
 from __future__ import annotations
 
 import pytest
-from datetime import datetime, timezone
 from unittest.mock import patch, MagicMock
 
 from agent_publisher.services.trendradar_bridge import (
@@ -241,9 +241,11 @@ class TestFetchTrendingViaTrendRadar:
     @pytest.mark.asyncio
     async def test_storage_read_mode(self):
         """When storage path is set and data exists, reads from storage."""
-        mock_newsdata = _make_newsdata({
-            "zhihu": [_make_newsitem(title="知乎热点", source_id="zhihu")],
-        })
+        mock_newsdata = _make_newsdata(
+            {
+                "zhihu": [_make_newsitem(title="知乎热点", source_id="zhihu")],
+            }
+        )
 
         with patch("agent_publisher.services.trendradar_bridge.StorageManager") as MockSM:
             mock_sm = MagicMock()

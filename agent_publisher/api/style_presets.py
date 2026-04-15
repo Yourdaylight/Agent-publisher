@@ -1,4 +1,5 @@
 """Admin API for style preset management."""
+
 from __future__ import annotations
 
 import logging
@@ -18,6 +19,7 @@ router = APIRouter(prefix="/api/style-presets", tags=["style-presets"])
 # ---------------------------------------------------------------------------
 # Request / Response schemas
 # ---------------------------------------------------------------------------
+
 
 class StylePresetCreate(BaseModel):
     style_id: str
@@ -47,6 +49,7 @@ class StylePresetOut(BaseModel):
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
+
 
 @router.get("", response_model=list[StylePresetOut])
 async def list_style_presets(db: AsyncSession = Depends(get_db)):

@@ -33,6 +33,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class TrendRadarNewsItem:
     """Unified news item from TrendRadar aggregation."""
+
     title: str
     url: str
     source_platform: str  # weibo, douyin, zhihu, baidu, toutiao, bilibili, etc.
@@ -69,7 +70,7 @@ class TrendRadarNewsItem:
         """Build structured raw content from trending item."""
         lines = [
             f"# {self.title}\n",
-            f"## 基本信息\n",
+            "## 基本信息\n",
             f"- **平台**: {self.source_platform.capitalize()}\n",
             f"- **热度**: {self.hot_value:.1f}/100\n",
             f"- **排名**: #{self.rank}\n",
@@ -147,9 +148,7 @@ class TrendRadarAdapter:
             # Determine platform list
             if not platforms:
                 platforms = [
-                    p.strip()
-                    for p in settings.trendradar_platforms.split(",")
-                    if p.strip()
+                    p.strip() for p in settings.trendradar_platforms.split(",") if p.strip()
                 ]
 
             logger.info(
@@ -224,9 +223,7 @@ class TrendRadarAdapter:
         existing_urls: set[str] = set()
         if agent_id is not None:
             result = await self.db.execute(
-                select(CandidateMaterial.original_url).where(
-                    CandidateMaterial.agent_id == agent_id
-                )
+                select(CandidateMaterial.original_url).where(CandidateMaterial.agent_id == agent_id)
             )
             existing_urls = set(row[0] for row in result.all())
         else:

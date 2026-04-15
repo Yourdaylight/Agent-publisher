@@ -26,6 +26,7 @@ router = APIRouter(prefix="/api/articles", tags=["articles"])
 
 class ArticleUpdate(BaseModel):
     """Request body for updating an article."""
+
     title: str | None = None
     digest: str | None = None
     content: str | None = None
@@ -35,6 +36,7 @@ class ArticleUpdate(BaseModel):
 
 class VariantGenerateRequest(BaseModel):
     """Request body for batch variant generation."""
+
     agent_ids: list[int]
     style_ids: list[str]
 
@@ -57,10 +59,12 @@ async def _get_article_with_ownership(
     a shared permission group. Write operations (update/publish/sync) must still
     be performed by the article owner or an admin.
     """
-    stmt = select(Article).where(Article.id == article_id).options(
-        selectinload(Article.publish_relations).selectinload(
-            ArticlePublishRelation.account
-        ),
+    stmt = (
+        select(Article)
+        .where(Article.id == article_id)
+        .options(
+            selectinload(Article.publish_relations).selectinload(ArticlePublishRelation.account),
+        )
     )
     result = await db.execute(stmt)
     article = result.scalar_one_or_none()
@@ -80,14 +84,14 @@ async def _get_article_with_ownership(
     return article
 
 
-async def _get_article_own_only(
-    article_id: int, user: UserContext, db: AsyncSession
-) -> Article:
+async def _get_article_own_only(article_id: int, user: UserContext, db: AsyncSession) -> Article:
     """Stricter check: only the owner (or admin) may modify the article."""
-    stmt = select(Article).where(Article.id == article_id).options(
-        selectinload(Article.publish_relations).selectinload(
-            ArticlePublishRelation.account
-        ),
+    stmt = (
+        select(Article)
+        .where(Article.id == article_id)
+        .options(
+            selectinload(Article.publish_relations).selectinload(ArticlePublishRelation.account),
+        )
     )
     result = await db.execute(stmt)
     article = result.scalar_one_or_none()
@@ -115,21 +119,26 @@ async def list_articles(
     stmt = select(Article).order_by(Article.id.desc())
     if not user.is_admin:
         visible_emails = await get_visible_emails(user, db)
-        stmt = stmt.join(Agent, Article.agent_id == Agent.id).join(
-            Account, Agent.account_id == Account.id
-        ).where(Account.owner_email.in_(visible_emails))
+        stmt = (
+            stmt.join(Agent, Article.agent_id == Agent.id)
+            .join(Account, Agent.account_id == Account.id)
+            .where(Account.owner_email.in_(visible_emails))
+        )
     elif group_id is not None:
         # Admin filtering by a specific group
         from agent_publisher.models.group import UserGroupMember
+
         member_emails_stmt = select(UserGroupMember.email).where(
             UserGroupMember.group_id == group_id
         )
         member_emails_result = await db.execute(member_emails_stmt)
         group_emails = [row[0] for row in member_emails_result.all()]
         if group_emails:
-            stmt = stmt.join(Agent, Article.agent_id == Agent.id).join(
-                Account, Agent.account_id == Account.id
-            ).where(Account.owner_email.in_(group_emails))
+            stmt = (
+                stmt.join(Agent, Article.agent_id == Agent.id)
+                .join(Account, Agent.account_id == Account.id)
+                .where(Account.owner_email.in_(group_emails))
+            )
         else:
             return []
     if agent_id:
@@ -223,6 +232,7 @@ async def create_article_from_materials(
 
 class BeautifyRequest(BaseModel):
     """Optional params for beautify endpoint."""
+
     theme: str = "default"
 
 
@@ -255,6 +265,7 @@ async def beautify_article(
 
 class AIBeautifyRequest(BaseModel):
     """Optional params for AI beautify endpoint."""
+
     style_hint: str = ""
 
 
@@ -304,6 +315,7 @@ async def ai_beautify_article(
         "html_content": html,
         "credits_consumed": 3,
     }
+
 
 @router.post("/{article_id}/publish", response_model=ArticlePublishResponse)
 async def publish_article(
@@ -429,6 +441,7 @@ async def generate_cover_image(
         raise HTTPException(402, consume_result.get("error", "Credits 不足"))
 
     from agent_publisher.services.minimax_image_service import MiniMaxImageService
+
     image_svc = MiniMaxImageService()
 
     title = article.title or "科技资讯"
@@ -470,6 +483,7 @@ async def generate_cover_image(
 
 class InlineImageRequest(BaseModel):
     """Request body for inline image generation."""
+
     prompt: str
     aspect_ratio: str = "1:1"
 
@@ -500,6 +514,7 @@ async def generate_inline_image(
         raise HTTPException(402, consume_result.get("error", "Credits 不足"))
 
     from agent_publisher.services.minimax_image_service import MiniMaxImageService
+
     image_svc = MiniMaxImageService()
 
     try:
@@ -569,9 +584,7 @@ async def list_article_variants(
     from agent_publisher.models.agent import Agent
 
     stmt = (
-        select(Article)
-        .where(Article.source_article_id == article_id)
-        .order_by(Article.id.desc())
+        select(Article).where(Article.source_article_id == article_id).order_by(Article.id.desc())
     )
     result = await db.execute(stmt)
     variants = result.scalars().all()
@@ -580,9 +593,7 @@ async def list_article_variants(
     agent_ids = list({v.agent_id for v in variants})
     agent_names: dict[int, str] = {}
     if agent_ids:
-        agent_result = await db.execute(
-            select(Agent.id, Agent.name).where(Agent.id.in_(agent_ids))
-        )
+        agent_result = await db.execute(select(Agent.id, Agent.name).where(Agent.id.in_(agent_ids)))
         agent_names = dict(agent_result.all())
 
     return [

@@ -35,9 +35,7 @@ class CandidateMaterial(Base):
     quality_score: Mapped[float | None] = mapped_column(Float, default=None, nullable=True)
     # Status: pending / accepted / rejected
     status: Mapped[str] = mapped_column(String(20), default="pending")
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     agent: Mapped["Agent"] = relationship(backref="candidate_materials")  # noqa: F821
 

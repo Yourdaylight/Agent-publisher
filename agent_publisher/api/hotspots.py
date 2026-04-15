@@ -11,7 +11,13 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from agent_publisher.api.deps import UserContext, get_current_user, get_db, get_visible_emails, require_admin
+from agent_publisher.api.deps import (
+    UserContext,
+    get_current_user,
+    get_db,
+    get_visible_emails,
+    require_admin,
+)
 from agent_publisher.models.account import Account
 from agent_publisher.models.agent import Agent
 from agent_publisher.models.candidate_material import CandidateMaterial
@@ -27,7 +33,9 @@ class HotspotCreateArticleRequest(BaseModel):
     style_id: str | None = None
     user_prompt: str | None = None
     mode: str | None = None  # rewrite / summary / expand
-    extra_material_ids: list[int] | None = None  # additional hotspot IDs for multi-material creation
+    extra_material_ids: list[int] | None = (
+        None  # additional hotspot IDs for multi-material creation
+    )
 
 
 class HotspotExportRequest(BaseModel):
@@ -64,16 +72,22 @@ def _extract_platform(item: CandidateMaterial) -> str:
 
 
 async def _load_visible_hotspots(db: AsyncSession, user: UserContext) -> list[CandidateMaterial]:
-    stmt = select(CandidateMaterial).where(
-        CandidateMaterial.source_type == "trending",
-        CandidateMaterial.is_duplicate.is_(False),
-    ).order_by(CandidateMaterial.created_at.desc())
+    stmt = (
+        select(CandidateMaterial)
+        .where(
+            CandidateMaterial.source_type == "trending",
+            CandidateMaterial.is_duplicate.is_(False),
+        )
+        .order_by(CandidateMaterial.created_at.desc())
+    )
     if not user.is_admin:
         visible_emails = await get_visible_emails(user, db)
         stmt = (
             stmt.join(Agent, CandidateMaterial.agent_id == Agent.id, isouter=True)
             .join(Account, Agent.account_id == Account.id, isouter=True)
-            .where((CandidateMaterial.agent_id.is_(None)) | (Account.owner_email.in_(visible_emails)))
+            .where(
+                (CandidateMaterial.agent_id.is_(None)) | (Account.owner_email.in_(visible_emails))
+            )
         )
     result = await db.execute(stmt)
     return list(result.scalars().all())
@@ -116,8 +130,7 @@ def _apply_hotspot_filters(
         platform_filters.append(platform.strip().lower())
     if platform_filters:
         filtered = [
-            item for item in filtered
-            if _extract_platform(item).lower() in platform_filters
+            item for item in filtered if _extract_platform(item).lower() in platform_filters
         ]
 
     if tag:
@@ -126,8 +139,10 @@ def _apply_hotspot_filters(
     if keyword:
         keyword_lower = keyword.lower()
         filtered = [
-            item for item in filtered
-            if keyword_lower in (item.title or "").lower() or keyword_lower in (item.summary or "").lower()
+            item
+            for item in filtered
+            if keyword_lower in (item.title or "").lower()
+            or keyword_lower in (item.summary or "").lower()
         ]
 
     if heat_min is not None:
@@ -168,7 +183,7 @@ async def list_hotspots(
         time_range=time_range,
     )
     total = len(filtered)
-    page_items = filtered[offset: offset + limit]
+    page_items = filtered[offset : offset + limit]
     return {
         "items": [_serialize_hotspot(item) for item in page_items],
         "total": total,
@@ -183,11 +198,12 @@ async def list_hotspot_platforms(
     user: UserContext = Depends(get_current_user),
 ):
     items = await _load_visible_hotspots(db, user)
-    counter = Counter(_extract_platform(item) for item in items if _extract_platform(item) and _extract_platform(item) != "未知")
-    return [
-        {"value": name, "label": name, "count": count}
-        for name, count in counter.most_common()
-    ]
+    counter = Counter(
+        _extract_platform(item)
+        for item in items
+        if _extract_platform(item) and _extract_platform(item) != "未知"
+    )
+    return [{"value": name, "label": name, "count": count} for name, count in counter.most_common()]
 
 
 @router.get("/{hotspot_id}")
@@ -246,15 +262,17 @@ async def export_hotspots(
     writer = csv.writer(buf)
     writer.writerow(["ID", "标题", "摘要", "链接", "标签", "质量分", "创建时间"])
     for item in items:
-        writer.writerow([
-            item["id"],
-            item["title"],
-            item["summary"],
-            item["original_url"],
-            ", ".join(item["tags"]),
-            item["quality_score"],
-            item["created_at"],
-        ])
+        writer.writerow(
+            [
+                item["id"],
+                item["title"],
+                item["summary"],
+                item["original_url"],
+                ", ".join(item["tags"]),
+                item["quality_score"],
+                item["created_at"],
+            ]
+        )
     output = io.BytesIO(buf.getvalue().encode("utf-8-sig"))
     return StreamingResponse(
         output,
@@ -299,9 +317,7 @@ async def create_article_from_hotspot(
                 raise HTTPException(status_code=403, detail="Access denied")
     else:
         # No agent specified — try the built-in agent first, fallback to transient
-        builtin_result = await db.execute(
-            select(Agent).where(Agent.is_builtin.is_(True)).limit(1)
-        )
+        builtin_result = await db.execute(select(Agent).where(Agent.is_builtin.is_(True)).limit(1))
         agent = builtin_result.scalar_one_or_none()
         if agent is None:
             # Build a rich transient agent with vertical context from the hotspot
@@ -370,14 +386,14 @@ async def create_article_from_hotspot_async(
         if not agent:
             raise HTTPException(status_code=404, detail="Agent not found")
     else:
-        builtin_result = await db.execute(
-            select(Agent).where(Agent.is_builtin.is_(True)).limit(1)
-        )
+        builtin_result = await db.execute(select(Agent).where(Agent.is_builtin.is_(True)).limit(1))
         agent = builtin_result.scalar_one_or_none()
         if agent is None:
             platform = (hotspot.extra_metadata or {}).get("platform_name", "")
             agent = Agent(
-                id=None, name="默认写作身份", topic=hotspot.title[:40],
+                id=None,
+                name="默认写作身份",
+                topic=hotspot.title[:40],
                 description=(
                     f"你是一个专注于热点话题的公众号内容编辑。"
                     f"当前话题「{hotspot.title}」"
@@ -385,7 +401,8 @@ async def create_article_from_hotspot_async(
                     f"请深入分析这个话题，结合行业背景和受众兴趣，"
                     f"产出一篇有深度、有观点、适合公众号传播的文章。"
                 ),
-                account_id=None, prompt_template="",
+                account_id=None,
+                prompt_template="",
                 image_style="现代简约风格，色彩鲜明",
             )
 
@@ -422,8 +439,10 @@ async def create_article_from_hotspot_async(
     agent_data = None
     if not agent_id:
         agent_data = {
-            "name": agent.name, "topic": agent.topic,
-            "description": agent.description, "prompt_template": agent.prompt_template,
+            "name": agent.name,
+            "topic": agent.topic,
+            "description": agent.description,
+            "prompt_template": agent.prompt_template,
             "image_style": agent.image_style,
         }
 
@@ -442,11 +461,16 @@ async def create_article_from_hotspot_async(
             async def _step_cb(step_name: str, status: str, output: dict):
                 finished_at = datetime.now(timezone.utc).isoformat()
                 started_at = step_start_times.pop(step_name, finished_at)
-                t.steps = [*(t.steps or []), {
-                    "name": step_name, "status": status,
-                    "started_at": started_at, "finished_at": finished_at,
-                    "output": output,
-                }]
+                t.steps = [
+                    *(t.steps or []),
+                    {
+                        "name": step_name,
+                        "status": status,
+                        "started_at": started_at,
+                        "finished_at": finished_at,
+                        "output": output,
+                    },
+                ]
                 await session.commit()
                 next_map = {"material_fetch": "llm_generate", "llm_generate": "save_article"}
                 if step_name in next_map:
@@ -483,6 +507,7 @@ async def create_article_from_hotspot_async(
                 t.result = {"article_id": article.id, "title": article.title}
             except Exception as e:
                 import logging
+
                 logging.getLogger(__name__).error("Hotspot create task %d failed: %s", task_id, e)
                 t.status = "failed"
                 t.result = {**(t.result or {}), "error": str(e)}

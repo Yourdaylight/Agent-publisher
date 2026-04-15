@@ -18,7 +18,8 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 @dataclass
 class UserContext:
     """User identity extracted from the auth middleware."""
-    email: str          # "__admin__" for access_key login, actual email for email login
+
+    email: str  # "__admin__" for access_key login, actual email for email login
     is_admin: bool
 
 
@@ -62,12 +63,9 @@ async def get_visible_emails(user: UserContext, db: AsyncSession) -> set[str]:
     visible: set[str] = {user.email}
     if group_ids:
         member_result = await db.execute(
-            select(UserGroupMember.email).where(
-                UserGroupMember.group_id.in_(group_ids)
-            )
+            select(UserGroupMember.email).where(UserGroupMember.group_id.in_(group_ids))
         )
         for (email,) in member_result.all():
             visible.add(email)
 
     return visible
-
