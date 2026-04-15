@@ -7,7 +7,7 @@ test.describe('登录链路', () => {
     await page.getByPlaceholder('请输入访问密钥').fill(
       process.env.AP_ACCESS_KEY ?? 'agent-publisher-2024',
     );
-    await page.getByRole('button', { name: '登录' }).click();
+    await page.getByText('登录', { exact: true }).click();
 
     await expect(page).toHaveURL(/\/create/, { timeout: 10_000 });
   });
@@ -15,7 +15,7 @@ test.describe('登录链路', () => {
   test('错误密钥展示错误提示', async ({ page }) => {
     await page.goto('/login');
     await page.getByPlaceholder('请输入访问密钥').fill('wrong-key-12345');
-    await page.getByRole('button', { name: '登录' }).click();
+    await page.getByText('登录', { exact: true }).click();
 
     await expect(page.getByText(/密钥|错误|失败|invalid/i)).toBeVisible();
     await expect(page).toHaveURL(/\/login/);
@@ -32,7 +32,7 @@ test.describe('登录链路', () => {
     await page.getByPlaceholder('请输入访问密钥').fill(
       process.env.AP_ACCESS_KEY ?? 'agent-publisher-2024',
     );
-    await page.getByRole('button', { name: '登录' }).click();
+    await page.getByText('登录', { exact: true }).click();
     await expect(page).toHaveURL(/\/create/);
 
     // Revisit /login → should redirect

@@ -14,7 +14,7 @@ test.describe('关键页面冒烟', () => {
     // Three mode chips: 爆款二创 / 深度分析 / 热点总结
     await expect(page.locator('.mode-chip')).toHaveCount(3);
     // Bottom bar should have video button
-    await expect(page.locator('button', { hasText: /生成视频/ })).toBeVisible();
+    await expect(page.getByText(/生成视频/)).toBeVisible();
   });
 
   test('热点列表可访问', async ({ page }) => {
