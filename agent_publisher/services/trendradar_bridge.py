@@ -71,6 +71,10 @@ def newsdata_to_trendradar_newsitems(
 ) -> list[TrendRadarNewsItem]:
     """Convert a TrendRadar NewsData object to a flat list of TrendRadarNewsItem.
 
+    Also computes cross-platform count: if the same title appears across
+    multiple source_ids, each item gets cross_platform_count and all_platforms
+    in its metadata (needed by frontend Trending.vue).
+
     Args:
         newsdata: A TrendRadar NewsData (or duck-typed equivalent with .items dict).
         platforms: Optional platform filter. None = all platforms.
@@ -85,12 +89,31 @@ def newsdata_to_trendradar_newsitems(
     if not items_dict:
         return []
 
+    id_to_name = getattr(newsdata, "id_to_name", {})
+
+    # Phase 1: convert all items
     result: list[TrendRadarNewsItem] = []
     for source_id, news_list in items_dict.items():
         if platforms and source_id not in platforms:
             continue
+        platform_name = id_to_name.get(source_id, source_id)
         for item in news_list:
-            result.append(newsitem_to_trendradar_newsitem(item, source_id))
+            tr_item = newsitem_to_trendradar_newsitem(item, source_id)
+            # Add platform_name from id_to_name mapping
+            tr_item.metadata["platform_name"] = platform_name
+            result.append(tr_item)
+
+    # Phase 2: compute cross-platform counts by title
+    title_platforms: dict[str, set[str]] = {}
+    for item in result:
+        key = item.title.strip().lower()
+        title_platforms.setdefault(key, set()).add(item.source_platform)
+
+    for item in result:
+        key = item.title.strip().lower()
+        cross_platforms = title_platforms.get(key, {item.source_platform})
+        item.metadata["cross_platform_count"] = len(cross_platforms)
+        item.metadata["all_platforms"] = sorted(cross_platforms)
 
     return result
 
@@ -105,6 +128,7 @@ def _live_fetch_sync(platform_ids: list[str]) -> list[TrendRadarNewsItem]:
 
     items: list[TrendRadarNewsItem] = []
     for source_id, titles_data in results.items():
+        platform_name = id_to_name.get(source_id, source_id)
         for title, data in titles_data.items():
             ranks = data.get("ranks", [])
             rank = ranks[0] if ranks else 99
@@ -127,12 +151,25 @@ def _live_fetch_sync(platform_ids: list[str]) -> list[TrendRadarNewsItem]:
                 metadata={
                     "mobile_url": mobile_url,
                     "ranks": ranks,
+                    "platform_name": platform_name,
                     "source": "trendradar_live_fetch",
                 },
             ))
 
     if failed_ids:
         logger.warning("TrendRadar live fetch failed for platforms: %s", failed_ids)
+
+    # Compute cross-platform counts
+    title_platforms: dict[str, set[str]] = {}
+    for item in items:
+        key = item.title.strip().lower()
+        title_platforms.setdefault(key, set()).add(item.source_platform)
+
+    for item in items:
+        key = item.title.strip().lower()
+        cross_platforms = title_platforms.get(key, {item.source_platform})
+        item.metadata["cross_platform_count"] = len(cross_platforms)
+        item.metadata["all_platforms"] = sorted(cross_platforms)
 
     return items
 

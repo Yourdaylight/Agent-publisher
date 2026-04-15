@@ -166,6 +166,46 @@ class TestNewsDataConversion:
         result = newsdata_to_trendradar_newsitems(newsdata, platforms=None)
         assert len(result) == 2
 
+    def test_cross_platform_count_computed(self):
+        """Same title on 3 platforms → cross_platform_count=3 on each."""
+        items = {
+            "weibo": [_make_newsitem(title="AI突破", url="https://weibo.com/1")],
+            "zhihu": [_make_newsitem(title="AI突破", url="https://zhihu.com/1")],
+            "baidu": [_make_newsitem(title="AI突破", url="https://baidu.com/1")],
+        }
+        newsdata = _make_newsdata(items)
+        result = newsdata_to_trendradar_newsitems(newsdata)
+
+        assert len(result) == 3
+        for item in result:
+            assert item.metadata["cross_platform_count"] == 3
+            assert len(item.metadata["all_platforms"]) == 3
+
+    def test_cross_platform_count_single(self):
+        """Unique title on 1 platform → cross_platform_count=1."""
+        items = {
+            "weibo": [_make_newsitem(title="独家新闻", url="https://weibo.com/1")],
+            "zhihu": [_make_newsitem(title="完全不同", url="https://zhihu.com/1")],
+        }
+        newsdata = _make_newsdata(items)
+        result = newsdata_to_trendradar_newsitems(newsdata)
+
+        for item in result:
+            assert item.metadata["cross_platform_count"] == 1
+
+    def test_platform_name_in_metadata(self):
+        """Items include platform_name from id_to_name mapping."""
+        items = {
+            "weibo": [_make_newsitem(title="微博新闻")],
+        }
+        newsdata = _make_newsdata(items)
+        # Override id_to_name with Chinese names
+        newsdata.id_to_name = {"weibo": "微博热搜"}
+        result = newsdata_to_trendradar_newsitems(newsdata)
+
+        assert len(result) == 1
+        assert result[0].metadata["platform_name"] == "微博热搜"
+
 
 # ── Integration test: fetch_trending_via_trendradar ──
 
