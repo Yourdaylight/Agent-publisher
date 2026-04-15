@@ -48,6 +48,13 @@ def reset_login_ip_ban() -> None:
     _ip_records.clear()
 
 
+@pytest.fixture(autouse=True)
+def stub_tencent_credentials(monkeypatch: pytest.MonkeyPatch):
+    """Provide fake Tencent Cloud credentials so HunyuanImageService can init without error."""
+    monkeypatch.setattr(app_settings, 'tencent_secret_id', 'fake-test-id')
+    monkeypatch.setattr(app_settings, 'tencent_secret_key', 'fake-test-key')
+
+
 @pytest.fixture
 def test_settings(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(app_settings, 'access_key', 'test-access-key')
