@@ -114,6 +114,12 @@ class LLMService:
         logger.info("LLM stream call: provider=%s model=%s", provider, model)
         return adapter.generate_stream(model, api_key, messages, base_url=base_url)
 
+    # Output format instruction appended when not present in the prompt
+    OUTPUT_FORMAT = (
+        "请按以下格式输出：\n"
+        "---TITLE---\n文章标题\n---DIGEST---\n摘要\n---CONTENT---\nMarkdown正文"
+    )
+
     @staticmethod
     def build_article_messages(
         topic: str,
@@ -121,18 +127,51 @@ class LLMService:
         prompt_template: str,
         agent_description: str,
     ) -> list[dict]:
-        """Build messages for article generation."""
+        """Build messages for article generation.
+
+        Guarantees that material content (news_list) is ALWAYS included in
+        the user message, even when the prompt template doesn't contain a
+        ``{news_list}`` placeholder.
+        """
         system_prompt = agent_description or (
-            f"你是一个专注于「{topic}」领域的公众号编辑。"
-            "你擅长将多条新闻整合为一篇有深度、有观点的公众号文章。"
+            f"你是一个专注于「{topic}」领域的资深公众号编辑。"
+            "你擅长将热点新闻和素材整合为一篇有深度、有观点的公众号文章。"
+            "你的文章特点：标题精炼吸引人、开头有力、观点鲜明、结构清晰、适合微信公众号阅读。"
         )
 
         if prompt_template:
-            user_prompt = prompt_template.format(
-                topic=topic,
-                news_list=news_list,
-                style="公众号文章",
-            )
+            # Check if template explicitly includes material content placeholder
+            has_news_placeholder = "{news_list}" in prompt_template
+
+            # Safe format: handle stray braces in templates gracefully
+            try:
+                user_prompt = prompt_template.format(
+                    topic=topic,
+                    news_list=news_list,
+                    style="公众号文章",
+                )
+            except (KeyError, ValueError, IndexError):
+                # Template has stray braces or unknown keys — use as-is
+                user_prompt = prompt_template
+                has_news_placeholder = False
+
+            # CRITICAL: If template didn't include {news_list}, append
+            # material content so LLM always sees the source material.
+            if not has_news_placeholder and news_list:
+                user_prompt += (
+                    f"\n\n---\n以下是参考素材：\n\n{news_list}\n\n"
+                    "请基于以上素材，撰写一篇公众号文章。要求：\n"
+                    "1. 标题吸引人，适合公众号传播\n"
+                    "2. 内容有深度分析，不只是新闻堆砌\n"
+                    "3. 使用 Markdown 格式\n"
+                    "4. 文章开头给出一段简短摘要（用于公众号摘要）\n"
+                    "5. 文末总结观点\n"
+                    "6. 字数 1500-3000 字"
+                )
+
+            # Ensure output format instruction is always present
+            if "---TITLE---" not in user_prompt:
+                user_prompt += f"\n\n{LLMService.OUTPUT_FORMAT}"
         else:
             user_prompt = (
                 f"以下是今天关于「{topic}」的热点新闻：\n\n{news_list}\n\n"
@@ -143,8 +182,7 @@ class LLMService:
                 "4. 文章开头给出一段简短摘要（用于公众号摘要）\n"
                 "5. 文末总结观点\n"
                 "6. 字数 1500-3000 字\n\n"
-                "请按以下格式输出：\n"
-                "---TITLE---\n文章标题\n---DIGEST---\n摘要\n---CONTENT---\nMarkdown正文"
+                f"{LLMService.OUTPUT_FORMAT}"
             )
 
         return [

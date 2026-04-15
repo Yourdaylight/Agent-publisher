@@ -27,6 +27,7 @@ class HotspotCreateArticleRequest(BaseModel):
     style_id: str | None = None
     user_prompt: str | None = None
     mode: str | None = None  # rewrite / summary / expand
+    extra_material_ids: list[int] | None = None  # additional hotspot IDs for multi-material creation
 
 
 class HotspotExportRequest(BaseModel):
@@ -303,20 +304,34 @@ async def create_article_from_hotspot(
         )
         agent = builtin_result.scalar_one_or_none()
         if agent is None:
+            # Build a rich transient agent with vertical context from the hotspot
+            platform = (hotspot.extra_metadata or {}).get("platform_name", "")
             agent = Agent(
                 id=None,
                 name="默认写作身份",
-                topic=hotspot.title,
-                description="",
+                topic=hotspot.title[:40],
+                description=(
+                    f"你是一个专注于热点话题的公众号内容编辑。"
+                    f"当前话题「{hotspot.title}」"
+                    f"{'来自' + platform if platform else ''}。"
+                    f"请深入分析这个话题，结合行业背景和受众兴趣，"
+                    f"产出一篇有深度、有观点、适合公众号传播的文章。"
+                ),
                 account_id=None,
                 prompt_template="",
                 image_style="现代简约风格，色彩鲜明",
             )
 
     svc = ArticleService(db)
+    # Combine primary hotspot with extra material IDs
+    material_ids = [hotspot.id]
+    if data.extra_material_ids:
+        for mid in data.extra_material_ids:
+            if mid != hotspot.id and mid not in material_ids:
+                material_ids.append(mid)
     article = await svc.create_article_from_materials(
         agent=agent,
-        material_ids=[hotspot.id],
+        material_ids=material_ids,
         style_id=data.style_id,
         prompt_template_id=data.prompt_template_id,
         user_prompt=data.user_prompt,
@@ -360,9 +375,17 @@ async def create_article_from_hotspot_async(
         )
         agent = builtin_result.scalar_one_or_none()
         if agent is None:
+            platform = (hotspot.extra_metadata or {}).get("platform_name", "")
             agent = Agent(
-                id=None, name="默认写作身份", topic=hotspot.title,
-                description="", account_id=None, prompt_template="",
+                id=None, name="默认写作身份", topic=hotspot.title[:40],
+                description=(
+                    f"你是一个专注于热点话题的公众号内容编辑。"
+                    f"当前话题「{hotspot.title}」"
+                    f"{'来自' + platform if platform else ''}。"
+                    f"请深入分析这个话题，结合行业背景和受众兴趣，"
+                    f"产出一篇有深度、有观点、适合公众号传播的文章。"
+                ),
+                account_id=None, prompt_template="",
                 image_style="现代简约风格，色彩鲜明",
             )
 
@@ -384,7 +407,12 @@ async def create_article_from_hotspot_async(
     # Capture params for background task
     task_id = task.id
     agent_id = agent.id if agent and agent.id else None
+    # Combine primary hotspot with extra material IDs for multi-material creation
     material_ids = [hotspot.id]
+    if data.extra_material_ids:
+        for mid in data.extra_material_ids:
+            if mid != hotspot.id and mid not in material_ids:
+                material_ids.append(mid)
     style_id = data.style_id
     prompt_template_id = data.prompt_template_id
     user_prompt = data.user_prompt

@@ -270,10 +270,18 @@ class ArticleService:
 
         title_seed = materials[0].title
         digest_seed = materials[0].summary or materials[0].title
+
+        # Build combined content from materials, with per-item truncation
+        # to avoid exceeding LLM context limits
+        MAX_PER_ITEM = 3000
         combined_content = "\n\n".join(
-            f"标题：{item.title}\n摘要：{item.summary}\n正文：{item.raw_content or item.summary}\n来源：{item.original_url}"
+            f"标题：{item.title}\n摘要：{item.summary}\n正文：{(item.raw_content or item.summary or '')[:MAX_PER_ITEM]}\n来源：{item.original_url}"
             for item in materials
         )
+        # Hard cap on total content length (roughly 8000 tokens worth)
+        MAX_TOTAL = 12000
+        if len(combined_content) > MAX_TOTAL:
+            combined_content = combined_content[:MAX_TOTAL] + "\n\n[...素材已截断，请基于以上内容撰写文章]"
 
         prompt_text = agent.prompt_template or ""
         if prompt_template_id:
@@ -1432,7 +1440,7 @@ class ArticleService:
     # AI Beautify: LLM-powered HTML formatting for WeChat
     # ------------------------------------------------------------------
 
-    async def ai_beautify_html(self, article: Article) -> str:
+    async def ai_beautify_html(self, article: Article, style_hint: str = "") -> str:
         """Use LLM to beautify article HTML for WeChat Official Account layout.
 
         Sends the current html_content (or renders markdown first) to the LLM
@@ -1449,25 +1457,61 @@ class ArticleService:
             raise ValueError("文章没有可美化的内容")
 
         system_prompt = (
-            "你是一位资深的微信公众号排版设计师。"
-            "你的任务是将用户提供的 HTML 内容进行排版美化，使其适合微信公众号阅读体验。\n\n"
-            "排版规范：\n"
-            "1. 所有样式必须使用 inline style（微信不支持 <style> 标签）\n"
-            "2. 标题使用合适的字号和加粗，添加适当的颜色对比\n"
-            "3. 段落文字使用 16px，行高 1.75，颜色 #3f3f3f\n"
-            "4. 段落之间保持合理的间距（margin-bottom: 20px）\n"
-            "5. 引用块添加左边框（#07C160 绿色）和浅灰背景\n"
-            "6. 重点内容可以用加粗或高亮色（#07C160）标注\n"
-            "7. 适当添加分隔线 <hr>，使用浅色细线样式\n"
-            "8. 图片保持 100% 宽度，添加圆角\n"
-            "9. 列表项添加适当缩进和间距\n"
-            "10. 整体排版简洁大气，符合微信公众号主流风格\n\n"
-            "重要：只输出美化后的 HTML，不要添加任何解释文字。保持原文内容不变，只优化排版样式。"
+            "你是一位顶级微信公众号排版设计师，你的排版作品在朋友圈被疯狂转发。\n"
+            "你的任务是将用户提供的 HTML 内容进行专业级排版美化。\n\n"
+            "## 核心原则\n"
+            "- 所有样式必须用 inline style（微信编辑器不支持 <style> / <link>）\n"
+            "- 不能使用 class / id 选择器\n"
+            "- 保持原文内容完整，只优化排版样式\n"
+            "- 只输出 HTML，不要解释文字\n\n"
+            "## 排版设计规范（参考顶级公众号如「虎嗅」「36氪」「少数派」）\n\n"
+            "### 整体容器\n"
+            "- 外层 <section>，字体 -apple-system, 'PingFang SC', sans-serif\n"
+            "- 正文 font-size: 16px, line-height: 1.75, color: #3f3f3f\n"
+            "- padding: 10px 8px\n\n"
+            "### 标题层级\n"
+            "- h1（文章标题）: 24px, bold, #1a1a1a, 居中, margin: 30px 0 12px\n"
+            "- h2（章节标题）: 用设计感的标题样式，例如：\n"
+            "  左侧 4px 粗色条(#07C160) + padding-left:14px + 18px bold #222\n"
+            "  或者：底部渐变色下划线 + 居中显示\n"
+            "  或者：带圆角的浅色背景色块 + 左对齐\n"
+            "  每篇文章保持同一种 h2 风格\n"
+            "- h3: 16px, bold, #333, 左侧小圆点装饰\n\n"
+            "### 段落与文字\n"
+            "- <p>: margin: 0 0 20px 0, text-align: justify\n"
+            "- <strong> 高亮关键句: color: #07C160 或 #2563eb\n"
+            "- 首段或核心段可以用大字号(17px)强调\n\n"
+            "### 引用块 (blockquote)\n"
+            "- 圆角卡片风格: background: #f7f8fa, border-radius: 8px\n"
+            "- 左边 4px 色条 #07C160\n"
+            "- padding: 16px 20px, color: #555, font-size: 15px\n"
+            "- 或者用浅绿色背景 #f0fdf4 + 深绿色文字\n\n"
+            "### 列表\n"
+            "- ul/ol 内 li: margin: 8px 0, padding-left: 8px\n"
+            "- 可用 emoji 或色块替代默认圆点\n\n"
+            "### 分隔线\n"
+            "- 不要用默认 <hr>，用装饰性分隔: 三个居中小圆点(···)\n"
+            "  或渐变细线: height:1px background:linear-gradient(to right, transparent, #ddd, transparent)\n\n"
+            "### 数据/对比/卡片\n"
+            "- 关键数据可以用卡片式排版: 浅色背景 + 大数字 + 小标签\n"
+            "- 对比信息用两栏或色块区分\n\n"
+            "### 尾部\n"
+            "- 结尾段用不同颜色或斜体做 visual break\n"
+            "- 最后的免责/注释用小字 13px, color: #999\n\n"
+            "## 配色方案（选一套保持统一）\n"
+            "- 方案A（微信绿）: 主色 #07C160, 辅色 #f0fdf4, 标题 #1a1a1a\n"
+            "- 方案B（科技蓝）: 主色 #2563eb, 辅色 #eff6ff, 标题 #1e293b\n"
+            "- 方案C（商务灰）: 主色 #374151, 辅色 #f3f4f6, 标题 #111827\n"
+            "根据文章主题自动选择最匹配的配色。"
         )
+
+        user_content = f"请美化以下 HTML 排版：\n\n{html_input}"
+        if style_hint and style_hint.strip():
+            user_content += f"\n\n用户额外要求：{style_hint.strip()}"
 
         messages = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"请美化以下 HTML 排版：\n\n{html_input}"},
+            {"role": "user", "content": user_content},
         ]
 
         provider = settings.default_llm_provider
