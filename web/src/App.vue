@@ -7,8 +7,15 @@
     <t-aside class="app-sidebar">
       <!-- Logo -->
       <div class="sidebar-logo">
-        <div class="logo-text">Agent Publisher</div>
-        <div class="logo-sub">AI 内容经营工作台</div>
+        <div class="logo-row">
+          <div>
+            <div class="logo-text">Agent Publisher</div>
+            <div class="logo-sub">AI 内容经营工作台</div>
+          </div>
+          <button type="button" class="tour-trigger-btn" title="新手引导" @click="tourActive = true">
+            <t-icon name="lightbulb" size="16px" />
+          </button>
+        </div>
       </div>
 
       <!-- CTA -->
@@ -30,15 +37,15 @@
         class="sidebar-menu"
       >
         <!-- ═══ 核心路径（所有用户可见） ═══ -->
-        <t-menu-item value="/trending">
+        <t-menu-item value="/trending" data-tour-id="nav-trending">
           <template #icon><t-icon name="trending-up" /></template>
           发现热点
         </t-menu-item>
-        <t-menu-item value="/create">
+        <t-menu-item value="/create" data-tour-id="nav-create">
           <template #icon><t-icon name="edit-1" /></template>
           AI 创作
         </t-menu-item>
-        <t-menu-item value="/articles">
+        <t-menu-item value="/articles" data-tour-id="nav-articles">
           <template #icon><t-icon name="file-paste" /></template>
           内容管理
         </t-menu-item>
@@ -46,7 +53,7 @@
           <template #icon><t-icon name="send" /></template>
           发布记录
         </t-menu-item>
-        <t-menu-item value="/materials">
+        <t-menu-item value="/materials" data-tour-id="nav-materials">
           <template #icon><t-icon name="image" /></template>
           素材库
         </t-menu-item>
@@ -129,6 +136,9 @@
       </t-content>
     </t-layout>
   </t-layout>
+
+  <!-- Product Tour (global, mounts above everything) -->
+  <ProductTour v-model="tourActive" />
 </template>
 
 <script setup lang="ts">
@@ -136,11 +146,13 @@ import { computed, ref, onMounted, watch } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { MessagePlugin } from 'tdesign-vue-next';
 import { getUserInfo, clearAuth, getVersion, getCreditsBalance } from '@/api';
+import ProductTour from '@/components/ProductTour.vue';
 
 const router = useRouter();
 const route = useRoute();
 
 const versionDisplay = ref('');
+const tourActive = ref(false);
 const creditsData = ref<any>(null);
 const creditsAvailable = computed(() => creditsData.value?.available ?? null);
 const creditsClass = computed(() => {
@@ -163,7 +175,13 @@ onMounted(async () => {
     const res = await getVersion();
     versionDisplay.value = res.data?.display || '';
   } catch { /* ignore */ }
-  if (!isLoginPage.value) fetchCredits();
+  if (!isLoginPage.value) {
+    fetchCredits();
+    // Auto-show tour on first visit
+    if (!localStorage.getItem('ap_tour_completed')) {
+      setTimeout(() => { tourActive.value = true; }, 600);
+    }
+  }
 });
 
 const isLoginPage = computed(() => route.path === '/login');
@@ -255,8 +273,17 @@ html, body, #app {
   flex-shrink: 0; overflow: hidden;
 }
 .sidebar-logo { padding: 20px 18px 6px; }
+.logo-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
 .logo-text { font-size: 16px; font-weight: 800; color: var(--td-brand-color); letter-spacing: -0.3px; }
 .logo-sub { font-size: 11px; color: var(--td-text-color-placeholder); margin-top: 3px; }
+.tour-trigger-btn {
+  flex-shrink: 0; width: 28px; height: 28px; border-radius: 8px;
+  border: 1px solid var(--td-component-stroke); background: #fff;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; color: var(--td-text-color-secondary);
+  transition: all 0.15s;
+}
+.tour-trigger-btn:hover { border-color: var(--td-brand-color); color: var(--td-brand-color); background: var(--td-brand-color-1); }
 .sidebar-cta { padding: 6px 14px 14px; }
 .sidebar-menu { flex: 1; overflow-y: auto; }
 .menu-divider { height: 1px; background: var(--td-component-stroke); margin: 6px 16px; }
