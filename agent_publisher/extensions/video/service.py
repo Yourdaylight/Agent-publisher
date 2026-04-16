@@ -6,13 +6,13 @@ Pipeline:
   Phase 1.5: edge-tts TTS for each scene narration → mp3 + subtitle word timestamps
   Phase 2: Run `npx remotion render` to produce MP4
 """
+
 from __future__ import annotations
 
 import asyncio
 import json
 import logging
 import re
-import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -37,6 +37,7 @@ TTS_VOICE = "zh-CN-XiaoxiaoNeural"
 # ---------------------------------------------------------------------------
 # Main entry
 # ---------------------------------------------------------------------------
+
 
 async def run_video_pipeline(
     task_id: int,
@@ -74,10 +75,16 @@ async def run_video_pipeline(
         preview_path = out_dir / "preview.html"
         preview_path.write_text(preview_html, encoding="utf-8")
 
-        await _record_step(task, session, "props_ready", "success", {
-            "scene_count": len(script.get("scenes", [])),
-            "total_duration_s": script.get("total_duration_s", 0),
-        })
+        await _record_step(
+            task,
+            session,
+            "props_ready",
+            "success",
+            {
+                "scene_count": len(script.get("scenes", [])),
+                "total_duration_s": script.get("total_duration_s", 0),
+            },
+        )
 
         # Phase 1.5: edge-tts — generate audio + subtitle timestamps for each scene
         await _generate_tts(script, out_dir, task, session)
@@ -109,16 +116,20 @@ async def run_video_pipeline(
 # Phase 0: Script generation
 # ---------------------------------------------------------------------------
 
+
 async def _generate_script(article: Article, task: Task, session: AsyncSession) -> dict:
     """Call LLM to generate video script."""
     await _record_step(task, session, "script_generation", "running", {})
 
     messages = [
         {"role": "system", "content": SCRIPT_SYSTEM_PROMPT},
-        {"role": "user", "content": build_script_prompt(
-            title=article.title or "无标题",
-            content=article.content or article.html_content or "",
-        )},
+        {
+            "role": "user",
+            "content": build_script_prompt(
+                title=article.title or "无标题",
+                content=article.content or article.html_content or "",
+            ),
+        },
     ]
 
     raw = await _call_llm(messages)
@@ -136,10 +147,16 @@ async def _generate_script(article: Article, task: Task, session: AsyncSession) 
         if "scene_id" not in sc:
             sc["scene_id"] = f"scene_{i + 1:02d}"
 
-    await _record_step(task, session, "script_generation", "success", {
-        "scene_count": len(scenes),
-        "total_duration_s": script.get("total_duration_s", 0),
-    })
+    await _record_step(
+        task,
+        session,
+        "script_generation",
+        "success",
+        {
+            "scene_count": len(scenes),
+            "total_duration_s": script.get("total_duration_s", 0),
+        },
+    )
 
     return script
 
@@ -147,6 +164,7 @@ async def _generate_script(article: Article, task: Task, session: AsyncSession) 
 # ---------------------------------------------------------------------------
 # Phase 1: Build preview HTML (instant preview before MP4 render)
 # ---------------------------------------------------------------------------
+
 
 def _build_preview_html(script: dict, *, task_id: int = 0) -> str:
     """Build a static HTML preview of the video script (no Remotion required)."""
@@ -173,7 +191,7 @@ def _build_preview_html(script: dict, *, task_id: int = 0) -> str:
 
         scenes_html += f"""
         <div class="scene" style="background:{bg}">
-          <div class="scene-num">{i+1}/{len(scenes)} · {purpose} · {duration}s</div>
+          <div class="scene-num">{i + 1}/{len(scenes)} · {purpose} · {duration}s</div>
           <div class="top-zone">
             <div class="headline" style="color:{accent}">{headline}</div>
             <div class="subline">{subline}</div>
@@ -236,6 +254,7 @@ def _build_preview_html(script: dict, *, task_id: int = 0) -> str:
 # Phase 1.5: edge-tts TTS + subtitle generation
 # ---------------------------------------------------------------------------
 
+
 async def _generate_tts(
     script: dict,
     out_dir: Path,
@@ -254,7 +273,9 @@ async def _generate_tts(
         import edge_tts  # noqa: F401 — confirm available
     except ImportError:
         logger.warning("edge-tts not installed — skipping TTS (pip install edge-tts)")
-        await _record_step(task, session, "tts_generate", "skipped", {"reason": "edge-tts not installed"})
+        await _record_step(
+            task, session, "tts_generate", "skipped", {"reason": "edge-tts not installed"}
+        )
         return
 
     import edge_tts as _edge_tts
@@ -297,11 +318,13 @@ async def _generate_tts(
                 if event["type"] == "audio":
                     audio_chunks.append(event["data"])
                 elif event["type"] in ("WordBoundary", "SentenceBoundary"):
-                    words.append({
-                        "text": event["text"],
-                        "start_ms": event["offset"] // 10000,
-                        "end_ms": (event["offset"] + event["duration"]) // 10000,
-                    })
+                    words.append(
+                        {
+                            "text": event["text"],
+                            "start_ms": event["offset"] // 10000,
+                            "end_ms": (event["offset"] + event["duration"]) // 10000,
+                        }
+                    )
 
             audio_path.write_bytes(b"".join(audio_chunks))
 
@@ -316,7 +339,9 @@ async def _generate_tts(
             scene["subtitles"] = words
             success_count += 1
 
-            logger.info("TTS OK: scene=%s words=%d duration=%.1fs", scene_id, len(words), duration_ms / 1000)
+            logger.info(
+                "TTS OK: scene=%s words=%d duration=%.1fs", scene_id, len(words), duration_ms / 1000
+            )
 
         except Exception as e:
             logger.warning("TTS failed for scene %s: %s", scene_id, e)
@@ -326,12 +351,20 @@ async def _generate_tts(
     props_path = out_dir / "props.json"
     props_path.write_text(json.dumps(script, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    await _record_step(task, session, "tts_generate", "success", {
-        "scenes_with_audio": success_count,
-        "total_scenes": len(scenes),
-        "total_audio_s": round(total_audio_ms / 1000, 1),
-    })
-    logger.info("TTS complete: %d/%d scenes, total %.1fs", success_count, len(scenes), total_audio_ms / 1000)
+    await _record_step(
+        task,
+        session,
+        "tts_generate",
+        "success",
+        {
+            "scenes_with_audio": success_count,
+            "total_scenes": len(scenes),
+            "total_audio_s": round(total_audio_ms / 1000, 1),
+        },
+    )
+    logger.info(
+        "TTS complete: %d/%d scenes, total %.1fs", success_count, len(scenes), total_audio_ms / 1000
+    )
 
 
 def staticFile(relative_path: str) -> str:
@@ -343,6 +376,7 @@ def staticFile(relative_path: str) -> str:
 # ---------------------------------------------------------------------------
 # Phase 2: Remotion render
 # ---------------------------------------------------------------------------
+
 
 async def _render_remotion(
     script: dict,
@@ -356,20 +390,30 @@ async def _render_remotion(
     # Check that Remotion project exists
     if not (REMOTION_DIR / "package.json").exists():
         logger.warning("Remotion project not found at %s — skipping MP4 render", REMOTION_DIR)
-        await _record_step(task, session, "remotion_render", "skipped", {
-            "reason": "Remotion project not installed. Run: cd agent_publisher/extensions/video/remotion && npm install"
-        })
+        await _record_step(
+            task,
+            session,
+            "remotion_render",
+            "skipped",
+            {
+                "reason": "Remotion project not installed. Run: cd agent_publisher/extensions/video/remotion && npm install"
+            },
+        )
         return None
 
     mp4_path = out_dir / "output.mp4"
     props_path = out_dir / "props.json"
 
     cmd = [
-        "npx", "remotion", "render",
+        "npx",
+        "remotion",
+        "render",
         "VideoComposition",
         str(mp4_path),
-        "--props", str(props_path),
-        "--log", "error",
+        "--props",
+        str(props_path),
+        "--log",
+        "error",
     ]
 
     logger.info("Running Remotion render: %s", " ".join(cmd))
@@ -389,20 +433,31 @@ async def _render_remotion(
             await _record_step(task, session, "remotion_render", "failed", {"error": err_msg})
             raise RuntimeError(f"Remotion render failed: {err_msg}")
 
-        await _record_step(task, session, "remotion_render", "success", {
-            "mp4_path": str(mp4_path),
-            "file_size_mb": round(mp4_path.stat().st_size / 1024 / 1024, 2) if mp4_path.exists() else 0,
-        })
+        await _record_step(
+            task,
+            session,
+            "remotion_render",
+            "success",
+            {
+                "mp4_path": str(mp4_path),
+                "file_size_mb": round(mp4_path.stat().st_size / 1024 / 1024, 2)
+                if mp4_path.exists()
+                else 0,
+            },
+        )
         return mp4_path
 
     except asyncio.TimeoutError:
-        await _record_step(task, session, "remotion_render", "failed", {"error": "Render timeout (300s)"})
+        await _record_step(
+            task, session, "remotion_render", "failed", {"error": "Render timeout (300s)"}
+        )
         raise RuntimeError("Remotion render timed out after 300 seconds")
 
 
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
 
 async def _call_llm(messages: list[dict]) -> str:
     provider = settings.default_llm_provider
@@ -422,7 +477,9 @@ def _parse_json(raw: str) -> Any:
         raise ValueError("LLM 返回的数据格式不正确") from exc
 
 
-async def _record_step(task: Task, session: AsyncSession, name: str, status: str, output: dict) -> None:
+async def _record_step(
+    task: Task, session: AsyncSession, name: str, status: str, output: dict
+) -> None:
     step = {
         "name": name,
         "status": status,

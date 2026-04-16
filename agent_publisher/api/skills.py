@@ -1,4 +1,5 @@
 """Skills API: OpenClaw agent connection endpoints with email-based auth."""
+
 from __future__ import annotations
 
 import hashlib
@@ -34,6 +35,7 @@ router = APIRouter(prefix="/api/skills", tags=["skills"])
 # ---------------------------------------------------------------------------
 # Token helpers (email-based, separate from the admin access_key tokens)
 # ---------------------------------------------------------------------------
+
 
 def _create_skill_token(email: str) -> str:
     """Create an HMAC-based token carrying the email identity."""
@@ -86,6 +88,7 @@ def _require_admin(email: str) -> None:
 # Request / Response schemas
 # ---------------------------------------------------------------------------
 
+
 class SkillAuthRequest(BaseModel):
     email: str
 
@@ -123,6 +126,7 @@ class SkillAccountOut(BaseModel):
 
 class SkillArticleCreate(BaseModel):
     """Request body for creating an article manually via skill API."""
+
     agent_id: int
     title: str
     digest: str = ""
@@ -135,6 +139,7 @@ class SkillArticleCreate(BaseModel):
 
 class SkillArticleUpdate(BaseModel):
     """Request body for updating an article."""
+
     title: str | None = None
     digest: str | None = None
     content: str | None = None
@@ -197,7 +202,9 @@ SETUP_GUIDE = {
                 "在「基础信息」页面找到「API IP白名单」，点击「编辑」",
                 "将服务器公网 IP `{host}` 添加到白名单中".format(host=settings.get_server_host()),
             ],
-            "note": "此地址 (`{host}`) 是当前服务端配置值；如配置了域名请填对应服务器的公网 IP".format(host=settings.get_server_host()),
+            "note": "此地址 (`{host}`) 是当前服务端配置值；如配置了域名请填对应服务器的公网 IP".format(
+                host=settings.get_server_host()
+            ),
         },
         {
             "step": 4,
@@ -216,7 +223,11 @@ SETUP_GUIDE = {
                     "method": "POST",
                     "path": "/api/skills/accounts",
                     "headers": {"Authorization": "Bearer <token>"},
-                    "body": {"name": "公众号名称", "appid": "your_appid", "appsecret": "your_appsecret"},
+                    "body": {
+                        "name": "公众号名称",
+                        "appid": "your_appid",
+                        "appsecret": "your_appsecret",
+                    },
                 },
             },
         },
@@ -236,7 +247,9 @@ SETUP_GUIDE = {
                         "account_id": 1,
                         "name": "科技前沿观察员",
                         "topic": "AI与科技",
-                        "rss_sources": [{"url": "https://feeds.example.com/tech", "name": "Tech Feed"}],
+                        "rss_sources": [
+                            {"url": "https://feeds.example.com/tech", "name": "Tech Feed"}
+                        ],
                     },
                 },
             },
@@ -393,11 +406,7 @@ async def skill_batch_publish(
                 target_account_ids=data.target_account_ids,
             )
             media_id = next(
-                (
-                    item.wechat_media_id
-                    for item in publish_result.results
-                    if item.wechat_media_id
-                ),
+                (item.wechat_media_id for item in publish_result.results if item.wechat_media_id),
                 "",
             )
             results.append(
@@ -448,6 +457,7 @@ async def skill_list_articles(
     variant_counts: dict[int, int] = {}
     if article_ids:
         from sqlalchemy import func as sqla_func
+
         variant_stmt = (
             select(Article.source_article_id, sqla_func.count(Article.id))
             .where(Article.source_article_id.in_(article_ids))
@@ -485,6 +495,7 @@ async def skill_whoami(request: Request):
 # ---------------------------------------------------------------------------
 # Agent management (scoped by account ownership)
 # ---------------------------------------------------------------------------
+
 
 class SkillAgentCreate(BaseModel):
     name: str
@@ -580,7 +591,9 @@ async def skill_update_agent(
 
     await db.commit()
     await db.refresh(agent)
-    logger.info("Skill updated agent id=%d for email=%s fields=%s", agent.id, email, list(updates.keys()))
+    logger.info(
+        "Skill updated agent id=%d for email=%s fields=%s", agent.id, email, list(updates.keys())
+    )
     return {
         "id": agent.id,
         "name": agent.name,
@@ -602,6 +615,7 @@ async def skill_create_agent(
 ):
     """Create an agent. The target account must be owned by the caller (or caller is admin)."""
     from sqlalchemy import func as sqla_func
+
     email = _get_skill_email(request)
     is_admin = settings.is_admin(email)
 
@@ -672,6 +686,7 @@ async def skill_generate(
 # Collect (trending / RSS / search — no LLM required)
 # ---------------------------------------------------------------------------
 
+
 @router.post("/agents/{agent_id}/collect")
 async def skill_collect(
     agent_id: int,
@@ -704,6 +719,7 @@ async def skill_collect(
     # Fetch newly collected materials for this agent
     mat_svc = CandidateMaterialService(db)
     from agent_publisher.schemas.candidate_material import CandidateMaterialListParams
+
     materials, _total = await mat_svc.list_materials(
         CandidateMaterialListParams(agent_id=agent_id, page=1, page_size=200)
     )
@@ -717,7 +733,10 @@ async def skill_collect(
 
     logger.info(
         "Skill collect for agent %d (%s): %d materials by email=%s",
-        agent_id, agent.name, total_collected, email,
+        agent_id,
+        agent.name,
+        total_collected,
+        email,
     )
 
     return {
@@ -747,6 +766,7 @@ async def skill_collect(
 # Task status
 # ---------------------------------------------------------------------------
 
+
 @router.get("/tasks/{task_id}")
 async def skill_get_task(
     task_id: int,
@@ -774,6 +794,7 @@ async def skill_get_task(
 # ---------------------------------------------------------------------------
 # Article detail & single publish
 # ---------------------------------------------------------------------------
+
 
 @router.get("/articles/{article_id}")
 async def skill_get_article(
@@ -863,6 +884,7 @@ async def skill_create_article(
         # When only html_content is provided, inject WeChat inline styles
         # so that unstyled HTML gets proper formatting for WeChat OA
         from agent_publisher.services.wechat_style_service import WeChatStyleService
+
         html_content = WeChatStyleService.inject_styles(html_content)
 
     article = Article(
@@ -885,7 +907,9 @@ async def skill_create_article(
     await db.commit()
     await db.refresh(article)
 
-    logger.info("Skill created article id=%d title=%s for email=%s", article.id, article.title, email)
+    logger.info(
+        "Skill created article id=%d title=%s for email=%s", article.id, article.title, email
+    )
     return {
         "id": article.id,
         "agent_id": article.agent_id,
@@ -934,6 +958,7 @@ async def skill_publish_article(
 # ---------------------------------------------------------------------------
 # Article edit & sync
 # ---------------------------------------------------------------------------
+
 
 @router.put("/articles/{article_id}")
 async def skill_update_article(
@@ -1038,6 +1063,7 @@ async def skill_sync_article(
 # Slideshow generation (Skills)
 # ---------------------------------------------------------------------------
 
+
 class SkillSlideshowRequest(BaseModel):
     skip_review: bool = False
 
@@ -1081,11 +1107,13 @@ async def skill_generate_slideshow(
     async def _bg_execute_full(task_id: int, art_id: int) -> None:
         async with async_session_factory() as session:
             from agent_publisher.extensions.slideshow.service import run_chapter_pipeline
+
             await run_chapter_pipeline(task_id, art_id, session)
 
     async def _bg_execute_outline(task_id: int, art_id: int) -> None:
         async with async_session_factory() as session:
             from agent_publisher.extensions.slideshow.service import run_generate_outline
+
             await run_generate_outline(task_id, art_id, session)
 
     if skip_review:
@@ -1096,7 +1124,10 @@ async def skill_generate_slideshow(
     mode = "skip_review" if skip_review else "draft_review"
     logger.info(
         "Skill slideshow for article %d: task=%d mode=%s by email=%s",
-        article_id, task.id, mode, email,
+        article_id,
+        task.id,
+        mode,
+        email,
     )
     return {"task_id": task.id, "mode": mode}
 
@@ -1132,8 +1163,12 @@ async def skill_slideshow_status(
         raise HTTPException(status_code=404, detail="Task not found")
 
     result = task.result or {}
-    has_player = bool(result.get("concat_path") and Path(str(result.get("concat_path", ""))).exists())
-    has_timeline = bool(result.get("timeline_path") and Path(str(result.get("timeline_path", ""))).exists())
+    has_player = bool(
+        result.get("concat_path") and Path(str(result.get("concat_path", ""))).exists()
+    )
+    has_timeline = bool(
+        result.get("timeline_path") and Path(str(result.get("timeline_path", ""))).exists()
+    )
 
     response = {
         "task_id": task.id,
@@ -1166,6 +1201,7 @@ async def skill_slideshow_status(
 # Media Asset Library (Skills)
 # ---------------------------------------------------------------------------
 
+
 @router.get("/media")
 async def skill_list_media(
     request: Request,
@@ -1184,7 +1220,11 @@ async def skill_list_media(
     email = _get_skill_email(request)
     is_admin = settings.is_admin(email)
 
-    stmt = select(MediaAsset).options(selectinload(MediaAsset.wechat_mappings)).order_by(MediaAsset.id.desc())
+    stmt = (
+        select(MediaAsset)
+        .options(selectinload(MediaAsset.wechat_mappings))
+        .order_by(MediaAsset.id.desc())
+    )
     count_stmt = select(func.count(MediaAsset.id))
 
     if not is_admin:
@@ -1248,7 +1288,6 @@ async def skill_upload_media(
 
     if "multipart/form-data" in content_type_header:
         # Handle multipart upload
-        from fastapi import UploadFile
         form = await request.form()
         file = form.get("file")
         if not file:
@@ -1297,7 +1336,9 @@ async def skill_upload_media(
     asset = MediaAsset(
         filename=original_filename,
         stored_filename=stored_filename,
-        content_type=file_content_type if "multipart" not in content_type_header else file_content_type,
+        content_type=file_content_type
+        if "multipart" not in content_type_header
+        else file_content_type,
         file_size=file_size,
         tags=tag_list,
         description=description,
@@ -1307,7 +1348,9 @@ async def skill_upload_media(
     await db.commit()
     await db.refresh(asset)
 
-    logger.info("Skill media uploaded: id=%d filename=%s email=%s", asset.id, original_filename, email)
+    logger.info(
+        "Skill media uploaded: id=%d filename=%s email=%s", asset.id, original_filename, email
+    )
     return {
         "id": asset.id,
         "filename": asset.filename,
@@ -1327,7 +1370,6 @@ async def skill_delete_media(
     db: AsyncSession = Depends(get_db),
 ):
     """Delete a media asset (own assets or admin)."""
-    from pathlib import Path
     from agent_publisher.api.media import UPLOAD_DIR
 
     email = _get_skill_email(request)
@@ -1354,6 +1396,7 @@ async def skill_delete_media(
 # Data Statistics (Followers & Article Stats)
 # ---------------------------------------------------------------------------
 
+
 async def _get_account_with_token(
     account_id: int,
     email: str,
@@ -1372,14 +1415,10 @@ async def _get_account_with_token(
     token_expired = (
         not account.access_token
         or not account.token_expires_at
-        or account.token_expires_at.replace(
-            tzinfo=timezone.utc
-        ) < now
+        or account.token_expires_at.replace(tzinfo=timezone.utc) < now
     )
     if token_expired:
-        token, expires_at = await WeChatService.get_access_token(
-            account.appid, account.appsecret
-        )
+        token, expires_at = await WeChatService.get_access_token(account.appid, account.appsecret)
         account.access_token = token
         account.token_expires_at = expires_at
         await db.commit()
@@ -1401,7 +1440,7 @@ async def skill_get_followers(
     - begin_date: YYYY-MM-DD (default: 7 days ago)
     - end_date: YYYY-MM-DD (default: yesterday)
     """
-    from datetime import date, timedelta, timezone
+    from datetime import date, timedelta
 
     email = _get_skill_email(request)
     account = await _get_account_with_token(account_id, email, db)
@@ -1470,7 +1509,7 @@ async def skill_get_article_stats(
     - begin_date: YYYY-MM-DD (default: 7 days ago)
     - end_date: YYYY-MM-DD (default: yesterday)
     """
-    from datetime import date, timedelta, timezone
+    from datetime import date, timedelta
 
     email = _get_skill_email(request)
     account = await _get_account_with_token(account_id, email, db)
@@ -1513,6 +1552,7 @@ async def skill_get_article_stats(
 # ---------------------------------------------------------------------------
 # Style Preset Management (Skills)
 # ---------------------------------------------------------------------------
+
 
 @router.get("/style-presets")
 async def skill_list_style_presets(
@@ -1587,7 +1627,9 @@ async def skill_update_style_preset(
 
     _get_skill_email(request)  # auth check
     body = await request.json()
-    updates = {k: v for k, v in body.items() if k in ("name", "description", "prompt") and v is not None}
+    updates = {
+        k: v for k, v in body.items() if k in ("name", "description", "prompt") and v is not None
+    }
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update")
 
@@ -1633,6 +1675,7 @@ async def skill_delete_style_preset(
 # Admin Management (Skills)
 # ---------------------------------------------------------------------------
 
+
 class AdminEmailRequest(BaseModel):
     email: str
 
@@ -1660,11 +1703,19 @@ async def skill_add_admin(data: AdminEmailRequest, request: Request):
         raise HTTPException(status_code=400, detail="Invalid email address")
 
     if settings.is_admin(target_email):
-        return {"ok": True, "message": f"{target_email} is already an admin", "admins": settings.list_admins()}
+        return {
+            "ok": True,
+            "message": f"{target_email} is already an admin",
+            "admins": settings.list_admins(),
+        }
 
     settings.add_admin(target_email)
     logger.info("Admin %s added admin %s at runtime", email, target_email)
-    return {"ok": True, "message": f"{target_email} added as admin", "admins": settings.list_admins()}
+    return {
+        "ok": True,
+        "message": f"{target_email} added as admin",
+        "admins": settings.list_admins(),
+    }
 
 
 @router.delete("/admins")
@@ -1685,7 +1736,7 @@ async def skill_remove_admin(data: AdminEmailRequest, request: Request):
     if target_email in env_admins:
         raise HTTPException(
             status_code=400,
-            detail=f"{target_email} is configured in ADMIN_EMAILS env and cannot be removed at runtime"
+            detail=f"{target_email} is configured in ADMIN_EMAILS env and cannot be removed at runtime",
         )
 
     removed = settings.remove_admin(target_email)
@@ -1693,12 +1744,17 @@ async def skill_remove_admin(data: AdminEmailRequest, request: Request):
         raise HTTPException(status_code=404, detail=f"{target_email} is not a runtime admin")
 
     logger.info("Admin %s removed admin %s at runtime", email, target_email)
-    return {"ok": True, "message": f"{target_email} removed from admins", "admins": settings.list_admins()}
+    return {
+        "ok": True,
+        "message": f"{target_email} removed from admins",
+        "admins": settings.list_admins(),
+    }
 
 
 # ---------------------------------------------------------------------------
 # Variant Generation (Skills)
 # ---------------------------------------------------------------------------
+
 
 class SkillVariantGenerateRequest(BaseModel):
     agent_ids: list[int]
@@ -1781,9 +1837,7 @@ async def skill_list_article_variants(
                 raise HTTPException(status_code=403, detail="Access denied")
 
     stmt = (
-        select(Article)
-        .where(Article.source_article_id == article_id)
-        .order_by(Article.id.desc())
+        select(Article).where(Article.source_article_id == article_id).order_by(Article.id.desc())
     )
     result = await db.execute(stmt)
     variants = result.scalars().all()
@@ -1792,9 +1846,7 @@ async def skill_list_article_variants(
     agent_ids = list({v.agent_id for v in variants})
     agent_names: dict[int, str] = {}
     if agent_ids:
-        agent_result = await db.execute(
-            select(Agent.id, Agent.name).where(Agent.id.in_(agent_ids))
-        )
+        agent_result = await db.execute(select(Agent.id, Agent.name).where(Agent.id.in_(agent_ids)))
         agent_names = dict(agent_result.all())
 
     return [
@@ -1816,8 +1868,10 @@ async def skill_list_article_variants(
 # Skills feed: accept candidate materials from external skills
 # ---------------------------------------------------------------------------
 
+
 class SkillsFeedItem(BaseModel):
     """Schema for a candidate material submitted by a skill."""
+
     title: str
     summary: str = ""
     original_url: str = ""
@@ -1897,6 +1951,7 @@ async def submit_skill_feed(
 # Markdown Upload (Image Proxy)
 # ---------------------------------------------------------------------------
 
+
 class MarkdownUploadRequest(BaseModel):
     content: str
     tags: list[str] = []
@@ -1941,7 +1996,7 @@ async def skill_upload_markdown(
     )
 
     skipped = 0
-    total_matches = len([m for m in re.finditer(r'!\[([^\]]*)\]\(([^)]+)\)', body.content)])
+    total_matches = len([m for m in re.finditer(r"!\[([^\]]*)\]\(([^)]+)\)", body.content)])
     if total_matches > len(image_infos):
         skipped = total_matches - len(image_infos)
 
@@ -1963,6 +2018,7 @@ async def skill_upload_markdown(
 # ---------------------------------------------------------------------------
 # Delete endpoints (ownership-checked)
 # ---------------------------------------------------------------------------
+
 
 @router.delete("/agents/{agent_id}")
 async def skill_delete_agent(
@@ -2015,6 +2071,7 @@ async def skill_delete_account(
 # ---------------------------------------------------------------------------
 # Permission group visibility (read-only for skill users)
 # ---------------------------------------------------------------------------
+
 
 @router.get("/groups")
 async def skill_list_my_groups(

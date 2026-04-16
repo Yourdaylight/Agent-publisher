@@ -1,4 +1,5 @@
 """数据源管理 REST API"""
+
 from __future__ import annotations
 
 import logging
@@ -28,6 +29,7 @@ router = APIRouter(prefix="/api/sources", tags=["sources"])
 
 # ── SourceConfig CRUD ─────────────────────────────────────────────────
 
+
 @router.post("", response_model=SourceConfigOut)
 async def create_source(
     data: SourceConfigCreate,
@@ -39,7 +41,9 @@ async def create_source(
     # Check for duplicate source_key
     existing = await svc.get_source_by_key(data.source_key)
     if existing:
-        raise HTTPException(status_code=409, detail=f"Source key '{data.source_key}' already exists")
+        raise HTTPException(
+            status_code=409, detail=f"Source key '{data.source_key}' already exists"
+        )
     return await svc.create_source(data)
 
 
@@ -123,6 +127,7 @@ async def toggle_source(
 
 # ── Agent 绑定管理 ────────────────────────────────────────────────────
 
+
 @router.get("/agents/{agent_id}/bindings", response_model=list[AgentSourceBindingOut])
 async def list_agent_bindings(
     agent_id: int,
@@ -173,6 +178,7 @@ async def unbind_agent_source(
 
 # ── 采集操作 ──────────────────────────────────────────────────────────
 
+
 @router.post("/agents/{agent_id}/collect")
 async def collect_for_agent(
     agent_id: int,
@@ -190,11 +196,13 @@ async def collect_for_agent(
     # Format response
     collect_results = []
     for source_type, ids in result.items():
-        collect_results.append(CollectResult(
-            source_type=source_type,
-            material_ids=ids,
-            count=len(ids),
-        ))
+        collect_results.append(
+            CollectResult(
+                source_type=source_type,
+                material_ids=ids,
+                count=len(ids),
+            )
+        )
 
     total = sum(r.count for r in collect_results)
     return {

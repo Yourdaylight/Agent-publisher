@@ -26,6 +26,7 @@ async def run_trending_refresh() -> None:
     try:
         async with async_session_factory() as session:
             from agent_publisher.services.source_registry_service import SourceRegistryService
+
             registry = SourceRegistryService(session)
             result = await registry.collect_all_trending()
             logger.info(
@@ -46,7 +47,9 @@ def sync_trending_schedule(interval_minutes: int | None = None) -> None:
     """
     from agent_publisher.config import settings
 
-    minutes = interval_minutes if interval_minutes is not None else settings.trending_refresh_interval
+    minutes = (
+        interval_minutes if interval_minutes is not None else settings.trending_refresh_interval
+    )
 
     # Remove existing job first
     if scheduler.get_job(TRENDING_JOB_ID):
@@ -72,8 +75,11 @@ def _parse_cron_trigger(cron_str: str) -> CronTrigger | None:
     if len(parts) != 5:
         return None
     return CronTrigger(
-        minute=parts[0], hour=parts[1], day=parts[2],
-        month=parts[3], day_of_week=parts[4],
+        minute=parts[0],
+        hour=parts[1],
+        day=parts[2],
+        month=parts[3],
+        day_of_week=parts[4],
     )
 
 
@@ -123,7 +129,9 @@ async def run_scheduled_collection(agent_id: int) -> None:
             total = sum(len(ids) for ids in result.values())
             logger.info(
                 "Scheduled collection for agent %d (%s): %d materials",
-                agent_id, agent.name, total,
+                agent_id,
+                agent.name,
+                total,
             )
     except Exception as e:
         logger.error("Scheduled collection failed for agent %d: %s", agent_id, e, exc_info=True)
@@ -144,9 +152,7 @@ async def refresh_platform_tokens() -> None:
     logger.info("Scheduler: refreshing platform tokens")
     try:
         async with async_session_factory() as session:
-            result = await session.execute(
-                select(Account).where(Account.auth_mode == "platform")
-            )
+            result = await session.execute(select(Account).where(Account.auth_mode == "platform"))
             accounts = result.scalars().all()
 
             refreshed = 0
@@ -154,11 +160,25 @@ async def refresh_platform_tokens() -> None:
                 # Check if token will expire soon
                 expires_at = account.authorizer_token_expires_at
                 if expires_at:
-                    expires_at = expires_at.replace(tzinfo=timezone.utc) if expires_at.tzinfo is None else expires_at
-                if not account.authorizer_access_token or not expires_at or expires_at < datetime.now(timezone.utc) + timedelta(minutes=30):
+                    expires_at = (
+                        expires_at.replace(tzinfo=timezone.utc)
+                        if expires_at.tzinfo is None
+                        else expires_at
+                    )
+                if (
+                    not account.authorizer_access_token
+                    or not expires_at
+                    or expires_at < datetime.now(timezone.utc) + timedelta(minutes=30)
+                ):
                     try:
-                        from agent_publisher.services.wechat_platform_service import WeChatPlatformService
-                        token, new_expires_at = await WeChatPlatformService.refresh_authorizer_token(
+                        from agent_publisher.services.wechat_platform_service import (
+                            WeChatPlatformService,
+                        )
+
+                        (
+                            token,
+                            new_expires_at,
+                        ) = await WeChatPlatformService.refresh_authorizer_token(
                             account.authorizer_appid, account.authorizer_refresh_token
                         )
                         account.authorizer_access_token = token
@@ -169,12 +189,16 @@ async def refresh_platform_tokens() -> None:
                     except Exception as e:
                         logger.error(
                             "Failed to refresh token for account id=%d appid=%s: %s",
-                            account.id, account.authorizer_appid, e,
+                            account.id,
+                            account.authorizer_appid,
+                            e,
                         )
 
             if refreshed > 0:
                 await session.commit()
-            logger.info("Scheduler: platform token refresh done — refreshed=%d/%d", refreshed, len(accounts))
+            logger.info(
+                "Scheduler: platform token refresh done — refreshed=%d/%d", refreshed, len(accounts)
+            )
 
     except Exception as e:
         logger.error("Scheduler: platform token refresh failed: %s", e, exc_info=True)
@@ -230,7 +254,9 @@ async def sync_agent_schedules() -> None:
                 replace_existing=True,
                 name=f"Agent {agent.id}: {agent.name}",
             )
-            logger.info("Scheduled agent %d (%s) with cron: %s", agent.id, agent.name, agent.schedule_cron)
+            logger.info(
+                "Scheduled agent %d (%s) with cron: %s", agent.id, agent.name, agent.schedule_cron
+            )
 
             # Pre-generation collection job (30 min before)
             collect_cron = _offset_cron_minutes(agent.schedule_cron, offset_minutes=-30)
@@ -247,7 +273,8 @@ async def sync_agent_schedules() -> None:
                     )
                     logger.info(
                         "Scheduled collection for agent %d at cron: %s (30 min before generation)",
-                        agent.id, collect_cron,
+                        agent.id,
+                        collect_cron,
                     )
 
         except Exception as e:

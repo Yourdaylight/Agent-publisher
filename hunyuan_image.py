@@ -232,9 +232,7 @@ class HunyuanImageClient:
 
             logger.debug("Job %s status: %s, waiting...", job_id, status)
 
-        raise TimeoutError(
-            f"Image generation timed out after {max_wait}s for job {job_id}"
-        )
+        raise TimeoutError(f"Image generation timed out after {max_wait}s for job {job_id}")
 
     # ── Utilities ─────────────────────────────────────────────────────
 
@@ -254,9 +252,13 @@ def main() -> None:
     parser.add_argument("--secret-id", default=None, help="Tencent Cloud SecretId")
     parser.add_argument("--secret-key", default=None, help="Tencent Cloud SecretKey")
     parser.add_argument("--region", default=DEFAULT_REGION, help="API region")
-    parser.add_argument("--resolution", default=DEFAULT_RESOLUTION, help="Image resolution (e.g. 1024:1024)")
+    parser.add_argument(
+        "--resolution", default=DEFAULT_RESOLUTION, help="Image resolution (e.g. 1024:1024)"
+    )
     parser.add_argument("--max-wait", type=int, default=DEFAULT_MAX_WAIT, help="Max wait seconds")
-    parser.add_argument("--poll-interval", type=int, default=DEFAULT_POLL_INTERVAL, help="Poll interval seconds")
+    parser.add_argument(
+        "--poll-interval", type=int, default=DEFAULT_POLL_INTERVAL, help="Poll interval seconds"
+    )
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose logging")
     args = parser.parse_args()
 

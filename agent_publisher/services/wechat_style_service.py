@@ -7,6 +7,7 @@ All styling is done via inline `style` attributes on individual tags.
 Tags that already have a `style` attribute are left untouched to preserve
 user-customized formatting.
 """
+
 from __future__ import annotations
 
 import re

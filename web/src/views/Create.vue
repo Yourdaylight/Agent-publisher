@@ -7,16 +7,24 @@
 
       <t-select
         v-model="selectedHotspotIds"
-        placeholder="选择热点话题（可多选）..."
+        placeholder="选择 1-3 个热点话题，AI 将综合这些素材创作..."
         size="small"
         class="topic-select"
         multiple
         :popup-props="{ overlayStyle: { width: '400px' } }"
         :min-collapsed-num="1"
+        :max="3"
         filterable
         @change="onHotspotIdsChange"
       >
-        <t-option v-for="item in trendingHotspots" :key="item.id" :value="item.id" :label="item.title" />
+        <t-option v-for="item in trendingHotspots" :key="item.id" :value="item.id" :label="item.title">
+          <div style="display:flex;align-items:center;gap:6px;font-size:12px">
+            <span v-if="item.metadata?.platform_name" style="color:#999;font-size:11px;flex-shrink:0">{{ item.metadata.platform_name }}</span>
+            <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ item.title }}</span>
+            <span v-if="item.quality_score >= 0.8" style="color:#f5222d;font-size:10px;flex-shrink:0">🔥超热</span>
+            <span v-else-if="item.quality_score >= 0.6" style="color:#fa8c16;font-size:10px;flex-shrink:0">🟠高热</span>
+          </div>
+        </t-option>
       </t-select>
 
       <div v-if="aiAngles.length > 0" class="angle-chips">
@@ -148,7 +156,7 @@
             <!-- 正常编辑模式 -->
             <template v-else>
               <!-- 富文本编辑器 -->
-              <div v-show="activeTab === 'rich' || !form.id">
+              <div v-show="activeTab === 'rich' || !form.id" class="editor-tab-wrap">
                 <TiptapEditor ref="tiptapRef" v-model="richHtml" placeholder="开始写作，或使用右侧 AI 助手生成内容..." />
               </div>
 
@@ -179,7 +187,10 @@
       <aside class="side-panel">
         <div class="side-tabs">
           <button type="button" class="side-tab" :class="{ active: sideTab === 'ai' }" @click="sideTab = 'ai'">AI 助手</button>
-          <button type="button" class="side-tab" :class="{ active: sideTab === 'preview' }" @click="sideTab = 'preview'">微信预览</button>
+          <button type="button" class="side-tab" :class="{ active: sideTab === 'preview' }" @click="sideTab = 'preview'">
+            微信预览
+            <span class="tab-badge">排版</span>
+          </button>
         </div>
 
         <div class="side-body">
@@ -211,7 +222,10 @@
                 :disabled="creating || hotspotLoading || generating"
                 @click="doAIWrite"
               >
-                <span v-if="!creating && !hotspotLoading && !generating">AI 生成文章</span>
+                <span v-if="!creating && !hotspotLoading && !generating">
+                  AI 生成文章
+                  <span v-if="selectedHotspotIds.length > 1" style="font-size:11px;opacity:0.85"> · {{ selectedHotspotIds.length }} 个素材</span>
+                </span>
                 <span v-else-if="hotspotLoading">加载话题中...</span>
                 <template v-else>
                   <t-loading size="small" theme="dots" />
@@ -224,51 +238,24 @@
               <div class="ai-cost" v-else>消耗 ~3 Credits · 约30秒</div>
             </div>
 
-            <!-- 模块1b: 生成封面图 -->
+            <!-- 模块1b: AI 配图（封面 + 内容配图） -->
             <div class="ai-card" v-if="form.id">
               <div class="ai-card-title">🖼 AI 配图</div>
-              <button type="button" class="beautify-btn primary-beauty" style="width:100%" :disabled="coverGenerating" @click="doGenerateCover">
+              <button type="button" class="beautify-btn primary-beauty" style="width:100%;margin-bottom:8px" :disabled="coverGenerating" @click="doGenerateCover">
                 <template v-if="!coverGenerating">
                   <span>🖼 生成封面图</span>
-                  <span class="b-desc">AI 自动生成配图 · 1 Credit</span>
+                  <span class="b-desc">MiniMax AI 配图 · 1 Credit</span>
                 </template>
                 <template v-else><t-loading size="small" /> 生成中...</template>
               </button>
-            </div>
-
-            <!-- 模块2: 排版美化（高亮核心模块） -->
-            <div class="ai-card beautify-card">
-              <div class="ai-card-title">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v1m0 16v1m-7.071-2.929l.707-.707M18.364 5.636l.707-.707M3 12h1m16 0h1M5.636 5.636l-.707-.707m12.728 12.728l.707.7M16 12a4 4 0 11-8 0 4 4 0 018 0z"/></svg>
-                AI 排版美化
-              </div>
-              <div class="beautify-grid">
-                <!-- 一键美化：全宽主按钮 -->
-                <button
-                  type="button"
-                  class="beautify-btn primary-beauty"
-                  :disabled="!form.id || aiBeautifying"
-                  @click="doAIBeautify"
-                >
-                  <template v-if="!aiBeautifying">
-                    <span>✨ 一键智能排版</span>
-                    <span class="b-desc">自动优化格式、配色、间距 · ~3 Credits</span>
+              <div class="inline-img-section">
+                <input v-model="inlineImgPrompt" class="inline-img-input" placeholder="描述你需要的内容配图...（如：一张数据增长趋势图）" />
+                <button type="button" class="beautify-btn" style="width:100%" :disabled="inlineImgGenerating || !inlineImgPrompt.trim()" @click="doGenerateInlineImage">
+                  <template v-if="!inlineImgGenerating">
+                    <span>🎨 生成内容配图</span>
+                    <span class="b-desc">插入文章正文 · 2 Credits</span>
                   </template>
-                  <template v-else><t-loading size="small" /> 处理中...</template>
-                </button>
-                <!-- 子操作 -->
-                <button
-                  type="button"
-                  class="beautify-btn"
-                  :disabled="!form.id || beautifying"
-                  @click="doBeautify"
-                >
-                  <span>📐 格式修正</span>
-                  <span class="b-desc">修复排版错误 · 免费</span>
-                </button>
-                <button type="button" class="beautify-btn" :disabled="!form.id || beautifying" @click="doBeautify">
-                  <span>🎨 风格模板</span>
-                  <span class="b-desc">wenyan 渲染 · 免费</span>
+                  <template v-else><t-loading size="small" /> 生成中...</template>
                 </button>
               </div>
             </div>
@@ -298,7 +285,7 @@
           </div>
 
           <!-- 预览 Tab -->
-          <div v-show="sideTab === 'preview'">
+          <div v-show="sideTab === 'preview'" class="preview-section">
             <div class="phone-frame">
               <div class="phone-notch"></div>
               <div class="phone-screen">
@@ -311,6 +298,42 @@
                 <img v-if="form.cover_image_url" :src="form.cover_image_url" class="wx-cover" />
                 <div v-if="previewHtml && previewHtml !== '<p></p>'" class="wx-body" v-html="previewHtml" />
                 <div v-else class="wx-empty">内容将实时显示在这里</div>
+              </div>
+            </div>
+
+            <!-- 排版美化区 -->
+            <div v-if="form.id" class="beautify-section">
+              <!-- wenyan 主题选择 -->
+              <div class="beautify-label">wenyan 排版主题</div>
+              <div class="wenyan-theme-grid">
+                <button
+                  v-for="wt in wenyanThemes"
+                  :key="wt.id"
+                  type="button"
+                  class="wenyan-theme-chip"
+                  :class="{ active: selectedWenyanTheme === wt.id }"
+                  @click="selectedWenyanTheme = wt.id"
+                >
+                  <span class="wt-name">{{ wt.name }}</span>
+                  <span class="wt-desc">{{ wt.desc }}</span>
+                </button>
+              </div>
+              <button type="button" class="beautify-action-btn" :disabled="beautifying" @click="doBeautify">
+                <template v-if="!beautifying">📐 应用主题排版 · 免费</template>
+                <template v-else><t-loading size="small" /> 渲染中...</template>
+              </button>
+
+              <!-- AI 智能排版 -->
+              <div class="beautify-divider"></div>
+              <button type="button" class="beautify-action-btn primary" :disabled="aiBeautifying" @click="doAIBeautify">
+                <template v-if="!aiBeautifying">✨ AI 智能排版 · 3 Credits</template>
+                <template v-else><t-loading size="small" /> AI 处理中...</template>
+              </button>
+              <button type="button" class="advanced-toggle" @click="aiStyleAdvanced = !aiStyleAdvanced">
+                {{ aiStyleAdvanced ? '收起' : '高级配置' }} ▾
+              </button>
+              <div v-if="aiStyleAdvanced" class="advanced-box">
+                <textarea v-model="aiStyleHint" class="style-hint-input" placeholder="输入排版风格提示...&#10;例如：科技感、极简主义、暖色调、卡片式布局" rows="2"></textarea>
               </div>
             </div>
 
@@ -371,7 +394,7 @@ import {
   beautifyArticle, getAgents, getArticle, getArticles, generateVariants,
   getHotspot, getHotspots, getPromptTemplates, getStylePresets,
   syncArticle, updateArticle, uploadMedia, getMedia, getAccounts,
-  getCreditsBalance, generateCoverImage, generateSlideshow, getSlideshowPreviewUrl,
+  getCreditsBalance, generateCoverImage, generateInlineImage, generateSlideshow, getSlideshowPreviewUrl,
 } from '@/api';
 
 interface EditForm {
@@ -435,6 +458,27 @@ const styleThemes: StyleTheme[] = [
   { id: 'vivid', name: '活力橙', previewBg: '#fff3e0' },
 ];
 const currentStyleTheme = ref<StyleTheme>(styleThemes[0]);
+
+// --- wenyan 排版主题 ---
+const wenyanThemes = [
+  { id: 'default', name: '经典', desc: '简洁通用' },
+  { id: 'orangeheart', name: '橙心', desc: '温暖优雅' },
+  { id: 'rainbow', name: '彩虹', desc: '活泼清新' },
+  { id: 'lapis', name: '天青', desc: '冷色淡雅' },
+  { id: 'pie', name: '少数派', desc: '现代锐利' },
+  { id: 'maize', name: '玉米', desc: '明亮柔和' },
+  { id: 'purple', name: '紫韵', desc: '极简高级' },
+  { id: 'phycat', name: '薄荷', desc: '清新层次' },
+];
+const selectedWenyanTheme = ref('default');
+
+// --- AI 美化高级配置 ---
+const aiStyleHint = ref('');
+const aiStyleAdvanced = ref(false);
+
+// --- 内容配图 ---
+const inlineImgPrompt = ref('');
+const inlineImgGenerating = ref(false);
 
 // --- 配置选择 ---
 const selectedAgentId = ref<number | undefined>(undefined);
@@ -735,12 +779,15 @@ const doAIWrite = async () => {
   }
   creating.value = true;
   try {
+    // Build extra material IDs from multi-select (exclude the primary hotspot)
+    const extraIds = selectedHotspotIds.value.filter((id: number) => id !== selectedHotspot.value.id);
     const res = await createArticleFromHotspotAsync(selectedHotspot.value.id, {
       agent_id: selectedAgentId.value || agents.value[0]?.id,
       style_id: selectedStyleId.value,
       prompt_template_id: selectedPromptId.value,
       user_prompt: userPrompt.value || undefined,
       mode: selectedMode.value || undefined,
+      extra_material_ids: extraIds.length > 0 ? extraIds : undefined,
     });
     connectTaskSSE(res.data.task_id);
   } catch (err: any) {
@@ -823,14 +870,12 @@ const doBeautify = async () => {
   beautifying.value = true;
   try {
     await saveArticle();
-    const res = await beautifyArticle(form.value.id);
+    const res = await beautifyArticle(form.value.id, { theme: selectedWenyanTheme.value });
     if (res.data.html_content) {
       form.value.html_content = res.data.html_content;
       htmlSource.value = res.data.html_content;
-      // wenyan 渲染的 HTML 含 inline style，Tiptap 会剥掉样式
-      // 所以切到预览模式让用户看到真实排版效果
       activeTab.value = 'preview';
-      MessagePlugin.success('wenyan 排版完成，已切换到预览模式');
+      MessagePlugin.success(`wenyan「${wenyanThemes.find(t => t.id === selectedWenyanTheme.value)?.name || selectedWenyanTheme.value}」排版完成`);
     }
   } catch (err: any) {
     MessagePlugin.error(err?.response?.data?.detail || '排版失败');
@@ -842,11 +887,12 @@ const doAIBeautify = async () => {
   aiBeautifying.value = true;
   try {
     await saveArticle();
-    const res = await aiBeautifyArticle(form.value.id);
+    const res = await aiBeautifyArticle(form.value.id, {
+      style_hint: aiStyleHint.value || undefined,
+    });
     if (res.data.html_content) {
       form.value.html_content = res.data.html_content;
       htmlSource.value = res.data.html_content;
-      // AI 美化同理，切到预览模式
       activeTab.value = 'preview';
       MessagePlugin.success(`AI 美化完成（~${res.data.credits_consumed || 3} Credits）`);
       fetchCredits();
@@ -913,6 +959,48 @@ const doGenerateCover = async () => {
     MessagePlugin.error(err?.response?.data?.detail || '封面图生成失败');
   } finally {
     coverGenerating.value = false;
+  }
+};
+
+// ---- 内容配图生成 ----
+const doGenerateInlineImage = async () => {
+  if (!form.value.id || !inlineImgPrompt.value.trim()) {
+    MessagePlugin.warning('请输入配图描述');
+    return;
+  }
+  inlineImgGenerating.value = true;
+  try {
+    const res = await generateInlineImage(form.value.id, {
+      prompt: inlineImgPrompt.value.trim(),
+      aspect_ratio: '16:9',
+    });
+    if (res.data.image_url) {
+      const imgUrl = res.data.image_url;
+      const alt = inlineImgPrompt.value.slice(0, 30);
+
+      // Insert into TipTap editor if in rich mode
+      if (tiptapRef.value && (activeTab.value === 'rich' || !form.value.id)) {
+        const imgTag = `<p><img src="${imgUrl}" alt="${alt}" style="width:100%;border-radius:8px;margin:16px 0" /></p>`;
+        richHtml.value += imgTag;
+        form.value.html_content = richHtml.value;
+      }
+
+      // Also insert into markdown content
+      if (form.value.content) {
+        form.value.content += `\n\n![${alt}](${imgUrl})\n`;
+      }
+
+      inlineImgPrompt.value = '';
+      MessagePlugin.success(`配图已生成并插入文章（${res.data.credits_consumed} Credits）`);
+      fetchCredits();
+
+      // Auto-save to persist the image in the article
+      await saveArticle();
+    }
+  } catch (err: any) {
+    MessagePlugin.error(err?.response?.data?.detail || '配图生成失败');
+  } finally {
+    inlineImgGenerating.value = false;
   }
 };
 
@@ -1056,12 +1144,12 @@ onMounted(async () => {
   background: #fff; overflow: hidden;
 }
 .editor-scroll {
-  flex: 1; overflow-y: auto; padding: 28px 40px 20px;
+  flex: 1; overflow-y: auto; padding: 16px 32px 12px;
 }
 
 /* 标题输入 */
 .editor-title {
-  font-size: 26px; font-weight: 700; line-height: 1.35; color: #1a1a1a;
+  font-size: 22px; font-weight: 700; line-height: 1.3; color: #1a1a1a;
   border: none; outline: none; width: 100%; padding: 0;
   background: transparent; font-family: inherit;
 }
@@ -1069,8 +1157,8 @@ onMounted(async () => {
 
 /* 元信息区 */
 .editor-meta {
-  margin-top: 8px; display: flex; flex-direction: column; gap: 6px;
-  padding-bottom: 16px; border-bottom: 1px solid #f0f1f3;
+  margin-top: 4px; display: flex; flex-direction: column; gap: 4px;
+  padding-bottom: 8px; border-bottom: 1px solid #f0f1f3;
 }
 .editor-digest {
   font-size: 14px; color: #6b7280; border: none; outline: none;
@@ -1097,19 +1185,20 @@ onMounted(async () => {
 
 /* 分割线 */
 .editor-divider {
-  height: 1px; background: #f0f1f3; margin: 12px 0 8px;
+  height: 1px; background: #f0f1f3; margin: 6px 0 4px;
 }
 
 /* Tab 切换 */
-.toolbar-tabs { padding: 4px 0 10px; }
+.toolbar-tabs { padding: 2px 0 6px; }
 
-/* 编辑器内容容器 */
+/* 编辑器内容容器 — 用 calc 撑满剩余高度 */
 .editor-body-wrap {
-  position: relative; min-height: 300px;
+  position: relative;
 }
-.editor-scroll :deep(.tiptap-editor) { min-height: 300px !important; }
+.editor-tab-wrap { }
+.editor-scroll :deep(.tiptap-editor) { }
 .editor-scroll :deep(.ProseMirror) {
-  min-height: 300px !important; padding: 12px 16px !important;
+  min-height: calc(100vh - 340px); padding: 12px 16px !important;
   font-size: 15px; line-height: 1.85; color: #374151;
   border: 1px solid #e5e7eb; border-radius: 8px; background: #fff;
 }
@@ -1117,9 +1206,9 @@ onMounted(async () => {
   outline: none; border-color: var(--td-brand-color, #2563eb);
   box-shadow: 0 0 0 2px rgba(37,99,235,0.08);
 }
-.raw-editor-wrap { min-height: 300px; }
+.raw-editor-wrap { }
 .raw-editor {
-  width: 100%; min-height: 300px; padding: 12px 16px;
+  width: 100%; min-height: calc(100vh - 340px); padding: 12px 16px;
   border: 1px solid #e5e7eb; border-radius: 8px;
   font-family: 'Menlo', 'Consolas', monospace; font-size: 13px;
   line-height: 1.7; resize: vertical; background: #fff;
@@ -1130,8 +1219,8 @@ onMounted(async () => {
   box-shadow: 0 0 0 2px rgba(37,99,235,0.08);
 }
 .preview-html-wrap {
-  min-height: 300px; border: 1px solid #e5e7eb; border-radius: 8px;
-  background: #fff; padding: 12px 16px;
+  min-height: calc(100vh - 340px); border: 1px solid #e5e7eb; border-radius: 8px;
+  background: #fff; padding: 12px 16px; overflow-y: auto;
 }
 .preview-html {
   min-height: 280px; line-height: 1.85; font-size: 14px; color: #333;
@@ -1140,7 +1229,7 @@ onMounted(async () => {
 /* 生成期间的微信样式预览 */
 .wechat-preview-generating {
   position: relative;
-  min-height: 400px;
+  min-height: calc(100vh - 340px);
   border: 1px solid #e5e7eb;
   border-radius: 10px;
   background: #fff;
@@ -1182,7 +1271,7 @@ onMounted(async () => {
 
 /* 字数统计 */
 .word-count {
-  text-align: right; font-size: 11px; color: #9ca3af; padding: 10px 0 4px;
+  text-align: right; font-size: 11px; color: #9ca3af; padding: 6px 0 0;
 }
 
 /* === 右侧面板 === */
@@ -1345,6 +1434,79 @@ onMounted(async () => {
 .draft-item:hover { background: #e8eaed; }
 .draft-item.active { background: #dbeafe; color: var(--td-brand-color, #2563eb); }
 .draft-empty { font-size: 11px; color: #ccc; padding: 6px 0; }
+
+/* ---- Tab badge ---- */
+.tab-badge {
+  display: inline-block; padding: 1px 6px; border-radius: 99px;
+  font-size: 9px; font-weight: 700; color: #fff;
+  background: linear-gradient(135deg, #2563eb, #7c3aed);
+  margin-left: 4px; vertical-align: middle; line-height: 1.4;
+}
+
+/* ---- 排版美化区（微信预览 tab 内）---- */
+.preview-section { display: flex; flex-direction: column; gap: 16px; }
+.beautify-section {
+  padding: 14px; border-radius: 12px;
+  background: linear-gradient(135deg, #f8faff 0%, #eff6ff 50%, #fdf4ff 100%);
+  border: 1px solid rgba(37,99,235,0.12);
+}
+.beautify-label {
+  font-size: 11px; font-weight: 700; color: #6b7280; margin-bottom: 8px;
+  letter-spacing: 0.3px; text-transform: uppercase;
+}
+.wenyan-theme-grid {
+  display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 4px; margin-bottom: 10px;
+}
+.wenyan-theme-chip {
+  padding: 6px 4px; border: 1px solid #e5e7eb; border-radius: 8px;
+  background: #fff; cursor: pointer; text-align: center; transition: all .15s;
+  font-family: inherit;
+}
+.wenyan-theme-chip:hover { border-color: #93c5fd; background: #eff6ff; }
+.wenyan-theme-chip.active { border-color: var(--td-brand-color, #2563eb); background: #dbeafe; }
+.wt-name { display: block; font-size: 12px; font-weight: 700; color: #1a1a1a; }
+.wt-desc { display: block; font-size: 9px; color: #9ca3af; margin-top: 1px; }
+.wenyan-theme-chip.active .wt-name { color: var(--td-brand-color); }
+
+.beautify-action-btn {
+  width: 100%; padding: 9px; border: 1px solid #e5e7eb; border-radius: 8px;
+  background: #fff; font-size: 13px; font-weight: 600; color: #374151;
+  cursor: pointer; transition: all .15s; font-family: inherit;
+}
+.beautify-action-btn:hover:not(:disabled) { border-color: #93c5fd; background: #f8faff; }
+.beautify-action-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.beautify-action-btn.primary {
+  background: linear-gradient(135deg, #2563eb, #7c3aed); color: #fff; border: none;
+  box-shadow: 0 2px 8px rgba(124,58,237,0.2);
+}
+.beautify-action-btn.primary:hover:not(:disabled) {
+  box-shadow: 0 4px 16px rgba(124,58,237,0.3); transform: translateY(-1px);
+}
+
+.beautify-divider { height: 1px; background: rgba(37,99,235,0.1); margin: 10px 0; }
+
+.advanced-toggle {
+  width: 100%; padding: 4px; border: none; background: transparent;
+  font-size: 11px; color: #9ca3af; cursor: pointer; text-align: center;
+  font-family: inherit;
+}
+.advanced-toggle:hover { color: #6b7280; }
+.advanced-box { margin-top: 6px; }
+.style-hint-input {
+  width: 100%; padding: 8px 10px; border: 1px solid #e5e7eb; border-radius: 6px;
+  font-size: 12px; line-height: 1.5; color: #374151; background: #fff;
+  resize: none; font-family: inherit; box-sizing: border-box;
+}
+.style-hint-input:focus { border-color: var(--td-brand-color); outline: none; }
+
+/* ---- 内容配图输入 ---- */
+.inline-img-section { margin-top: 4px; }
+.inline-img-input {
+  width: 100%; padding: 8px 10px; border: 1px solid #e5e7eb; border-radius: 6px;
+  font-size: 12px; color: #374151; background: #f8f9fb; margin-bottom: 6px;
+  font-family: inherit; box-sizing: border-box;
+}
+.inline-img-input:focus { border-color: var(--td-brand-color); outline: none; background: #fff; }
 
 /* mode chips */
 .mode-chips { display: flex; gap: 6px; margin-bottom: 4px; }

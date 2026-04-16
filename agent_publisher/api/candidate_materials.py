@@ -1,8 +1,8 @@
 """Candidate Materials API: browse, filter, tag, and manually upload materials."""
+
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -23,6 +23,7 @@ router = APIRouter(prefix="/api/candidate-materials", tags=["materials"])
 # ---------------------------------------------------------------------------
 # Manual upload
 # ---------------------------------------------------------------------------
+
 
 class ManualUploadRequest(BaseModel):
     title: str
@@ -55,6 +56,7 @@ async def upload_material(
 # ---------------------------------------------------------------------------
 # List / filter
 # ---------------------------------------------------------------------------
+
 
 @router.get("", response_model=dict)
 async def list_materials(
@@ -94,6 +96,7 @@ async def list_materials(
 # Detail
 # ---------------------------------------------------------------------------
 
+
 @router.get("/{material_id}", response_model=CandidateMaterialOut)
 async def get_material(
     material_id: int,
@@ -110,6 +113,7 @@ async def get_material(
 # ---------------------------------------------------------------------------
 # Tag management
 # ---------------------------------------------------------------------------
+
 
 @router.patch("/{material_id}/tags", response_model=CandidateMaterialOut)
 async def update_material_tags(

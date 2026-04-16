@@ -12,7 +12,9 @@ class Article(Base):
     __tablename__ = "articles"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    agent_id: Mapped[int | None] = mapped_column(ForeignKey("agents.id"), nullable=True, default=None)
+    agent_id: Mapped[int | None] = mapped_column(
+        ForeignKey("agents.id"), nullable=True, default=None
+    )
     title: Mapped[str] = mapped_column(String(200))
     digest: Mapped[str] = mapped_column(String(500), default="")
     content: Mapped[str] = mapped_column(Text, default="")
@@ -28,9 +30,7 @@ class Article(Base):
         ForeignKey("articles.id"), nullable=True, default=None
     )
     variant_style: Mapped[str | None] = mapped_column(String(50), nullable=True, default=None)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     agent: Mapped["Agent"] = relationship(back_populates="articles")  # noqa: F821
     publish_records: Mapped[list["PublishRecord"]] = relationship(  # noqa: F821

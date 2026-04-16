@@ -4,11 +4,12 @@
   - AI 智能筛选 (兴趣标签提取 + 批量相关性评分)
   - AI 趋势分析 (结构化洞察输出)
 """
+
 from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,6 +22,7 @@ logger = logging.getLogger(__name__)
 def _get_llm_config() -> dict:
     """获取平台级 LLM 配置"""
     from agent_publisher.config import settings
+
     return {
         "provider": settings.default_llm_provider,
         "model": settings.default_llm_model,
@@ -115,10 +117,8 @@ class HotspotAIService:
 
         # Process in batches
         for start in range(0, len(items), batch_size):
-            batch = items[start:start + batch_size]
-            items_text = "\n".join(
-                f"[{item['index']}] {item['title']}" for item in batch
-            )
+            batch = items[start : start + batch_size]
+            items_text = "\n".join(f"[{item['index']}] {item['title']}" for item in batch)
             tags_text = ", ".join(t["tag"] for t in tags)
 
             messages = [
@@ -184,8 +184,7 @@ class HotspotAIService:
 
         # Prepare items for classification
         items = [
-            {"index": i, "title": f"{m.title} - {m.summary[:100]}"}
-            for i, m in enumerate(materials)
+            {"index": i, "title": f"{m.title} - {m.summary[:100]}"} for i, m in enumerate(materials)
         ]
 
         # Classify
@@ -221,10 +220,11 @@ class HotspotAIService:
     @dataclass
     class TrendAnalysisResult:
         """趋势分析结果"""
-        core_trends: str = ""       # 核心热点与舆情
-        sentiment: str = ""         # 舆论风向与争议
-        signals: str = ""           # 异动与弱信号
-        outlook: str = ""           # 研判与建议
+
+        core_trends: str = ""  # 核心热点与舆情
+        sentiment: str = ""  # 舆论风向与争议
+        signals: str = ""  # 异动与弱信号
+        outlook: str = ""  # 研判与建议
         success: bool = False
         total_analyzed: int = 0
 
@@ -317,8 +317,8 @@ def _parse_trend_sections(text: str) -> dict[str, str]:
 
     sections: dict[str, str] = {}
     # Match ## N. Title or ## Title patterns
-    parts = re.split(r'##\s*\d*\.?\s*', text)
-    headers = re.findall(r'##\s*\d*\.?\s*(.+?)[\n\r]', text)
+    parts = re.split(r"##\s*\d*\.?\s*", text)
+    headers = re.findall(r"##\s*\d*\.?\s*(.+?)[\n\r]", text)
 
     for i, header in enumerate(headers):
         header_clean = header.strip().rstrip("：:")

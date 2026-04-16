@@ -1,8 +1,8 @@
 """数据源注册中心 — SourceConfig CRUD + Agent 绑定 + 采集编排"""
+
 from __future__ import annotations
 
 import logging
-from typing import Sequence
 
 from sqlalchemy import and_, delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,11 +16,6 @@ from agent_publisher.schemas.source_config import (
     SourceConfigCreate,
     SourceConfigUpdate,
     TRENDING_PLATFORMS,
-)
-from agent_publisher.services.trending_service import (
-    KeywordRule,
-    TrendingCollectorService,
-    parse_keyword_rules,
 )
 
 logger = logging.getLogger(__name__)
@@ -161,8 +156,6 @@ class SourceRegistryService:
         )
         result = await self.session.execute(stmt)
         return result.scalars().first()
-        logger.info("Bound agent %d to source %d", agent_id, data.source_config_id)
-        return binding
 
     async def unbind_agent(self, agent_id: int, source_config_id: int) -> bool:
         """解绑 Agent 与数据源"""
@@ -216,7 +209,9 @@ class SourceRegistryService:
 
         # 获取所有启用的绑定
         bindings = await self.list_agent_bindings(agent.id)
-        enabled_bindings = [b for b in bindings if b.is_enabled and b.source_config and b.source_config.is_enabled]
+        enabled_bindings = [
+            b for b in bindings if b.is_enabled and b.source_config and b.source_config.is_enabled
+        ]
 
         if not enabled_bindings:
             logger.info("No enabled source bindings for agent %s", agent.name)
@@ -249,13 +244,19 @@ class SourceRegistryService:
         total = sum(len(ids) for ids in results.values())
         logger.info(
             "Collected %d total materials for agent %s: %s",
-            total, agent.name,
+            total,
+            agent.name,
             {k: len(v) for k, v in results.items()},
         )
         return results
 
     async def collect_all_trending(self) -> dict[str, object]:
-        """采集所有已启用的 trending 数据源，用于管理员全局刷新热榜。"""
+        """采集所有已启用的 trending 数据源，用于管理员全局刷新热榜。
+
+        Uses TrendRadar adapter for data fetching.
+        """
+        from agent_publisher.services.trendradar_adapter import get_trendradar_adapter
+
         sources = await self.list_sources(source_type="trending", is_enabled=True)
         seen_platforms: set[str] = set()
         platform_ids: list[str] = []
@@ -273,39 +274,21 @@ class SourceRegistryService:
                 "duplicate_items": 0,
             }
 
-        collector = TrendingCollectorService(self.session)
-        created_ids = await collector.collect(
+        adapter = await get_trendradar_adapter(self.session)
+        result = await adapter.collect_for_agent(
             agent_id=None,
             agent_name="global_trending",
-            platform_configs=[{"platform_id": pid} for pid in platform_ids],
+            platforms=platform_ids,
         )
-
-        if not created_ids:
-            return {
-                "platforms_collected": platform_ids,
-                "total_items": 0,
-                "new_items": 0,
-                "duplicate_items": 0,
-            }
-
-        result = await self.session.execute(
-            select(CandidateMaterial.id).where(
-                CandidateMaterial.id.in_(created_ids),
-                CandidateMaterial.is_duplicate.is_(False),
-            )
-        )
-        new_items = len(result.scalars().all())
 
         return {
-            "platforms_collected": platform_ids,
-            "total_items": len(created_ids),
-            "new_items": new_items,
-            "duplicate_items": len(created_ids) - new_items,
+            "platforms_collected": result.get("platforms_collected", platform_ids),
+            "total_items": result.get("new_items", 0) + result.get("duplicates_skipped", 0),
+            "new_items": result.get("new_items", 0),
+            "duplicate_items": result.get("duplicates_skipped", 0),
         }
 
-    async def _collect_rss(
-        self, agent: Agent, bindings: list[AgentSourceBinding]
-    ) -> list[int]:
+    async def _collect_rss(self, agent: Agent, bindings: list[AgentSourceBinding]) -> list[int]:
         """RSS 采集 — 复用已有 RssCollectorAdapter"""
         from agent_publisher.services.rss_service import RssCollectorAdapter
 
@@ -314,10 +297,12 @@ class SourceRegistryService:
             cfg = binding.source_config.config or {}
             url = cfg.get("url", "")
             if url:
-                rss_sources.append({
-                    "url": url,
-                    "name": binding.source_config.display_name,
-                })
+                rss_sources.append(
+                    {
+                        "url": url,
+                        "name": binding.source_config.display_name,
+                    }
+                )
 
         if not rss_sources:
             return []
@@ -332,34 +317,58 @@ class SourceRegistryService:
     async def _collect_trending(
         self, agent: Agent, bindings: list[AgentSourceBinding]
     ) -> list[int]:
-        """热榜采集"""
-        platform_configs = []
+        """热榜采集 — 使用 TrendRadar adapter 获取热点数据。"""
+        from agent_publisher.services.trendradar_adapter import get_trendradar_adapter
+
+        platform_ids: list[str] = []
         all_filter_keywords: list[str] = []
 
         for binding in bindings:
             cfg = binding.source_config.config or {}
             pid = cfg.get("platform_id", "")
             if pid:
-                platform_configs.append({"platform_id": pid})
+                platform_ids.append(pid)
 
             # Collect per-binding filter keywords
             if binding.filter_keywords:
                 all_filter_keywords.extend(binding.filter_keywords)
 
-        if not platform_configs:
+        if not platform_ids:
             return []
 
-        collector = TrendingCollectorService(self.session)
-        return await collector.collect(
+        adapter = await get_trendradar_adapter(self.session)
+        result = await adapter.collect_for_agent(
             agent_id=agent.id,
             agent_name=agent.name,
-            platform_configs=platform_configs,
+            platforms=platform_ids,
             filter_keywords=all_filter_keywords if all_filter_keywords else None,
         )
 
-    async def _collect_search(
-        self, agent: Agent, bindings: list[AgentSourceBinding]
-    ) -> list[int]:
+        if result["status"] != "success":
+            logger.error(
+                "TrendRadar collection failed for agent %s: %s",
+                agent.name,
+                result.get("error", "unknown"),
+            )
+            return []
+
+        logger.info(
+            "TrendRadar collection for agent %s: new=%d, dupes=%d, filtered=%d",
+            agent.name,
+            result.get("new_items", 0),
+            result.get("duplicates_skipped", 0),
+            result.get("low_quality_skipped", 0),
+        )
+
+        # Return IDs of recently created trending materials for this agent
+        stmt = select(CandidateMaterial.id).where(
+            CandidateMaterial.agent_id == agent.id,
+            CandidateMaterial.source_type == "trending",
+        )
+        db_result = await self.session.execute(stmt)
+        return [row[0] for row in db_result.all()]
+
+    async def _collect_search(self, agent: Agent, bindings: list[AgentSourceBinding]) -> list[int]:
         """搜索采集 — 复用已有 SearchCollector"""
         from agent_publisher.services.search_collector_service import get_search_collector
 

@@ -1,18 +1,26 @@
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import pytest
 
 from agent_publisher.services.llm_service import LLMService
 
+# Helper: patch _load_base_prompt to return empty string (isolate tests from file)
+_NO_BASE = patch.object(LLMService, "_load_base_prompt", return_value="")
+# Helper: patch _load_base_prompt to return a known base prompt
+_WITH_BASE = patch.object(LLMService, "_load_base_prompt", return_value="你是微信公众号编辑。")
+
 
 def test_build_article_messages_default_template():
     """build_article_messages should produce system + user messages."""
-    messages = LLMService.build_article_messages(
-        topic="AI科技",
-        news_list="- News 1\n- News 2",
-        prompt_template="",
-        agent_description="",
-    )
+    with _NO_BASE:
+        messages = LLMService.build_article_messages(
+            topic="AI科技",
+            news_list="- News 1\n- News 2",
+            prompt_template="",
+            agent_description="",
+        )
     assert len(messages) == 2
     assert messages[0]["role"] == "system"
     assert messages[1]["role"] == "user"
@@ -23,12 +31,13 @@ def test_build_article_messages_default_template():
 def test_build_article_messages_custom_template():
     """Custom prompt template should be used when provided."""
     template = "Topic: {topic}\nNews:\n{news_list}\nStyle: {style}"
-    messages = LLMService.build_article_messages(
-        topic="Finance",
-        news_list="- Stock up",
-        prompt_template=template,
-        agent_description="You are a finance editor.",
-    )
+    with _NO_BASE:
+        messages = LLMService.build_article_messages(
+            topic="Finance",
+            news_list="- Stock up",
+            prompt_template=template,
+            agent_description="You are a finance editor.",
+        )
     assert messages[0]["content"] == "You are a finance editor."
     assert "Finance" in messages[1]["content"]
     assert "Stock up" in messages[1]["content"]
@@ -56,3 +65,154 @@ async def test_generate_invalid_provider():
     """Calling generate with unknown provider raises ValueError."""
     with pytest.raises(ValueError, match="Unsupported LLM provider"):
         await LLMService.generate("nonexistent", "model", "key", [])
+
+
+# ── P0 Fix: Template without {news_list} must still include material content ──
+
+
+class TestNewsListAlwaysIncluded:
+    """CRITICAL: Verify that material content (news_list) ALWAYS reaches the LLM,
+    regardless of prompt template configuration.
+
+    This was a P0 bug: custom templates that didn't include {news_list} caused
+    str.format() to silently discard all material content, making the LLM generate
+    articles with no reference to the source materials.
+    """
+
+    def test_template_without_placeholder_includes_news(self):
+        """Template without {news_list} must still include the news content."""
+        with _NO_BASE:
+            msgs = LLMService.build_article_messages(
+                topic="Finance",
+                news_list="Stock market crashes 10%",
+                prompt_template="Write a financial analysis article with expert insights",
+                agent_description="",
+            )
+        assert "Stock market crashes 10%" in msgs[1]["content"], (
+            "P0 BUG: Template without {news_list} silently dropped all material content"
+        )
+
+    def test_stray_braces_dont_crash(self):
+        """Templates with literal braces (JSON, code snippets) don't crash."""
+        with _NO_BASE:
+            msgs = LLMService.build_article_messages(
+                topic="Dev",
+                news_list="New API released",
+                prompt_template='Use this format: {"key": "value"}',
+                agent_description="",
+            )
+        assert "New API released" in msgs[1]["content"]
+
+    def test_mode_instructions_preserve_news(self):
+        """Mode instructions appended to prompt still include news_list."""
+        # Simulate what article_service does: append mode text to prompt_text
+        prompt = "Write a cool article\n\n创作模式：爆款二创。基于以下素材进行二次创作"
+        with _NO_BASE:
+            msgs = LLMService.build_article_messages(
+                topic="AI",
+                news_list="Important material content",
+                prompt_template=prompt,
+                agent_description="",
+            )
+        assert "Important material content" in msgs[1]["content"]
+        assert "爆款二创" in msgs[1]["content"]
+
+    def test_output_format_always_present(self):
+        """Output format markers (---TITLE---) present in all cases."""
+        with _NO_BASE:
+            # No template
+            msgs = LLMService.build_article_messages("AI", "news", "", "")
+            assert "---TITLE---" in msgs[1]["content"]
+
+            # With template (no markers)
+            msgs = LLMService.build_article_messages("AI", "news", "Write about {news_list}", "")
+            assert "---TITLE---" in msgs[1]["content"]
+
+            # Template without placeholder
+            msgs = LLMService.build_article_messages("AI", "news", "Write an article", "")
+            assert "---TITLE---" in msgs[1]["content"]
+
+    def test_output_format_not_duplicated(self):
+        """Output format not duplicated if template already includes it."""
+        template = (
+            "Write about {news_list}\n---TITLE---\n标题\n---DIGEST---\n摘要\n---CONTENT---\n正文"
+        )
+        with _NO_BASE:
+            msgs = LLMService.build_article_messages("AI", "news", template, "")
+        assert msgs[1]["content"].count("---TITLE---") == 1
+
+    def test_agent_description_overrides_system_prompt(self):
+        """When agent_description is provided (no base prompt), it is the system prompt."""
+        with _NO_BASE:
+            msgs = LLMService.build_article_messages(
+                topic="AI", news_list="news", prompt_template="", agent_description="你是金融专家"
+            )
+        assert msgs[0]["content"] == "你是金融专家"
+
+    def test_default_system_prompt_includes_topic(self):
+        """Without agent_description and without base prompt, system prompt references the topic."""
+        with _NO_BASE:
+            msgs = LLMService.build_article_messages(
+                topic="量子计算", news_list="news", prompt_template="", agent_description=""
+            )
+        assert "量子计算" in msgs[0]["content"]
+
+
+# ── Base Prompt Integration Tests ──
+
+
+class TestBasePromptIntegration:
+    """Verify that base_prompt.md is properly layered into the system prompt."""
+
+    def test_base_prompt_with_agent_description(self):
+        """Base prompt + agent_description should be combined in system prompt."""
+        with _WITH_BASE:
+            msgs = LLMService.build_article_messages(
+                topic="AI",
+                news_list="news",
+                prompt_template="",
+                agent_description="你是金融专家",
+            )
+        system = msgs[0]["content"]
+        assert "你是微信公众号编辑" in system, "Base prompt missing"
+        assert "你是金融专家" in system, "Agent description missing"
+        assert "当前身份设定" in system, "Section header missing"
+
+    def test_base_prompt_without_agent_description(self):
+        """Base prompt without agent_description should include topic context."""
+        with _WITH_BASE:
+            msgs = LLMService.build_article_messages(
+                topic="量子计算",
+                news_list="news",
+                prompt_template="",
+                agent_description="",
+            )
+        system = msgs[0]["content"]
+        assert "你是微信公众号编辑" in system, "Base prompt missing"
+        assert "量子计算" in system, "Topic context missing"
+        assert "当前任务" in system, "Section header missing"
+
+    def test_base_prompt_does_not_affect_user_message(self):
+        """Base prompt only affects system message, not user message."""
+        with _WITH_BASE:
+            msgs = LLMService.build_article_messages(
+                topic="AI",
+                news_list="test news content",
+                prompt_template="",
+                agent_description="",
+            )
+        assert "你是微信公众号编辑" not in msgs[1]["content"]
+        assert "test news content" in msgs[1]["content"]
+
+    def test_no_base_prompt_fallback(self):
+        """Without base prompt file, uses original fallback behavior."""
+        with _NO_BASE:
+            msgs = LLMService.build_article_messages(
+                topic="科技",
+                news_list="news",
+                prompt_template="",
+                agent_description="",
+            )
+        assert "科技" in msgs[0]["content"]
+        # Should use the old-style fallback
+        assert "资深公众号编辑" in msgs[0]["content"]

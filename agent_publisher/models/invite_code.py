@@ -12,15 +12,20 @@ from agent_publisher.models.base import Base
 
 class InviteCode(Base):
     """Invite code for user registration via self-media promotion."""
+
     __tablename__ = "invite_codes"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     code: Mapped[str] = mapped_column(String(50), unique=True, index=True)
-    channel: Mapped[str] = mapped_column(String(50), default="open")  # douyin/xiaohongshu/wechat/open
+    channel: Mapped[str] = mapped_column(
+        String(50), default="open"
+    )  # douyin/xiaohongshu/wechat/open
     max_uses: Mapped[int] = mapped_column(Integer, default=0)  # 0 = unlimited
     used_count: Mapped[int] = mapped_column(Integer, default=0)
     bonus_credits: Mapped[int] = mapped_column(Integer, default=100)
-    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, default=None)
+    expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None
+    )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_by: Mapped[str] = mapped_column(String(200), default="")
     note: Mapped[str] = mapped_column(Text, default="")
@@ -29,6 +34,7 @@ class InviteCode(Base):
 
 class InviteRedemption(Base):
     """Record of an invite code being redeemed by a user."""
+
     __tablename__ = "invite_redemptions"
 
     id: Mapped[int] = mapped_column(primary_key=True)

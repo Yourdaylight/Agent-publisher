@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 
 # ── 11 个支持的热榜平台 ──────────────────────────────────────────────
@@ -26,6 +26,7 @@ TRENDING_PLATFORM_IDS = {p["id"] for p in TRENDING_PLATFORMS}
 
 
 # ── SourceConfig schemas ──────────────────────────────────────────────
+
 
 class SourceConfigCreate(BaseModel):
     source_type: Literal["rss", "trending", "search"]
@@ -59,6 +60,7 @@ class SourceConfigOut(BaseModel):
 
 # ── AgentSourceBinding schemas ────────────────────────────────────────
 
+
 class AgentSourceBindingCreate(BaseModel):
     source_config_id: int
     is_enabled: bool = True
@@ -80,14 +82,17 @@ class AgentSourceBindingOut(BaseModel):
 
 # ── Toggle schema ─────────────────────────────────────────────────────
 
+
 class ToggleRequest(BaseModel):
     is_enabled: bool
 
 
 # ── Collect result ────────────────────────────────────────────────────
 
+
 class CollectResult(BaseModel):
     """采集结果"""
+
     source_type: str
     material_ids: list[int]
     count: int

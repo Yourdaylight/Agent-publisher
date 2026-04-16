@@ -19,9 +19,7 @@ class Task(Base):
     steps: Mapped[list | None] = mapped_column(JSON, default=list)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     agent: Mapped["Agent | None"] = relationship(back_populates="tasks")  # noqa: F821
 

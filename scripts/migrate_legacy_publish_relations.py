@@ -8,6 +8,7 @@ Usage:
     python -m scripts.migrate_legacy_publish_relations
     # or: uv run scripts/migrate_legacy_publish_relations.py
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -17,7 +18,7 @@ import sys
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
 
@@ -36,7 +37,7 @@ async def migrate(session: AsyncSession, *, dry_run: bool = False) -> dict:
 
     # Find all published articles with wechat_media_id
     stmt = select(Article).where(
-        Article.wechat_media_id != '',
+        Article.wechat_media_id != "",
         Article.wechat_media_id.isnot(None),
     )
     result = await session.execute(stmt)
@@ -56,7 +57,7 @@ async def migrate(session: AsyncSession, *, dry_run: bool = False) -> dict:
         if existing:
             skipped += 1
             logger.debug(
-                'Article %d already has relation(s), skipping.',
+                "Article %d already has relation(s), skipping.",
                 article.id,
             )
             continue
@@ -65,7 +66,7 @@ async def migrate(session: AsyncSession, *, dry_run: bool = False) -> dict:
         agent = await session.get(Agent, article.agent_id)
         if not agent:
             logger.warning(
-                'Article %d: agent %d not found, skipping.',
+                "Article %d: agent %d not found, skipping.",
                 article.id,
                 article.agent_id,
             )
@@ -75,7 +76,7 @@ async def migrate(session: AsyncSession, *, dry_run: bool = False) -> dict:
         account_id = agent.account_id
         if not account_id:
             logger.warning(
-                'Article %d: agent %d has no account_id, skipping.',
+                "Article %d: agent %d has no account_id, skipping.",
                 article.id,
                 article.agent_id,
             )
@@ -87,16 +88,16 @@ async def migrate(session: AsyncSession, *, dry_run: bool = False) -> dict:
             article_id=article.id,
             account_id=account_id,
             wechat_media_id=article.wechat_media_id,
-            publish_status='success',
-            sync_status='synced',
-            last_error='',
+            publish_status="success",
+            sync_status="synced",
+            last_error="",
             last_published_at=article.published_at,
             last_synced_at=article.published_at,
         )
 
         if dry_run:
             logger.info(
-                '[DRY RUN] Would create relation: article=%d account=%d media_id=%s',
+                "[DRY RUN] Would create relation: article=%d account=%d media_id=%s",
                 article.id,
                 account_id,
                 article.wechat_media_id,
@@ -104,7 +105,7 @@ async def migrate(session: AsyncSession, *, dry_run: bool = False) -> dict:
         else:
             session.add(relation)
             logger.info(
-                'Created relation: article=%d account=%d media_id=%s',
+                "Created relation: article=%d account=%d media_id=%s",
                 article.id,
                 account_id,
                 article.wechat_media_id,
@@ -115,29 +116,29 @@ async def migrate(session: AsyncSession, *, dry_run: bool = False) -> dict:
         await session.commit()
 
     summary = {
-        'total_articles': len(articles),
-        'created': created,
-        'skipped': skipped,
-        'errors': errors,
+        "total_articles": len(articles),
+        "created": created,
+        "skipped": skipped,
+        "errors": errors,
     }
-    logger.info('Migration summary: %s', summary)
+    logger.info("Migration summary: %s", summary)
     return summary
 
 
 async def main():
     from agent_publisher.database import async_session_factory
 
-    dry_run = '--dry-run' in sys.argv
+    dry_run = "--dry-run" in sys.argv
     if dry_run:
-        logger.info('Running in DRY RUN mode — no changes will be committed.')
+        logger.info("Running in DRY RUN mode — no changes will be committed.")
 
     async with async_session_factory() as session:
         summary = await migrate(session, dry_run=dry_run)
 
-    print(f'\nMigration complete: {summary}')
+    print(f"\nMigration complete: {summary}")
     if dry_run:
-        print('(DRY RUN — re-run without --dry-run to apply changes)')
+        print("(DRY RUN — re-run without --dry-run to apply changes)")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     asyncio.run(main())

@@ -68,7 +68,7 @@ async def get_auth_url(user: UserContext = Depends(get_current_user)):
         raise HTTPException(
             status_code=400,
             detail="微信第三方平台未配置。请在 .env 中设置 WECHAT_PLATFORM_* 相关配置。"
-                   "详见 docs/wechat-platform-setup.md",
+            "详见 docs/wechat-platform-setup.md",
         )
 
     try:
@@ -86,7 +86,9 @@ async def get_auth_url(user: UserContext = Depends(get_current_user)):
     redirect_uri = f"https://{server_host}{port_part}/api/wechat-platform/auth-callback"
 
     auth_url = WeChatPlatformService.build_auth_url(
-        pre_auth_code, quote_plus(redirect_uri), auth_type=1  # 仅展示公众号
+        pre_auth_code,
+        quote_plus(redirect_uri),
+        auth_type=1,  # 仅展示公众号
     )
     h5_auth_url = WeChatPlatformService.build_h5_auth_url(
         pre_auth_code, quote_plus(redirect_uri), auth_type=1
@@ -114,7 +116,9 @@ async def auth_callback(
 
     Returns a simple HTML page indicating success or failure.
     """
-    logger.info("Auth callback received: auth_code=%s, expires_in=%d", auth_code[:8] + "...", expires_in)
+    logger.info(
+        "Auth callback received: auth_code=%s, expires_in=%d", auth_code[:8] + "...", expires_in
+    )
 
     try:
         # Exchange auth_code for authorizer info
@@ -132,10 +136,11 @@ async def auth_callback(
         verify_type_info = authorizer_detail.get("verify_type_info", {})
         service_type = service_type_info.get("id", 0) if isinstance(service_type_info, dict) else 0
         verify_type = verify_type_info.get("id", 0) if isinstance(verify_type_info, dict) else 0
-        user_name = authorizer_detail.get("user_name", "")  # 公众号原始ID
+        authorizer_detail.get("user_name", "")  # 公众号原始ID
 
         # Calculate token expiry
         from datetime import datetime, timedelta, timezone
+
         expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in_sec - 300)
 
         # Check if account already exists for this authorizer_appid
@@ -150,6 +155,7 @@ async def auth_callback(
         owner_email = ""
         try:
             from agent_publisher.config import settings as cfg
+
             admins = cfg.get_admin_emails()
             if admins:
                 owner_email = sorted(admins)[0]
@@ -171,7 +177,11 @@ async def auth_callback(
             if nick_name and not existing.name:
                 existing.name = nick_name
             await db.commit()
-            logger.info("Updated existing account id=%d for authorizer_appid=%s", existing.id, authorizer_appid)
+            logger.info(
+                "Updated existing account id=%d for authorizer_appid=%s",
+                existing.id,
+                authorizer_appid,
+            )
         else:
             # Create new account
             account = Account(
@@ -194,7 +204,9 @@ async def auth_callback(
             db.add(account)
             await db.commit()
             await db.refresh(account)
-            logger.info("Created new account id=%d for authorizer_appid=%s", account.id, authorizer_appid)
+            logger.info(
+                "Created new account id=%d for authorizer_appid=%s", account.id, authorizer_appid
+            )
 
         # Return a nice HTML success page
         display_name = nick_name or authorizer_appid
@@ -244,7 +256,9 @@ async def ticket_callback(request: Request):
     body = await request.body()
     xml_content = body.decode("utf-8")
 
-    logger.info("Ticket callback received: signature=%s, timestamp=%s", msg_signature[:8] + "...", timestamp)
+    logger.info(
+        "Ticket callback received: signature=%s, timestamp=%s", msg_signature[:8] + "...", timestamp
+    )
 
     try:
         # Decrypt the message
@@ -252,6 +266,7 @@ async def ticket_callback(request: Request):
 
         # Parse the decrypted XML to extract InfoType and ComponentVerifyTicket
         import xml.etree.ElementTree as ET
+
         root = ET.fromstring(plain_xml)
         info_type = root.findtext("InfoType", "")
         appid = root.findtext("AppId", "")
@@ -272,6 +287,7 @@ async def ticket_callback(request: Request):
             logger.warning("Account unauthorized: authorizer_appid=%s", authorizer_appid)
             # Mark account as unauthorized in database
             from agent_publisher.database import async_session_factory
+
             async with async_session_factory() as session:
                 result = await session.execute(
                     select(Account).where(Account.authorizer_appid == authorizer_appid)
@@ -289,7 +305,11 @@ async def ticket_callback(request: Request):
             # Authorization updated event
             authorizer_appid = root.findtext("AuthorizerAppid", "")
             authorization_code = root.findtext("AuthorizationCode", "")
-            logger.info("Authorization updated: appid=%s, code=%s", authorizer_appid, authorization_code[:8] + "...")
+            logger.info(
+                "Authorization updated: appid=%s, code=%s",
+                authorizer_appid,
+                authorization_code[:8] + "...",
+            )
 
         else:
             logger.info("Unhandled InfoType: %s", info_type)
@@ -327,6 +347,7 @@ async def event_callback(request: Request):
     try:
         plain_xml = CryptoUtils.decrypt_message(xml_content, msg_signature, timestamp, nonce)
         import xml.etree.ElementTree as ET
+
         root = ET.fromstring(plain_xml)
         info_type = root.findtext("InfoType", "")
         logger.info("Event callback: InfoType=%s", info_type)

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, JSON, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, JSON, String, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from agent_publisher.models.base import Base
@@ -28,9 +28,7 @@ class SourceConfig(Base):
     is_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     # 可选覆盖采集频率 (cron 表达式)
     collect_cron: Mapped[str | None] = mapped_column(String(100), default=None, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
@@ -48,9 +46,7 @@ class AgentSourceBinding(Base):
     """Agent <-> SourceConfig 多对多绑定"""
 
     __tablename__ = "agent_source_bindings"
-    __table_args__ = (
-        UniqueConstraint("agent_id", "source_config_id", name="uq_agent_source"),
-    )
+    __table_args__ = (UniqueConstraint("agent_id", "source_config_id", name="uq_agent_source"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     agent_id: Mapped[int] = mapped_column(ForeignKey("agents.id"))
@@ -58,9 +54,7 @@ class AgentSourceBinding(Base):
     is_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     # Per-agent 关键词过滤 (JSON array)
     filter_keywords: Mapped[list | None] = mapped_column(JSON, default=None, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     # Relationships
     source_config: Mapped["SourceConfig"] = relationship(back_populates="bindings")

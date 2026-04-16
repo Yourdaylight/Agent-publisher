@@ -85,7 +85,9 @@ class CryptoUtils:
         computed_sig = hashlib.sha1(sign_str.encode("utf-8")).hexdigest()
 
         if computed_sig != msg_signature:
-            raise ValueError(f"Signature mismatch: computed={computed_sig}, expected={msg_signature}")
+            raise ValueError(
+                f"Signature mismatch: computed={computed_sig}, expected={msg_signature}"
+            )
 
         # Decode the AES key (append "=" to make base64-decodable 32-byte key)
         import base64
@@ -213,9 +215,7 @@ class WeChatPlatformService:
             "expires_at": now + min(expires_in - 300, 5400),  # max 1.5h
         }
 
-        logger.info(
-            "Got component_access_token, expires_in=%ds", expires_in
-        )
+        logger.info("Got component_access_token, expires_in=%ds", expires_in)
         return token
 
     @staticmethod
@@ -265,7 +265,9 @@ class WeChatPlatformService:
         )
 
     @staticmethod
-    def build_h5_auth_url(pre_auth_code: str, redirect_uri: str, auth_type: int = 1, biz_appid: str = "") -> str:
+    def build_h5_auth_url(
+        pre_auth_code: str, redirect_uri: str, auth_type: int = 1, biz_appid: str = ""
+    ) -> str:
         """Build the H5 (mobile) authorization URL.
 
         This URL can be opened directly in WeChat's built-in browser,
@@ -315,8 +317,7 @@ class WeChatPlatformService:
 
         if "errcode" in data and data["errcode"] != 0:
             raise RuntimeError(
-                f"Failed to query auth: "
-                f"errcode={data.get('errcode')} errmsg={data.get('errmsg')}"
+                f"Failed to query auth: errcode={data.get('errcode')} errmsg={data.get('errmsg')}"
             )
 
         auth_info = data.get("authorization_info", {})
@@ -327,7 +328,8 @@ class WeChatPlatformService:
 
         logger.info(
             "Authorization successful: authorizer_appid=%s, expires_in=%ds",
-            authorizer_appid, expires_in,
+            authorizer_appid,
+            expires_in,
         )
 
         return {
@@ -410,7 +412,8 @@ class WeChatPlatformService:
 
         logger.info(
             "Refreshed authorizer_access_token for appid=%s, expires_in=%ds",
-            authorizer_appid, expires_in,
+            authorizer_appid,
+            expires_in,
         )
         return new_token, expires_at
 

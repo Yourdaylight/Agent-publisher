@@ -95,7 +95,9 @@ class MembershipService:
 
     async def list_plans(self) -> list[MembershipPlan]:
         result = await self.session.execute(
-            select(MembershipPlan).where(MembershipPlan.is_active.is_(True)).order_by(MembershipPlan.sort_order.asc())
+            select(MembershipPlan)
+            .where(MembershipPlan.is_active.is_(True))
+            .order_by(MembershipPlan.sort_order.asc())
         )
         return list(result.scalars().all())
 
@@ -109,7 +111,9 @@ class MembershipService:
         return result.scalars().first()
 
     async def create_placeholder_order(self, user_email: str, plan_name: str) -> Order:
-        result = await self.session.execute(select(MembershipPlan).where(MembershipPlan.name == plan_name))
+        result = await self.session.execute(
+            select(MembershipPlan).where(MembershipPlan.name == plan_name)
+        )
         plan = result.scalar_one_or_none()
         if not plan:
             raise ValueError("Membership plan not found")
@@ -127,8 +131,12 @@ class MembershipService:
         await self.session.refresh(order)
         return order
 
-    async def activate_membership(self, user_email: str, plan_name: str, duration_days: int = 30) -> UserMembership:
-        result = await self.session.execute(select(MembershipPlan).where(MembershipPlan.name == plan_name))
+    async def activate_membership(
+        self, user_email: str, plan_name: str, duration_days: int = 30
+    ) -> UserMembership:
+        result = await self.session.execute(
+            select(MembershipPlan).where(MembershipPlan.name == plan_name)
+        )
         plan = result.scalar_one_or_none()
         if not plan:
             raise ValueError("Membership plan not found")
@@ -150,6 +158,7 @@ class MembershipService:
         return {
             "wechat_qr": settings.contact_wechat_qr,
             "wechat_id": settings.contact_wechat_id,
-            "contact_description": settings.contact_description or "当前支付能力建设中，请联系管理员微信完成开通。",
+            "contact_description": settings.contact_description
+            or "当前支付能力建设中，请联系管理员微信完成开通。",
             "qrcode_path": "storage/qrcode/contact.png",
         }

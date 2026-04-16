@@ -1,4 +1,5 @@
 """User Group API: manage permission groups (admin only)."""
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -18,6 +19,7 @@ router = APIRouter(prefix="/api/groups", tags=["groups"])
 # ---------------------------------------------------------------------------
 # Schemas
 # ---------------------------------------------------------------------------
+
 
 class GroupCreate(BaseModel):
     name: str
@@ -70,11 +72,10 @@ class GroupOut(BaseModel):
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 async def _get_group(group_id: int, db: AsyncSession) -> UserGroup:
     result = await db.execute(
-        select(UserGroup)
-        .where(UserGroup.id == group_id)
-        .options(selectinload(UserGroup.members))
+        select(UserGroup).where(UserGroup.id == group_id).options(selectinload(UserGroup.members))
     )
     group = result.scalar_one_or_none()
     if not group:
@@ -85,6 +86,7 @@ async def _get_group(group_id: int, db: AsyncSession) -> UserGroup:
 # ---------------------------------------------------------------------------
 # Endpoints (admin-only write, any authenticated user can read their own groups)
 # ---------------------------------------------------------------------------
+
 
 @router.get("", response_model=list[GroupOut])
 async def list_groups(
@@ -190,7 +192,7 @@ async def add_member(
 ):
     """Add a user email to a group. Admin only."""
     require_admin(user)
-    group = await _get_group(group_id, db)  # existence check
+    await _get_group(group_id, db)  # existence check
 
     # Duplicate check
     dup = await db.execute(

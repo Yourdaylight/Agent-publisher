@@ -3,6 +3,7 @@
 Single LLM call: article → video script (scenes with text, colors, timing).
 The script is passed as props to the Remotion composition for rendering.
 """
+
 from __future__ import annotations
 
 # ---------------------------------------------------------------------------

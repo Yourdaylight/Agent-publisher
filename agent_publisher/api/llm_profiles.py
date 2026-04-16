@@ -79,9 +79,7 @@ async def delete_profile(
     if not profile:
         raise HTTPException(404, "LLM Profile not found")
     # Check if any agent references this profile
-    result = await db.execute(
-        select(Agent.id).where(Agent.llm_profile_id == profile_id).limit(1)
-    )
+    result = await db.execute(select(Agent.id).where(Agent.llm_profile_id == profile_id).limit(1))
     if result.scalar():
         raise HTTPException(
             400,

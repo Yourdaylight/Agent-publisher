@@ -1,4 +1,5 @@
 """Authentication API: login, token verification, and IP ban logic."""
+
 from __future__ import annotations
 
 import hashlib
@@ -10,7 +11,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, Request, HTTPException
 from pydantic import BaseModel, field_validator
 
-from agent_publisher.api.deps import get_current_user, UserContext, get_db
+from agent_publisher.api.deps import get_current_user, UserContext
 from agent_publisher.api.skills import _create_skill_token, verify_skill_token
 from agent_publisher.config import settings
 from agent_publisher.database import async_session_factory
@@ -32,6 +33,7 @@ async def _record_login_log(
     """Record a login attempt to system_logs."""
     try:
         from agent_publisher.services.system_log_service import SystemLogService
+
         async with async_session_factory() as session:
             svc = SystemLogService(session)
             await svc.record(
@@ -80,7 +82,9 @@ def _record_failed_attempt(ip: str) -> None:
     logger.warning("Failed login attempt from %s (count: %d)", ip, record["attempts"])
     if record["attempts"] >= MAX_ATTEMPTS:
         record["banned_until"] = time.time() + BAN_DURATION
-        logger.warning("IP %s banned for %ds after %d failed attempts", ip, BAN_DURATION, record["attempts"])
+        logger.warning(
+            "IP %s banned for %ds after %d failed attempts", ip, BAN_DURATION, record["attempts"]
+        )
 
 
 def _reset_attempts(ip: str) -> None:
@@ -108,7 +112,9 @@ def verify_token(token: str) -> bool:
             return False
         # Verify signature
         secret = settings.get_jwt_secret()
-        expected_sig = hashlib.sha256(f"{secret}:{settings.access_key}:{ts_str}".encode()).hexdigest()
+        expected_sig = hashlib.sha256(
+            f"{secret}:{settings.access_key}:{ts_str}".encode()
+        ).hexdigest()
         return sig == expected_sig
     except Exception:
         return False
@@ -118,8 +124,10 @@ def verify_token(token: str) -> bool:
 # Request / Response schemas
 # ---------------------------------------------------------------------------
 
+
 class LoginRequest(BaseModel):
     """Login request: provide either access_key (admin) or email (normal user)."""
+
     access_key: str | None = None
     email: str | None = None
 
@@ -150,6 +158,7 @@ class UserInfoResponse(BaseModel):
 # Endpoints
 # ---------------------------------------------------------------------------
 
+
 @router.post("/login", response_model=LoginResponse)
 async def login(req: LoginRequest, request: Request):
     """Login with either access_key (admin) or email (normal user).
@@ -165,11 +174,19 @@ async def login(req: LoginRequest, request: Request):
         email = req.email.strip().lower()
         if not settings.is_email_allowed(email):
             _record_failed_attempt(ip)
-            await _record_login_log(email=email, is_admin=settings.is_admin(email), status="failed", error="邮箱不在白名单", client_ip=ip)
+            await _record_login_log(
+                email=email,
+                is_admin=settings.is_admin(email),
+                status="failed",
+                error="邮箱不在白名单",
+                client_ip=ip,
+            )
             raise HTTPException(status_code=401, detail="该邮箱不在白名单中，请联系管理员")
         _reset_attempts(ip)
         token = _create_skill_token(email)
-        await _record_login_log(email=email, is_admin=settings.is_admin(email), status="success", client_ip=ip)
+        await _record_login_log(
+            email=email, is_admin=settings.is_admin(email), status="success", client_ip=ip
+        )
         return LoginResponse(
             token=token,
             message="Login successful",
@@ -181,7 +198,9 @@ async def login(req: LoginRequest, request: Request):
         # Admin access_key login
         if req.access_key != settings.access_key:
             _record_failed_attempt(ip)
-            await _record_login_log(email="__admin__", is_admin=True, status="failed", error="密钥错误", client_ip=ip)
+            await _record_login_log(
+                email="__admin__", is_admin=True, status="failed", error="密钥错误", client_ip=ip
+            )
             raise HTTPException(status_code=401, detail="Invalid access key")
         _reset_attempts(ip)
         token = _create_token(req.access_key)
@@ -192,8 +211,6 @@ async def login(req: LoginRequest, request: Request):
             email="__admin__",
             is_admin=True,
         )
-
-
 
 
 @router.get("/verify")
@@ -227,6 +244,7 @@ async def get_me(user: UserContext = Depends(get_current_user)):
 # Invite Code Login (public endpoint)
 # ---------------------------------------------------------------------------
 
+
 class InviteLoginRequest(BaseModel):
     code: str
     email: str
@@ -254,7 +272,7 @@ async def invite_login(req: InviteLoginRequest, request: Request):
     async with async_session_factory() as session:
         # 1. Validate invite code
         result = await session.execute(
-            select(InviteCode).where(InviteCode.code == req.code, InviteCode.is_active == True)
+            select(InviteCode).where(InviteCode.code == req.code, InviteCode.is_active)
         )
         invite = result.scalar_one_or_none()
         if not invite:
@@ -289,15 +307,19 @@ async def invite_login(req: InviteLoginRequest, request: Request):
             # Create credits account with bonus
             credits_svc = CreditsService(session)
             await credits_svc.get_or_create_balance(email)
-            await credits_svc.recharge(email, invite.bonus_credits, f"邀请码 {invite.code} 激活奖励")
+            await credits_svc.recharge(
+                email, invite.bonus_credits, f"邀请码 {invite.code} 激活奖励"
+            )
 
         # 4. Record redemption and update usage count
         invite.used_count += 1
-        session.add(InviteRedemption(
-            invite_code_id=invite.id,
-            user_email=email,
-            ip_address=ip,
-        ))
+        session.add(
+            InviteRedemption(
+                invite_code_id=invite.id,
+                user_email=email,
+                ip_address=ip,
+            )
+        )
         await session.commit()
 
         # 5. Issue token
@@ -305,7 +327,9 @@ async def invite_login(req: InviteLoginRequest, request: Request):
         token = _create_skill_token(email)
         return LoginResponse(
             token=token,
-            message=f"欢迎！已获得 {invite.bonus_credits} AI 创作积分" if not is_existing_user else "登录成功",
+            message=f"欢迎！已获得 {invite.bonus_credits} AI 创作积分"
+            if not is_existing_user
+            else "登录成功",
             email=email,
             is_admin=settings.is_admin(email),
         )

@@ -30,6 +30,7 @@ class CandidateMaterialUpdate(BaseModel):
 
 class CandidateMaterialTagUpdate(BaseModel):
     """Schema for adding/removing tags on a material."""
+
     add_tags: list[str] = []
     remove_tags: list[str] = []
 
@@ -42,7 +43,9 @@ class CandidateMaterialOut(BaseModel):
     title: str
     summary: str
     raw_content: str
-    metadata: dict | None = Field(None, validation_alias="extra_metadata", serialization_alias="metadata")
+    metadata: dict | None = Field(
+        None, validation_alias="extra_metadata", serialization_alias="metadata"
+    )
     tags: list[str] = []
     agent_id: int | None = None
     is_duplicate: bool
@@ -55,6 +58,7 @@ class CandidateMaterialOut(BaseModel):
 
 class CandidateMaterialListParams(BaseModel):
     """Query parameters for listing candidate materials."""
+
     agent_id: int | None = None
     source_type: str | None = None
     status: str | None = None

@@ -4,6 +4,7 @@ Two prompt sets:
   1. Orchestrator: splits article into chapters with narrative structure
   2. Chapter Writer: generates slides for a single chapter
 """
+
 from __future__ import annotations
 
 # ---------------------------------------------------------------------------

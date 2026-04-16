@@ -24,6 +24,7 @@ router = APIRouter(prefix="/api/invite-codes", tags=["invite-codes"])
 # Schemas
 # ---------------------------------------------------------------------------
 
+
 class InviteCodeCreate(BaseModel):
     channel: str = "open"
     max_uses: int = 0
@@ -51,6 +52,7 @@ def _generate_code(channel: str) -> str:
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
+
 
 @router.get("")
 async def list_invite_codes(
@@ -173,13 +175,11 @@ async def invite_stats(
     total_codes = total_result.scalar() or 0
 
     active_result = await db.execute(
-        select(func.count()).select_from(InviteCode).where(InviteCode.is_active == True)
+        select(func.count()).select_from(InviteCode).where(InviteCode.is_active)
     )
     active_codes = active_result.scalar() or 0
 
-    total_redemptions_result = await db.execute(
-        select(func.count()).select_from(InviteRedemption)
-    )
+    total_redemptions_result = await db.execute(select(func.count()).select_from(InviteRedemption))
     total_redemptions = total_redemptions_result.scalar() or 0
 
     unique_users_result = await db.execute(
@@ -189,8 +189,7 @@ async def invite_stats(
 
     # Per-channel breakdown
     channel_result = await db.execute(
-        select(InviteCode.channel, func.sum(InviteCode.used_count))
-        .group_by(InviteCode.channel)
+        select(InviteCode.channel, func.sum(InviteCode.used_count)).group_by(InviteCode.channel)
     )
     by_channel = {row[0]: row[1] or 0 for row in channel_result.all()}
 

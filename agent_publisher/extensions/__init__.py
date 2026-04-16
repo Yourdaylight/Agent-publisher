@@ -1,4 +1,5 @@
 """Extension registry — auto-discovers extensions under extensions/*/extension.py."""
+
 from __future__ import annotations
 
 import importlib

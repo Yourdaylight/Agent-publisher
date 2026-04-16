@@ -3,6 +3,7 @@
 Uses Remotion (React-based video rendering) to produce MP4 videos.
 LLM generates the scene script, Remotion renders the final video.
 """
+
 from __future__ import annotations
 
 from agent_publisher.extensions._base import Extension

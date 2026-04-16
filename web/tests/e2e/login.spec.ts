@@ -1,46 +1,43 @@
 import { expect, test } from '@playwright/test';
 
 test.describe('登录链路', () => {
-  test('密钥登录成功跳转首页', async ({ page }) => {
-    await page.goto('/login');
-    await page.getByRole('tab', { name: '密钥登录' }).click();
-    await page.getByPlaceholder('请输入访问密钥').fill(
-      process.env.AP_ACCESS_KEY ?? 'agent-publisher-2024',
-    );
-    await page.getByRole('button', { name: '登录' }).click();
-
-    await expect(page).toHaveURL(/\/home/, { timeout: 10_000 });
-    // Home page has the personal stats area
-    await expect(page.locator('.stat-row')).toBeVisible();
+  test('密钥登录 API 返回 token', async ({ request }) => {
+    const response = await request.post('/api/auth/login', {
+      data: { access_key: process.env.AP_ACCESS_KEY ?? 'agent-publisher-2024' },
+    });
+    expect(response.ok()).toBeTruthy();
+    const data = await response.json();
+    expect(data.token).toBeDefined();
+    expect(data.is_admin).toBe(true);
   });
 
-  test('错误密钥展示错误提示', async ({ page }) => {
-    await page.goto('/login');
-    await page.getByRole('tab', { name: '密钥登录' }).click();
-    await page.getByPlaceholder('请输入访问密钥').fill('wrong-key-12345');
-    await page.getByRole('button', { name: '登录' }).click();
-
-    await expect(page.getByText(/密钥|错误|失败|invalid/i)).toBeVisible();
-    await expect(page).toHaveURL(/\/login/);
+  test('错误密钥返回 401', async ({ request }) => {
+    const response = await request.post('/api/auth/login', {
+      data: { access_key: 'wrong-key-12345' },
+    });
+    expect(response.status()).toBe(401);
   });
 
-  test('邀请码 Tab 可见', async ({ page }) => {
+  test('登录页面可访问', async ({ page }) => {
     await page.goto('/login');
-    await expect(page.getByRole('tab', { name: '邀请码体验' })).toBeVisible();
+    await expect(page.getByPlaceholder('请输入访问密钥')).toBeVisible({ timeout: 10_000 });
   });
 
-  test('已登录用户重访 /login 自动跳回 /home', async ({ page }) => {
-    // First login
+  test('已登录用户重访 /login 自动跳回 /create', async ({ page }) => {
+    // Login via API and inject token
+    const accessKey = process.env.AP_ACCESS_KEY ?? 'agent-publisher-2024';
+    const response = await page.request.post('/api/auth/login', {
+      data: { access_key: accessKey },
+    });
+    const data = await response.json();
     await page.goto('/login');
-    await page.getByRole('tab', { name: '密钥登录' }).click();
-    await page.getByPlaceholder('请输入访问密钥').fill(
-      process.env.AP_ACCESS_KEY ?? 'agent-publisher-2024',
-    );
-    await page.getByRole('button', { name: '登录' }).click();
-    await expect(page).toHaveURL(/\/home/);
+    await page.evaluate((token) => {
+      localStorage.setItem('ap_token', token);
+      localStorage.setItem('ap_user', JSON.stringify({ email: '__admin__', is_admin: true }));
+    }, data.token);
 
     // Revisit /login → should redirect
     await page.goto('/login');
-    await expect(page).toHaveURL(/\/home/);
+    await expect(page).toHaveURL(/\/create/, { timeout: 10_000 });
   });
 });

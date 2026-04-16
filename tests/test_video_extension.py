@@ -8,16 +8,15 @@ Three tiers:
 The unit tests are the ones that would have caught the `--props` path bug
 before any manual testing.
 """
+
 from __future__ import annotations
 
 import json
 import os
-import subprocess
 import sys
 import types
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -26,22 +25,26 @@ import pytest
 # Third-party stubs (same as conftest)
 # ---------------------------------------------------------------------------
 
+
 def _stubs():
     for mod, attrs in [
-        ('tencentcloud', {}),
-        ('tencentcloud.common', {}),
-        ('tencentcloud.common.profile', {}),
-        ('tencentcloud.aiart', {}),
-        ('tencentcloud.aiart.v20221229', {}),
-        ('tencentcloud.common.credential', {'Credential': object}),
-        ('tencentcloud.common.profile.client_profile', {'ClientProfile': object}),
-        ('tencentcloud.common.profile.http_profile', {'HttpProfile': object}),
-        ('tencentcloud.aiart.v20221229.aiart_client', {'AiartClient': object}),
-        ('tencentcloud.aiart.v20221229.models', {
-            'SubmitTextToImageJobRequest': object,
-            'QueryTextToImageJobRequest': object,
-        }),
-        ('feedparser', {'parse': lambda *a, **k: SimpleNamespace(entries=[], feed={})}),
+        ("tencentcloud", {}),
+        ("tencentcloud.common", {}),
+        ("tencentcloud.common.profile", {}),
+        ("tencentcloud.aiart", {}),
+        ("tencentcloud.aiart.v20221229", {}),
+        ("tencentcloud.common.credential", {"Credential": object}),
+        ("tencentcloud.common.profile.client_profile", {"ClientProfile": object}),
+        ("tencentcloud.common.profile.http_profile", {"HttpProfile": object}),
+        ("tencentcloud.aiart.v20221229.aiart_client", {"AiartClient": object}),
+        (
+            "tencentcloud.aiart.v20221229.models",
+            {
+                "SubmitTextToImageJobRequest": object,
+                "QueryTextToImageJobRequest": object,
+            },
+        ),
+        ("feedparser", {"parse": lambda *a, **k: SimpleNamespace(entries=[], feed={})}),
     ]:
         m = sys.modules.get(mod) or types.ModuleType(mod)
         for k, v in attrs.items():
@@ -58,6 +61,7 @@ from agent_publisher.main import app  # noqa: E402
 # ============================================================
 # UNIT: path integrity — the class of bug that was missed
 # ============================================================
+
 
 class TestStorageRootPath:
     """STORAGE_ROOT must be an absolute path.
@@ -107,35 +111,40 @@ class TestStorageRootPath:
         mp4_path = out_dir / "output.mp4"
 
         cmd = [
-            "npx", "remotion", "render",
+            "npx",
+            "remotion",
+            "render",
             "VideoComposition",
             str(mp4_path),
-            "--props", str(props_path),
-            "--log", "error",
+            "--props",
+            str(props_path),
+            "--log",
+            "error",
         ]
 
         props_arg = cmd[cmd.index("--props") + 1]
         mp4_arg = cmd[4]
 
-        assert Path(props_arg).is_absolute(), \
-            f"--props must be absolute path, got: {props_arg}"
-        assert Path(mp4_arg).is_absolute(), \
-            f"mp4 output must be absolute path, got: {mp4_arg}"
+        assert Path(props_arg).is_absolute(), f"--props must be absolute path, got: {props_arg}"
+        assert Path(mp4_arg).is_absolute(), f"mp4 output must be absolute path, got: {mp4_arg}"
 
 
 # ============================================================
 # UNIT: prompts
 # ============================================================
 
+
 class TestVideoPrompts:
     def test_build_script_prompt_contains_title(self):
         from agent_publisher.extensions.video.prompts import build_script_prompt
+
         result = build_script_prompt("测试标题", "文章内容正文")
         assert "测试标题" in result
         assert "文章内容正文" in result
 
     def test_script_system_prompt_not_empty(self):
         from agent_publisher.extensions.video.prompts import SCRIPT_SYSTEM_PROMPT
+
         assert len(SCRIPT_SYSTEM_PROMPT) > 100
 
 
@@ -184,6 +193,7 @@ class TestScriptParsing:
 # UNIT: HTML preview builder
 # ============================================================
 
+
 class TestHtmlPreview:
     def test_build_preview_html_contains_title(self):
         html = video_service._build_preview_html(MOCK_SCRIPT)
@@ -215,6 +225,7 @@ async def client():
 @pytest.fixture
 async def auth_client(client):
     from agent_publisher.config import settings as s
+
     original = s.access_key
     s.access_key = "test-key-video"
     resp = await client.post("/api/auth/login", json={"access_key": "test-key-video"})
@@ -250,11 +261,13 @@ async def test_video_preview_accepts_token_param(client):
 # TIER B: Live server (AP_TEST_BASE_URL required)
 # ============================================================
 
+
 def _live():
     base = os.environ.get("AP_TEST_BASE_URL", "")
     if not base:
         pytest.skip("AP_TEST_BASE_URL not set")
     import httpx
+
     key = os.environ.get("AP_ACCESS_KEY", "agent-publisher-2024")
     c = httpx.Client(base_url=base, timeout=30)
     r = c.post("/api/auth/login", json={"access_key": key})

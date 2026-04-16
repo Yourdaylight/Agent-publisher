@@ -1,10 +1,11 @@
 """Governance service: source statistics, tag distribution, and governance rules."""
+
 from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta
 
-from sqlalchemy import and_, case, func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agent_publisher.models.account import Account
@@ -27,20 +28,18 @@ class GovernanceService:
         If owner_email is provided, only materials belonging to that user's agents are counted.
         """
         # Material counts by source_type
-        stmt = (
-            select(
-                CandidateMaterial.source_type,
-                func.count(CandidateMaterial.id).label("total"),
-                func.sum(case((CandidateMaterial.status == "accepted", 1), else_=0)).label("accepted"),
-                func.sum(case((CandidateMaterial.status == "rejected", 1), else_=0)).label("rejected"),
-                func.sum(case((CandidateMaterial.is_duplicate.is_(True), 1), else_=0)).label("duplicate_count"),
-            )
-            .group_by(CandidateMaterial.source_type)
-        )
+        stmt = select(
+            CandidateMaterial.source_type,
+            func.count(CandidateMaterial.id).label("total"),
+            func.sum(case((CandidateMaterial.status == "accepted", 1), else_=0)).label("accepted"),
+            func.sum(case((CandidateMaterial.status == "rejected", 1), else_=0)).label("rejected"),
+            func.sum(case((CandidateMaterial.is_duplicate.is_(True), 1), else_=0)).label(
+                "duplicate_count"
+            ),
+        ).group_by(CandidateMaterial.source_type)
         if owner_email:
             stmt = (
-                stmt
-                .join(Agent, CandidateMaterial.agent_id == Agent.id)
+                stmt.join(Agent, CandidateMaterial.agent_id == Agent.id)
                 .join(Account, Agent.account_id == Account.id)
                 .where(Account.owner_email == owner_email)
             )
@@ -64,17 +63,21 @@ class GovernanceService:
             accepted = row.accepted or 0
             rejected = row.rejected or 0
             dup = row.duplicate_count or 0
-            stats.append({
-                "source_type": row.source_type,
-                "total": total,
-                "accepted": accepted,
-                "rejected": rejected,
-                "pending": total - accepted - rejected,
-                "duplicate_count": dup,
-                "acceptance_rate": round(accepted / total, 4) if total > 0 else 0,
-                "duplicate_rate": round(dup / total, 4) if total > 0 else 0,
-                "conversion_rate": round(accepted / total_articles, 4) if total_articles > 0 else 0,
-            })
+            stats.append(
+                {
+                    "source_type": row.source_type,
+                    "total": total,
+                    "accepted": accepted,
+                    "rejected": rejected,
+                    "pending": total - accepted - rejected,
+                    "duplicate_count": dup,
+                    "acceptance_rate": round(accepted / total, 4) if total > 0 else 0,
+                    "duplicate_rate": round(dup / total, 4) if total > 0 else 0,
+                    "conversion_rate": round(accepted / total_articles, 4)
+                    if total_articles > 0
+                    else 0,
+                }
+            )
         return stats
 
     async def get_tag_stats(self, owner_email: str | None = None) -> list[dict]:
@@ -89,8 +92,7 @@ class GovernanceService:
         ).where(CandidateMaterial.tags.isnot(None))
         if owner_email:
             stmt = (
-                stmt
-                .join(Agent, CandidateMaterial.agent_id == Agent.id)
+                stmt.join(Agent, CandidateMaterial.agent_id == Agent.id)
                 .join(Account, Agent.account_id == Account.id)
                 .where(Account.owner_email == owner_email)
             )
@@ -114,15 +116,19 @@ class GovernanceService:
         for tag, counts in sorted(tag_counts.items(), key=lambda x: x[1]["total"], reverse=True):
             total = counts["total"]
             accepted = counts["accepted"]
-            stats.append({
-                "tag": tag,
-                "total": total,
-                "accepted": accepted,
-                "acceptance_rate": round(accepted / total, 4) if total > 0 else 0,
-            })
+            stats.append(
+                {
+                    "tag": tag,
+                    "total": total,
+                    "accepted": accepted,
+                    "acceptance_rate": round(accepted / total, 4) if total > 0 else 0,
+                }
+            )
         return stats
 
-    async def get_daily_intake_trend(self, days: int = 30, owner_email: str | None = None) -> list[dict]:
+    async def get_daily_intake_trend(
+        self, days: int = 30, owner_email: str | None = None
+    ) -> list[dict]:
         """Daily material intake trend for the last N days."""
         since = datetime.utcnow() - timedelta(days=days)
         stmt = (
@@ -137,8 +143,7 @@ class GovernanceService:
         )
         if owner_email:
             stmt = (
-                stmt
-                .join(Agent, CandidateMaterial.agent_id == Agent.id)
+                stmt.join(Agent, CandidateMaterial.agent_id == Agent.id)
                 .join(Account, Agent.account_id == Account.id)
                 .where(Account.owner_email == owner_email)
             )

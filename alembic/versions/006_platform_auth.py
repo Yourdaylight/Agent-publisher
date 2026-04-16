@@ -22,9 +22,16 @@ def upgrade() -> None:
     # Add new columns to accounts table
     op.add_column("accounts", sa.Column("auth_mode", sa.String(20), server_default="manual"))
     op.add_column("accounts", sa.Column("authorizer_appid", sa.String(100), server_default=""))
-    op.add_column("accounts", sa.Column("authorizer_refresh_token", sa.String(200), server_default=""))
-    op.add_column("accounts", sa.Column("authorizer_access_token", sa.String(600), server_default=""))
-    op.add_column("accounts", sa.Column("authorizer_token_expires_at", sa.DateTime(timezone=True), nullable=True))
+    op.add_column(
+        "accounts", sa.Column("authorizer_refresh_token", sa.String(200), server_default="")
+    )
+    op.add_column(
+        "accounts", sa.Column("authorizer_access_token", sa.String(600), server_default="")
+    )
+    op.add_column(
+        "accounts",
+        sa.Column("authorizer_token_expires_at", sa.DateTime(timezone=True), nullable=True),
+    )
     op.add_column("accounts", sa.Column("nick_name", sa.String(200), server_default=""))
     op.add_column("accounts", sa.Column("head_img", sa.String(500), server_default=""))
     op.add_column("accounts", sa.Column("service_type", sa.Integer(), server_default="0"))

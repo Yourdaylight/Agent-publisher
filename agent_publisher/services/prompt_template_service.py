@@ -75,7 +75,12 @@ class PromptTemplateService:
                 )
         await self.session.commit()
 
-    async def list_templates(self, owner_email: str | None = None, category: str | None = None, keyword: str | None = None) -> Sequence[PromptTemplate]:
+    async def list_templates(
+        self,
+        owner_email: str | None = None,
+        category: str | None = None,
+        keyword: str | None = None,
+    ) -> Sequence[PromptTemplate]:
         stmt = select(PromptTemplate)
         if owner_email:
             stmt = stmt.where(

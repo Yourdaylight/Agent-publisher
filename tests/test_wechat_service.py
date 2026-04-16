@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import pytest
-import httpx
-import respx
 
 from agent_publisher.services.wechat_service import WeChatService
 

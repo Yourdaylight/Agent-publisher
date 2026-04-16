@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import logging
 import mimetypes
 import re
@@ -37,7 +36,7 @@ class MarkdownService:
         tags = tags or []
 
         # Extract markdown images
-        img_pattern = re.compile(r'!\[([^\]]*)\]\(([^)]+)\)')
+        img_pattern = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
         matches = list(img_pattern.finditer(content))
 
         image_infos: list[dict] = []
@@ -74,15 +73,17 @@ class MarkdownService:
                 # Build replacement URL
                 localized_url = f"/api/media/{media_asset.id}/download"
                 original_markdown = match.group(0)
-                new_markdown = f'![{alt_text}]({localized_url})'
+                new_markdown = f"![{alt_text}]({localized_url})"
                 replaced_content = replaced_content.replace(original_markdown, new_markdown, 1)
 
-                image_infos.append({
-                    "original_url": original_url,
-                    "media_id": media_asset.id,
-                    "filename": filename,
-                    "url": localized_url,
-                })
+                image_infos.append(
+                    {
+                        "original_url": original_url,
+                        "media_id": media_asset.id,
+                        "filename": filename,
+                        "url": localized_url,
+                    }
+                )
 
                 logger.info(
                     "Markdown image processed: url=%s -> media_id=%d",

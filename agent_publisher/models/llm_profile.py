@@ -19,9 +19,7 @@ class LLMProfile(Base):
     base_url: Mapped[str] = mapped_column(String(500), default="", nullable=True)
     is_default: Mapped[bool] = mapped_column(Boolean, default=False)
     description: Mapped[str] = mapped_column(Text, default="", nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     def __repr__(self) -> str:
         return f"<LLMProfile id={self.id} name={self.name!r} provider={self.provider!r} model={self.model!r}>"

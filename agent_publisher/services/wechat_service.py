@@ -39,9 +39,7 @@ class WeChatService:
             data = resp.json()
 
         if "errcode" in data and data["errcode"] != 0:
-            raise RuntimeError(
-                f"WeChat token error: {data.get('errcode')} - {data.get('errmsg')}"
-            )
+            raise RuntimeError(f"WeChat token error: {data.get('errcode')} - {data.get('errmsg')}")
 
         token = data["access_token"]
         expires_in = data.get("expires_in", 7200)
@@ -50,7 +48,9 @@ class WeChatService:
         return token, expires_at
 
     @staticmethod
-    async def upload_image(access_token: str, image_data: bytes, filename: str = "image.png") -> str:
+    async def upload_image(
+        access_token: str, image_data: bytes, filename: str = "image.png"
+    ) -> str:
         """Upload image as permanent material. Returns media_id."""
         url = f"{WECHAT_API_BASE}/material/add_material"
         params = {"access_token": access_token, "type": "image"}
@@ -69,7 +69,9 @@ class WeChatService:
         return media_id
 
     @staticmethod
-    async def upload_thumb(access_token: str, image_data: bytes, filename: str = "thumb.jpg") -> str:
+    async def upload_thumb(
+        access_token: str, image_data: bytes, filename: str = "thumb.jpg"
+    ) -> str:
         """Upload thumb image. Returns thumb_media_id."""
         url = f"{WECHAT_API_BASE}/material/add_material"
         params = {"access_token": access_token, "type": "thumb"}
@@ -94,11 +96,7 @@ class WeChatService:
         """Upload an inline article image and return the WeChat-hosted image URL."""
         url = f"{WECHAT_API_BASE}/media/uploadimg"
         params = {"access_token": access_token}
-        resolved_content_type = (
-            content_type
-            or mimetypes.guess_type(filename)[0]
-            or "image/png"
-        )
+        resolved_content_type = content_type or mimetypes.guess_type(filename)[0] or "image/png"
         files = {"media": (filename, image_data, resolved_content_type)}
 
         async with _wechat_client(timeout=60) as client:
@@ -286,7 +284,9 @@ class WeChatService:
                 WeChatService._check_wechat_error(data, "getarticlesummary")
                 all_data.extend(data.get("list", []))
 
-        logger.info("Got article summary: %d records (%s ~ %s)", len(all_data), begin_date, end_date)
+        logger.info(
+            "Got article summary: %d records (%s ~ %s)", len(all_data), begin_date, end_date
+        )
         return all_data
 
     @staticmethod

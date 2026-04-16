@@ -3,6 +3,7 @@
 Converts LLM-produced chart descriptions into ECharts ``option`` dicts that
 can be embedded in the reveal.js HTML via JSON serialisation.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -20,8 +21,7 @@ def _bar_option(chart: dict) -> dict[str, Any]:
         "xAxis": {"type": "category", "data": chart.get("categories", [])},
         "yAxis": {"type": "value"},
         "series": [
-            {"name": s["name"], "type": "bar", "data": s["data"]}
-            for s in chart.get("series", [])
+            {"name": s["name"], "type": "bar", "data": s["data"]} for s in chart.get("series", [])
         ],
     }
 
@@ -51,7 +51,13 @@ def _pie_option(chart: dict) -> dict[str, Any]:
                 "type": "pie",
                 "radius": "55%",
                 "data": first.get("data", []),
-                "emphasis": {"itemStyle": {"shadowBlur": 10, "shadowOffsetX": 0, "shadowColor": "rgba(0, 0, 0, 0.5)"}},
+                "emphasis": {
+                    "itemStyle": {
+                        "shadowBlur": 10,
+                        "shadowOffsetX": 0,
+                        "shadowColor": "rgba(0, 0, 0, 0.5)",
+                    }
+                },
             }
         ],
     }
@@ -65,8 +71,7 @@ def _radar_option(chart: dict) -> dict[str, Any]:
             {
                 "type": "radar",
                 "data": [
-                    {"value": s["data"], "name": s.get("name", "")}
-                    for s in chart.get("series", [])
+                    {"value": s["data"], "name": s.get("name", "")} for s in chart.get("series", [])
                 ],
             }
         ],

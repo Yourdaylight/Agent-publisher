@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import sys
 from typing import Optional
 
 import typer
@@ -157,8 +156,13 @@ def agent_list():
             table.add_column("Cron")
             for a in agents:
                 table.add_row(
-                    str(a.id), a.name, a.topic, str(a.account_id),
-                    f"{a.llm_provider}/{a.llm_model}", str(a.is_active), a.schedule_cron,
+                    str(a.id),
+                    a.name,
+                    a.topic,
+                    str(a.account_id),
+                    f"{a.llm_provider}/{a.llm_model}",
+                    str(a.is_active),
+                    a.schedule_cron,
                 )
             console.print(table)
 
@@ -186,11 +190,16 @@ def agent_config(
                 console.print(f"[red]Agent {agent_id} not found[/red]")
                 raise typer.Exit(1)
             updates = {
-                k: v for k, v in {
-                    "llm_provider": llm_provider, "llm_model": llm_model,
-                    "llm_api_key": llm_api_key, "image_style": image_style,
-                    "schedule_cron": schedule_cron, "is_active": is_active,
-                }.items() if v is not None
+                k: v
+                for k, v in {
+                    "llm_provider": llm_provider,
+                    "llm_model": llm_model,
+                    "llm_api_key": llm_api_key,
+                    "image_style": image_style,
+                    "schedule_cron": schedule_cron,
+                    "is_active": is_active,
+                }.items()
+                if v is not None
             }
             for key, value in updates.items():
                 setattr(agent, key, value)
@@ -292,6 +301,7 @@ def article_publish(
 
 # ==================== Run (batch) ====================
 
+
 @app.command("run")
 def run_batch(
     all_agents: bool = typer.Option(False, "--all", help="Run all active agents"),
@@ -319,7 +329,9 @@ def run_batch(
                     console.print(f"[yellow]Generating for agent {aid}...[/yellow]")
                     task = await task_svc.run_generate(aid)
                     status_color = "green" if task.status == "success" else "red"
-                    console.print(f"  [{status_color}]Task={task.id} {task.status}: {task.result}[/{status_color}]")
+                    console.print(
+                        f"  [{status_color}]Task={task.id} {task.status}: {task.result}[/{status_color}]"
+                    )
             else:
                 console.print("[red]Specify --all or --agent-id[/red]")
                 raise typer.Exit(1)
@@ -355,9 +367,12 @@ def task_list():
             for t in tasks:
                 color = {"success": "green", "failed": "red", "running": "yellow"}.get(t.status, "")
                 table.add_row(
-                    str(t.id), str(t.agent_id or "-"), t.task_type,
+                    str(t.id),
+                    str(t.agent_id or "-"),
+                    t.task_type,
                     f"[{color}]{t.status}[/{color}]" if color else t.status,
-                    str(t.started_at or "-"), str(t.finished_at or "-"),
+                    str(t.started_at or "-"),
+                    str(t.finished_at or "-"),
                 )
             console.print(table)
 
@@ -384,6 +399,7 @@ def task_status(task_id: int = typer.Argument(..., help="Task ID")):
             console.print(f"  Finished: {task.finished_at or 'N/A'}")
             if task.result:
                 import json
+
                 console.print(f"  Result: {json.dumps(task.result, ensure_ascii=False, indent=2)}")
 
     _run(_status())
@@ -516,7 +532,9 @@ def setup_check():
         table.add_row(
             "Tencent Cloud",
             "[green]Configured[/green]" if tc_ok else "[red]Not configured[/red]",
-            f"SecretID: {cfg.tencent_secret_id[:8]}..." if tc_ok else "Set TENCENT_SECRET_ID/KEY in .env",
+            f"SecretID: {cfg.tencent_secret_id[:8]}..."
+            if tc_ok
+            else "Set TENCENT_SECRET_ID/KEY in .env",
         )
 
         # LLM
@@ -532,7 +550,9 @@ def setup_check():
         table.add_row(
             "Email Whitelist",
             f"[green]{len(wl)} emails[/green]" if wl else "[yellow]Empty[/yellow]",
-            ", ".join(list(wl)[:3]) + ("..." if len(wl) > 3 else "") if wl else "Set EMAIL_WHITELIST in .env",
+            ", ".join(list(wl)[:3]) + ("..." if len(wl) > 3 else "")
+            if wl
+            else "Set EMAIL_WHITELIST in .env",
         )
 
         # Admins
@@ -540,7 +560,9 @@ def setup_check():
         table.add_row(
             "Admin Emails",
             f"[green]{len(admins)} admins[/green]" if admins else "[yellow]None[/yellow]",
-            ", ".join(sorted(admins)[:3]) + ("..." if len(admins) > 3 else "") if admins else "Set ADMIN_EMAILS in .env",
+            ", ".join(sorted(admins)[:3]) + ("..." if len(admins) > 3 else "")
+            if admins
+            else "Set ADMIN_EMAILS in .env",
         )
 
         # Accounts
@@ -589,6 +611,7 @@ def image_generate(prompt: str = typer.Argument(..., help="Image description")):
 
 # ==================== Collect ====================
 
+
 @app.command("collect")
 def collect(
     agent_id: Optional[int] = typer.Option(None, "--agent-id", help="Agent ID to collect for"),
@@ -622,7 +645,9 @@ def collect(
                         collect_result = await registry_svc.collect_for_agent(agent)
                         total = sum(len(ids) for ids in collect_result.values())
                         grand_total += total
-                        summary = ", ".join(f"{k}={len(v)}" for k, v in collect_result.items()) or "none"
+                        summary = (
+                            ", ".join(f"{k}={len(v)}" for k, v in collect_result.items()) or "none"
+                        )
                         console.print(f" [green]{total} materials ({summary})[/green]")
                     except Exception as e:
                         console.print(f" [red]failed: {e}[/red]")
@@ -635,7 +660,9 @@ def collect(
                     console.print(f"[red]Agent {agent_id} not found[/red]")
                     raise typer.Exit(1)
 
-                console.print(f"[yellow]Collecting for agent '{agent.name}' (id={agent.id})...[/yellow]")
+                console.print(
+                    f"[yellow]Collecting for agent '{agent.name}' (id={agent.id})...[/yellow]"
+                )
                 collect_result = await registry_svc.collect_for_agent(agent)
                 total = sum(len(ids) for ids in collect_result.values())
                 summary = ", ".join(f"{k}={len(v)}" for k, v in collect_result.items()) or "none"

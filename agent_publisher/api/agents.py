@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from agent_publisher.api.deps import get_db, get_current_user, UserContext
 from agent_publisher.models.account import Account
-from agent_publisher.models.agent import Agent, AGENT_ROLES, AGENT_SOURCE_MODES
+from agent_publisher.models.agent import Agent
 from agent_publisher.schemas.agent import AgentCreate, AgentOut, AgentUpdate
 from agent_publisher.services.task_service import TaskService
 
@@ -16,19 +16,17 @@ USER_AGENT_LIMIT = 5
 
 def _validate_agent_config(data: AgentCreate | AgentUpdate, is_create: bool = True) -> None:
     """Validate agent configuration based on source_mode."""
-    source_mode = getattr(data, 'source_mode', None)
+    source_mode = getattr(data, "source_mode", None)
     if source_mode is None and not is_create:
         return
     # RSS and skills_feed validation is relaxed — sources can be added later
     if source_mode == "skills_feed" and is_create:
-        allowed = getattr(data, 'allowed_skill_sources', None)
+        allowed = getattr(data, "allowed_skill_sources", None)
         if not allowed:
             raise HTTPException(422, "Skills feed mode requires 'allowed_skill_sources'")
 
 
-async def _check_account_ownership(
-    account_id: int, user: UserContext, db: AsyncSession
-) -> Account:
+async def _check_account_ownership(account_id: int, user: UserContext, db: AsyncSession) -> Account:
     """Verify user has access to the specified account."""
     account = await db.get(Account, account_id)
     if not account:
@@ -38,9 +36,7 @@ async def _check_account_ownership(
     return account
 
 
-async def _get_agent_with_ownership(
-    agent_id: int, user: UserContext, db: AsyncSession
-) -> Agent:
+async def _get_agent_with_ownership(agent_id: int, user: UserContext, db: AsyncSession) -> Agent:
     """Fetch an agent and verify ownership through its Account."""
     agent = await db.get(Agent, agent_id)
     if not agent:
@@ -131,7 +127,7 @@ async def generate_for_agent(
     db: AsyncSession = Depends(get_db),
     user: UserContext = Depends(get_current_user),
 ):
-    agent = await _get_agent_with_ownership(agent_id, user, db)
+    await _get_agent_with_ownership(agent_id, user, db)
     task_svc = TaskService(db)
     task = await task_svc.run_generate(agent_id)
     return {"task_id": task.id, "status": task.status}

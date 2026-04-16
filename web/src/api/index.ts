@@ -101,8 +101,8 @@ export const generateForAgent = (id: number) => http.post(`/agents/${id}/generat
 export const getArticles = (params?: { agent_id?: number; status?: string }) => http.get('/articles', { params });
 export const getArticle = (id: number) => http.get(`/articles/${id}`);
 export const updateArticle = (id: number, data: any) => http.put(`/articles/${id}`, data);
-export const beautifyArticle = (id: number) => http.post(`/articles/${id}/beautify`);
-export const aiBeautifyArticle = (id: number) => http.post(`/articles/${id}/ai-beautify`);
+export const beautifyArticle = (id: number, data?: { theme?: string }) => http.post(`/articles/${id}/beautify`, data ?? {});
+export const aiBeautifyArticle = (id: number, data?: { style_hint?: string }) => http.post(`/articles/${id}/ai-beautify`, data ?? {});
 export const publishArticle = (id: number, data?: { target_account_ids?: number[] }) =>
   http.post(`/articles/${id}/publish`, data ?? {});
 export const syncArticle = (id: number, data?: { target_account_ids?: number[] }) =>
@@ -112,6 +112,8 @@ export const generateVariants = (articleId: number, data: { agent_ids: number[];
   http.post(`/articles/${articleId}/variants`, data);
 export const getArticleVariants = (articleId: number) => http.get(`/articles/${articleId}/variants`);
 export const generateCoverImage = (articleId: number) => http.post(`/articles/${articleId}/generate-cover`);
+export const generateInlineImage = (articleId: number, data: { prompt: string; aspect_ratio?: string }) =>
+  http.post(`/articles/${articleId}/generate-inline-image`, data);
 export const createFromMaterials = (data: { material_ids: number[]; agent_id: number; style_id?: string; prompt_id?: number; user_prompt?: string; mode?: string }) =>
   http.post('/articles/from-materials', data);
 
@@ -172,11 +174,16 @@ export const getHotspot = (id: number) => http.get(`/hotspots/${id}`);
 export const getHotspotTrend = (id: number) => http.get(`/hotspots/${id}/trend`);
 export const exportHotspots = (data: { platform?: string; tag?: string; keyword?: string; limit?: number }) =>
   http.post('/hotspots/export', data, { responseType: 'blob' });
-export const createArticleFromHotspot = (hotspotId: number, data: { agent_id?: number; style_id?: string; prompt_template_id?: number; user_prompt?: string; mode?: string }) =>
+export const createArticleFromHotspot = (hotspotId: number, data: { agent_id?: number; style_id?: string; prompt_template_id?: number; user_prompt?: string; mode?: string; extra_material_ids?: number[] }) =>
   http.post(`/hotspots/${hotspotId}/create-article`, data);
-export const createArticleFromHotspotAsync = (hotspotId: number, data: { agent_id?: number; style_id?: string; prompt_template_id?: number; user_prompt?: string; mode?: string }) =>
+export const createArticleFromHotspotAsync = (hotspotId: number, data: { agent_id?: number; style_id?: string; prompt_template_id?: number; user_prompt?: string; mode?: string; extra_material_ids?: number[] }) =>
   http.post(`/hotspots/${hotspotId}/create-article-async`, data);
 export const deleteAgent = (id: number) => http.delete(`/agents/${id}`);
+
+// User preferences
+export const getUserPreferences = () => http.get('/user/preferences');
+export const saveUserPreferences = (data: { interest_keywords?: string[]; preferred_platforms?: string[]; blocked_keywords?: string[] }) =>
+  http.put('/user/preferences', data);
 
 // WeChat Third-party Platform (扫码授权公众号)
 export const getWechatPlatformStatus = () => http.get('/wechat-platform/status');
