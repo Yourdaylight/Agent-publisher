@@ -180,6 +180,11 @@ export const createArticleFromHotspotAsync = (hotspotId: number, data: { agent_i
   http.post(`/hotspots/${hotspotId}/create-article-async`, data);
 export const deleteAgent = (id: number) => http.delete(`/agents/${id}`);
 
+// User preferences
+export const getUserPreferences = () => http.get('/user/preferences');
+export const saveUserPreferences = (data: { interest_keywords?: string[]; preferred_platforms?: string[]; blocked_keywords?: string[] }) =>
+  http.put('/user/preferences', data);
+
 // WeChat Third-party Platform (扫码授权公众号)
 export const getWechatPlatformStatus = () => http.get('/wechat-platform/status');
 export const getWechatPlatformAuthUrl = () => http.get('/wechat-platform/auth-url');

@@ -128,6 +128,16 @@ class LLMService:
     )
 
     @staticmethod
+    def _load_base_prompt() -> str:
+        """Load the base prompt from ``agent_publisher/prompt/base_prompt.md``.
+
+        Uses an lru_cache internally so the file is read only once.
+        """
+        from agent_publisher.prompt import load_base_prompt
+
+        return load_base_prompt()
+
+    @staticmethod
     def build_article_messages(
         topic: str,
         news_list: str,
@@ -136,15 +146,40 @@ class LLMService:
     ) -> list[dict]:
         """Build messages for article generation.
 
+        Prompt layering:
+          1. **base_prompt** (from ``prompt/base_prompt.md``) — always included
+             as the foundation of the system prompt.
+          2. **agent_description** — appended after base prompt to add
+             agent-specific vertical context (persona, expertise, style).
+          3. If neither is available, a sensible default referencing
+             ``topic`` is used as fallback.
+
         Guarantees that material content (news_list) is ALWAYS included in
         the user message, even when the prompt template doesn't contain a
         ``{news_list}`` placeholder.
         """
-        system_prompt = agent_description or (
-            f"你是一个专注于「{topic}」领域的资深公众号编辑。"
-            "你擅长将热点新闻和素材整合为一篇有深度、有观点的公众号文章。"
-            "你的文章特点：标题精炼吸引人、开头有力、观点鲜明、结构清晰、适合微信公众号阅读。"
-        )
+        base_prompt = LLMService._load_base_prompt()
+
+        if agent_description and base_prompt:
+            # Layer: base prompt + agent-specific context
+            system_prompt = f"{base_prompt}\n\n---\n\n## 当前身份设定\n\n{agent_description}"
+        elif agent_description:
+            # No base prompt file — agent description alone
+            system_prompt = agent_description
+        elif base_prompt:
+            # Base prompt + topic context (no agent description)
+            system_prompt = (
+                f"{base_prompt}\n\n---\n\n"
+                f"## 当前任务\n\n你当前专注于「{topic}」领域的内容创作。"
+                f"请结合该领域的行业背景和受众特点来撰写文章。"
+            )
+        else:
+            # Fallback: no base prompt, no agent description
+            system_prompt = (
+                f"你是一个专注于「{topic}」领域的资深公众号编辑。"
+                "你擅长将热点新闻和素材整合为一篇有深度、有观点的公众号文章。"
+                "你的文章特点：标题精炼吸引人、开头有力、观点鲜明、结构清晰、适合微信公众号阅读。"
+            )
 
         if prompt_template:
             # Check if template explicitly includes material content placeholder

@@ -2,32 +2,57 @@
   <div class="trending-page">
     <aside class="trending-sidebar">
       <div class="sidebar-panel page-meta-panel">
-        <div class="page-kicker">每日热榜</div>
-        <div class="page-title">左侧筛选，右侧看榜。</div>
-        <div class="page-desc">把筛选固定住，主区只负责看跨平台热点和决定是否进入 AI 创作。</div>
+        <div class="page-kicker">发现热点</div>
+        <div class="page-title">实时追踪全网热点，AI 一键创作</div>
+      </div>
+
+      <!-- 我的偏好 -->
+      <div class="sidebar-panel preference-panel">
+        <div class="panel-head">
+          <div class="panel-label" style="margin-bottom:0">我的偏好</div>
+          <t-link v-if="hasPreference" theme="danger" @click="clearPreference">清除</t-link>
+        </div>
+        <div class="pref-section">
+          <div class="pref-hint">关注话题</div>
+          <div class="pref-tags">
+            <t-tag
+              v-for="kw in preference.interest_keywords"
+              :key="kw"
+              size="small"
+              theme="primary"
+              variant="light"
+              closable
+              @close="removeInterestKeyword(kw)"
+            >{{ kw }}</t-tag>
+            <t-input
+              v-model="newKeyword"
+              size="small"
+              placeholder="+ 添加"
+              style="width: 80px"
+              @enter="addInterestKeyword"
+            />
+          </div>
+        </div>
+        <div class="pref-section">
+          <div class="pref-hint">常看平台</div>
+          <div class="chip-row">
+            <button
+              v-for="platform in platformOptions"
+              :key="'pref-' + platform.value"
+              type="button"
+              class="pref-chip"
+              :class="{ active: preference.preferred_platforms.includes(platform.value) }"
+              @click="togglePreferredPlatform(platform.value)"
+            >{{ platform.label }}</button>
+          </div>
+        </div>
+        <t-button size="small" theme="primary" block @click="applyPreferenceToFilters" :disabled="!hasPreference">应用偏好筛选</t-button>
       </div>
 
       <div class="sidebar-panel filter-panel">
         <div class="panel-label">搜索</div>
         <t-input v-model="filters.keyword" placeholder="搜索热点标题/摘要" clearable />
         <t-input v-model="filters.tag" placeholder="标签，如 AI" clearable style="margin-top: 10px" />
-
-        <div class="section-block">
-          <div class="panel-label">平台</div>
-          <div class="chip-column">
-            <button
-              v-for="platform in platformOptions"
-              :key="platform.value"
-              type="button"
-              class="filter-chip"
-              :class="{ active: selectedPlatforms.includes(platform.value) }"
-              @click="togglePlatformFilter(platform.value)"
-            >
-              <span>{{ platform.label }}</span>
-              <span class="chip-count">{{ platform.count }}</span>
-            </button>
-          </div>
-        </div>
 
         <div class="section-block">
           <div class="panel-label">热度</div>
@@ -69,11 +94,7 @@
 
       <div class="sidebar-panel cluster-panel">
         <div class="panel-head">
-          <div>
-            <div class="panel-label">跨平台共振榜</div>
-            <div class="panel-subtext">优先看多个平台同时有反应的话题。</div>
-          </div>
-          <t-link theme="primary" @click="go('/hotspots')">历史库</t-link>
+          <div class="panel-label">跨平台共振榜</div>
         </div>
         <div v-if="topClusters.length" class="cluster-list-mini">
           <button v-for="item in topClusters" :key="item.id" type="button" class="cluster-item-mini" @click="openQuickCreate(item)">
@@ -98,26 +119,28 @@
           <span class="stats-pill">更新 {{ latestUpdatedAt }}</span>
         </div>
         <div class="stats-right">
+          <t-button size="small" variant="outline" :loading="exporting" @click="downloadExport">导出 CSV</t-button>
           <t-button v-if="isAdmin" size="small" theme="primary" :loading="refreshing" @click="refreshTrending">刷新热榜</t-button>
         </div>
       </div>
 
       <div class="main-shell">
-        <div class="tab-strip">
+        <div class="main-header">
           <div>
             <div class="main-title">热点榜单</div>
-            <div class="main-subtitle">右侧主区只保留榜单本身，筛选不再打断视线。</div>
+            <div class="main-subtitle">数据来源：TrendRadar 跨平台聚合引擎</div>
           </div>
-          <t-tabs :value="activePlatformTab" @change="handlePlatformTabChange">
-            <t-tab-panel value="all" :label="`全部 (${pagination.total})`" />
-            <t-tab-panel
-              v-for="platform in platformOptions"
-              :key="platform.value"
-              :value="platform.value"
-              :label="`${platform.label} (${platform.count})`"
-            />
-          </t-tabs>
         </div>
+
+        <t-tabs :value="activePlatformTab" @change="handlePlatformTabChange" style="margin-bottom: 16px">
+          <t-tab-panel value="all" :label="`全部 (${pagination.total})`" />
+          <t-tab-panel
+            v-for="platform in platformOptions"
+            :key="platform.value"
+            :value="platform.value"
+            :label="`${platform.label} (${platform.count})`"
+          />
+        </t-tabs>
 
         <div v-if="hotspots.length" class="hotspot-grid" :style="{ opacity: loading ? 0.55 : 1 }">
           <article
@@ -193,15 +216,24 @@
 import { computed, onMounted, reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { MessagePlugin } from 'tdesign-vue-next';
-import { createArticleFromHotspot, createArticleFromHotspotAsync, getAgents, getHotspotPlatforms, getHotspotTrend, getHotspots, getPromptTemplates, getStylePresets, getUserInfo, refreshAllTrending } from '@/api';
+import { createArticleFromHotspot, createArticleFromHotspotAsync, exportHotspots, getAgents, getHotspotPlatforms, getHotspotTrend, getHotspots, getPromptTemplates, getStylePresets, getUserInfo, refreshAllTrending } from '@/api';
 import CreateArticleDialog from '@/components/CreateArticleDialog.vue';
 import TrendDialog from '@/components/TrendDialog.vue';
 import { formatDateTime, formatShortTime } from '@/utils/format';
 import { getHotspotPlatform, heatLabel, qualityBarColor } from '@/utils/hotspot';
 
+const PREF_STORAGE_KEY = 'ap_user_preferences';
+
+interface UserPreference {
+  interest_keywords: string[];
+  preferred_platforms: string[];
+  blocked_keywords: string[];
+}
+
 const router = useRouter();
 const loading = ref(false);
 const refreshing = ref(false);
+const exporting = ref(false);
 const creating = ref(false);
 const hotspots = ref<any[]>([]);
 const agents = ref<any[]>([]);
@@ -216,6 +248,16 @@ const selectedPlatforms = ref<string[]>([]);
 const heatRange = ref('all');
 const timeRange = ref('3d');
 const platformOptions = ref<Array<{ value: string; label: string; count: number }>>([]);
+const newKeyword = ref('');
+
+// User preference (localStorage + backend sync)
+const preference = reactive<UserPreference>({
+  interest_keywords: [],
+  preferred_platforms: [],
+  blocked_keywords: [],
+});
+
+const hasPreference = computed(() => preference.interest_keywords.length > 0 || preference.preferred_platforms.length > 0);
 
 const filters = reactive({
   keyword: '',
@@ -251,6 +293,98 @@ const timeOptions = [
 ];
 
 const go = (path: string) => router.push(path);
+
+// ── Preference helpers ──
+const loadPreferenceFromStorage = () => {
+  try {
+    const raw = localStorage.getItem(PREF_STORAGE_KEY);
+    if (raw) {
+      const saved = JSON.parse(raw);
+      preference.interest_keywords = saved.interest_keywords || [];
+      preference.preferred_platforms = saved.preferred_platforms || [];
+      preference.blocked_keywords = saved.blocked_keywords || [];
+    }
+  } catch { /* ignore */ }
+};
+
+const savePreferenceToStorage = () => {
+  localStorage.setItem(PREF_STORAGE_KEY, JSON.stringify({
+    interest_keywords: preference.interest_keywords,
+    preferred_platforms: preference.preferred_platforms,
+    blocked_keywords: preference.blocked_keywords,
+  }));
+};
+
+const syncPreferenceToBackend = async () => {
+  try {
+    const { saveUserPreferences } = await import('@/api');
+    await saveUserPreferences({
+      interest_keywords: preference.interest_keywords,
+      preferred_platforms: preference.preferred_platforms,
+      blocked_keywords: preference.blocked_keywords,
+    });
+  } catch { /* silent */ }
+};
+
+const loadPreferenceFromBackend = async () => {
+  try {
+    const { getUserPreferences } = await import('@/api');
+    const res = await getUserPreferences();
+    if (res.data) {
+      const d = res.data;
+      if (d.interest_keywords?.length || d.preferred_platforms?.length) {
+        preference.interest_keywords = d.interest_keywords || [];
+        preference.preferred_platforms = d.preferred_platforms || [];
+        preference.blocked_keywords = d.blocked_keywords || [];
+        savePreferenceToStorage();
+      }
+    }
+  } catch { /* silent */ }
+};
+
+const addInterestKeyword = () => {
+  const kw = newKeyword.value.trim();
+  if (kw && !preference.interest_keywords.includes(kw)) {
+    preference.interest_keywords.push(kw);
+    savePreferenceToStorage();
+    syncPreferenceToBackend();
+  }
+  newKeyword.value = '';
+};
+
+const removeInterestKeyword = (kw: string) => {
+  preference.interest_keywords = preference.interest_keywords.filter((k) => k !== kw);
+  savePreferenceToStorage();
+  syncPreferenceToBackend();
+};
+
+const togglePreferredPlatform = (platform: string) => {
+  if (preference.preferred_platforms.includes(platform)) {
+    preference.preferred_platforms = preference.preferred_platforms.filter((p) => p !== platform);
+  } else {
+    preference.preferred_platforms.push(platform);
+  }
+  savePreferenceToStorage();
+  syncPreferenceToBackend();
+};
+
+const applyPreferenceToFilters = () => {
+  if (preference.interest_keywords.length) {
+    filters.keyword = preference.interest_keywords.join(' ');
+  }
+  if (preference.preferred_platforms.length === 1) {
+    activePlatformTab.value = preference.preferred_platforms[0];
+  }
+  applyFilters();
+};
+
+const clearPreference = () => {
+  preference.interest_keywords = [];
+  preference.preferred_platforms = [];
+  preference.blocked_keywords = [];
+  savePreferenceToStorage();
+  syncPreferenceToBackend();
+};
 
 const goToCreate = async (item: any) => {
   selectedHotspotForCreate.value = item;
@@ -331,13 +465,24 @@ const fetchHotspots = async () => {
       keyword: filters.keyword || undefined,
       tag: filters.tag || undefined,
       platform: activePlatformTab.value !== 'all' ? activePlatformTab.value : undefined,
-      platforms: activePlatformTab.value === 'all' && selectedPlatforms.value.length ? selectedPlatforms.value.join(',') : undefined,
       time_range: timeRange.value,
       limit: pagination.pageSize,
       offset: pagination.offset,
       ...heatParams,
     });
-    hotspots.value = res.data?.items || [];
+    let items = res.data?.items || [];
+
+    // Preference boost: items matching interest keywords float to top
+    if (preference.interest_keywords.length && !filters.keyword) {
+      const kwList = preference.interest_keywords.map((k) => k.toLowerCase());
+      const matchScore = (item: any) => {
+        const text = ((item.title || '') + ' ' + (item.summary || '')).toLowerCase();
+        return kwList.reduce((score, kw) => score + (text.includes(kw) ? 1 : 0), 0);
+      };
+      items = [...items].sort((a, b) => matchScore(b) - matchScore(a));
+    }
+
+    hotspots.value = items;
     pagination.total = res.data?.total || 0;
   } catch {
     hotspots.value = [];
@@ -365,7 +510,6 @@ const resetFilters = async () => {
 };
 
 const togglePlatformFilter = (platform: string) => {
-  activePlatformTab.value = 'all';
   if (selectedPlatforms.value.includes(platform)) {
     selectedPlatforms.value = selectedPlatforms.value.filter((item) => item !== platform);
   } else {
@@ -375,7 +519,6 @@ const togglePlatformFilter = (platform: string) => {
 
 const handlePlatformTabChange = async (value: string) => {
   activePlatformTab.value = value;
-  selectedPlatforms.value = [];
   pagination.page = 1;
   await fetchHotspots();
 };
@@ -405,6 +548,29 @@ const refreshTrending = async () => {
   }
 };
 
+const downloadExport = async () => {
+  exporting.value = true;
+  try {
+    const res = await exportHotspots({
+      keyword: filters.keyword || undefined,
+      platform: selectedPlatforms.value.length ? selectedPlatforms.value[0] : undefined,
+      tag: filters.tag || undefined,
+      limit: 500,
+    });
+    const blob = new Blob([res.data], { type: 'text/csv;charset=utf-8;' });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'hotspots.csv';
+    link.click();
+    window.URL.revokeObjectURL(url);
+  } catch {
+    MessagePlugin.error('导出失败');
+  } finally {
+    exporting.value = false;
+  }
+};
+
 const openTrend = async (row: any) => {
   try {
     const res = await getHotspotTrend(row.id);
@@ -417,6 +583,14 @@ const openTrend = async (row: any) => {
 };
 
 onMounted(async () => {
+  // Load preference from localStorage first (instant)
+  loadPreferenceFromStorage();
+
+  // Auto-apply preference as default tab
+  if (preference.preferred_platforms.length === 1) {
+    activePlatformTab.value = preference.preferred_platforms[0];
+  }
+
   await Promise.all([
     fetchPlatformOptions(),
     fetchHotspots(),
@@ -424,6 +598,9 @@ onMounted(async () => {
     getStylePresets().then((res) => { stylePresets.value = res.data || []; }).catch(() => {}),
     getPromptTemplates().then((res) => { prompts.value = res.data || []; }).catch(() => {}),
   ]);
+
+  // Sync preference from backend (async, backend wins if different)
+  loadPreferenceFromBackend();
 });
 </script>
 
@@ -583,8 +760,10 @@ onMounted(async () => {
 .main-shell {
   padding: 16px;
 }
-.tab-strip {
-  display: grid;
+.main-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
   gap: 14px;
   margin-bottom: 16px;
 }
@@ -719,6 +898,45 @@ onMounted(async () => {
   margin-top: 18px;
   padding-top: 16px;
   border-top: 1px solid var(--td-component-stroke);
+}
+/* ── Preference panel ── */
+.preference-panel {
+  padding: 14px 16px;
+}
+.pref-section {
+  margin-bottom: 12px;
+}
+.pref-hint {
+  font-size: 11px;
+  color: var(--td-text-color-secondary);
+  margin-bottom: 6px;
+}
+.pref-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.pref-chip {
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--td-component-stroke);
+  background: #fff;
+  color: var(--td-text-color-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all .15s ease;
+}
+.pref-chip:hover,
+.pref-chip.active {
+  border-color: var(--td-brand-color);
+  color: var(--td-brand-color);
+  background: var(--td-brand-color-1);
 }
 @media (max-width: 1100px) {
   .trending-page {

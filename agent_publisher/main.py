@@ -35,6 +35,7 @@ from agent_publisher.api.tasks import router as tasks_router
 from agent_publisher.api.invite_codes import router as invite_codes_router
 from agent_publisher.api.wechat_platform import router as wechat_platform_router
 from agent_publisher.api.system_logs import router as system_logs_router
+from agent_publisher.api.preferences import router as preferences_router
 from agent_publisher.middleware.logging_middleware import SystemLogMiddleware
 from agent_publisher.api.deps import get_db, get_current_user, UserContext
 from agent_publisher.config import settings
@@ -47,6 +48,7 @@ from agent_publisher.models.credits import CreditsBalance, CreditsTransaction  #
 from agent_publisher.models.group import UserGroup, UserGroupMember  # noqa: F401 – ensure tables are created
 from agent_publisher.models.invite_code import InviteCode, InviteRedemption  # noqa: F401
 from agent_publisher.models.platform_ticket import PlatformTicket  # noqa: F401 – ensure table is created
+from agent_publisher.models.user_preference import UserPreference  # noqa: F401 – ensure table is created
 from agent_publisher.database import engine
 from agent_publisher.models.base import Base
 from agent_publisher.extensions import registry as extension_registry
@@ -336,6 +338,7 @@ app.include_router(extensions_router)
 app.include_router(invite_codes_router)
 app.include_router(wechat_platform_router)
 app.include_router(system_logs_router)
+app.include_router(preferences_router)
 
 # Discover and register extensions (graceful degradation: failures only logged)
 extension_registry.discover_and_load()

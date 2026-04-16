@@ -8,7 +8,10 @@ from __future__ import annotations
 
 import logging
 
-from hunyuan_image import HunyuanImageClient
+try:
+    from hunyuan_image import HunyuanImageClient
+except ImportError:
+    HunyuanImageClient = None  # type: ignore[misc,assignment]
 from agent_publisher.config import settings
 
 logger = logging.getLogger(__name__)

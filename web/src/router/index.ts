@@ -4,11 +4,11 @@ import { getUserInfo } from '@/api';
 const routes = [
   { path: '/login', name: 'Login', component: () => import('@/views/Login.vue'), meta: { title: '登录', public: true } },
   { path: '/', redirect: '/create' },
-  { path: '/trending', name: 'Trending', component: () => import('@/views/Trending.vue'), meta: { title: '每日热榜' } },
+  { path: '/trending', name: 'Trending', component: () => import('@/views/Trending.vue'), meta: { title: '发现热点' } },
   { path: '/create', name: 'Create', component: () => import('@/views/Create.vue'), meta: { title: 'AI 创作控制台' } },
   { path: '/dashboard', redirect: '/create' },
   { path: '/guide', name: 'Guide', component: () => import('@/views/Guide.vue'), meta: { title: '快速配置' } },
-  { path: '/hotspots', name: 'Hotspots', component: () => import('@/views/Hotspots.vue'), meta: { title: '热点发现' } },
+  { path: '/hotspots', redirect: '/trending' },
   { path: '/workbench', name: 'Workbench', component: () => import('@/views/Workbench.vue'), meta: { title: '创作工作台' } },
   { path: '/accounts', name: 'Accounts', component: () => import('@/views/Accounts.vue'), meta: { title: '公众号管理' } },
   { path: '/agents', name: 'Agents', component: () => import('@/views/Agents.vue'), meta: { title: 'Agent 管理' } },
