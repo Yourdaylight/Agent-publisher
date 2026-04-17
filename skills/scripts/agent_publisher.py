@@ -199,6 +199,13 @@ def cmd_create_article(args):
         with open(args.content_file, "r", encoding="utf-8") as f:
             file_content = f.read()
         if args.content_file.endswith((".html", ".htm")):
+            if not getattr(args, "force_html", False):
+                print(
+                    "Warning: HTML file detected. Markdown (.md) is recommended for best "
+                    "wenyan rendering and beautify/ai-beautify support.\n"
+                    "  Use --force-html to suppress this warning.",
+                    file=sys.stderr,
+                )
             html_content = file_content
         else:
             content = file_content
@@ -237,6 +244,13 @@ def cmd_edit_article(args):
         with open(args.content_file, "r", encoding="utf-8") as f:
             file_content = f.read()
         if args.content_file.endswith((".html", ".htm")):
+            if not getattr(args, "force_html", False):
+                print(
+                    "Warning: HTML file detected. Markdown (.md) is recommended for best "
+                    "wenyan rendering and beautify/ai-beautify support.\n"
+                    "  Use --force-html to suppress this warning.",
+                    file=sys.stderr,
+                )
             payload["html_content"] = file_content
         else:
             payload["content"] = file_content
@@ -271,6 +285,8 @@ def cmd_ai_beautify(args):
     payload = {}
     if args.style_hint:
         payload["style_hint"] = args.style_hint
+    if args.theme:
+        payload["theme"] = args.theme
     result = api("POST", f"{base}/api/skills/articles/{args.article_id}/ai-beautify",
                  token=token, json=payload)
     if result.get("ok"):
@@ -442,6 +458,7 @@ def build_parser():
     p.add_argument("--content", "-c", help="Markdown content (inline)")
     p.add_argument("--content-file", "-f", help="Path to .md or .html file")
     p.add_argument("--cover", help="Cover: media:<id> or URL")
+    p.add_argument("--force-html", action="store_true", help="Suppress HTML file warning")
     p.set_defaults(func=cmd_create_article)
 
     # edit-article
@@ -452,6 +469,7 @@ def build_parser():
     p.add_argument("--content", "-c")
     p.add_argument("--content-file", "-f")
     p.add_argument("--cover")
+    p.add_argument("--force-html", action="store_true", help="Suppress HTML file warning")
     p.set_defaults(func=cmd_edit_article)
 
     # beautify
@@ -465,6 +483,7 @@ def build_parser():
     p = sub.add_parser("ai-beautify", help="AI 智能美化")
     p.add_argument("article_id", type=int)
     p.add_argument("--style-hint", default="", help="Style direction for AI")
+    p.add_argument("--theme", default="", help="Base wenyan theme (default, orangeheart, rainbow, lapis, pie, maize, purple, phycat)")
     p.set_defaults(func=cmd_ai_beautify)
 
     # publish

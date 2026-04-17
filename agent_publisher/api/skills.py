@@ -125,13 +125,19 @@ class SkillAccountOut(BaseModel):
 
 
 class SkillArticleCreate(BaseModel):
-    """Request body for creating an article manually via skill API."""
+    """Request body for creating an article manually via skill API.
+
+    Prefer using ``content`` (Markdown) over ``html_content``.
+    Markdown articles get wenyan theme rendering and full beautify support.
+    ``html_content`` is kept for backwards compatibility (web frontend use)
+    but skill/CLI users should always provide Markdown.
+    """
 
     agent_id: int
     title: str
     digest: str = ""
-    content: str = ""  # Markdown content
-    html_content: str = ""  # Pre-rendered HTML (used if content is empty)
+    content: str = ""  # Markdown content (RECOMMENDED)
+    html_content: str = ""  # Pre-rendered HTML (deprecated for skill use; kept for web compat)
     cover_image_url: str = ""  # URL or media library path e.g. media:<id>
     status: str = "draft"
     target_account_ids: list[int] | None = None
@@ -1111,6 +1117,7 @@ async def skill_beautify_article(
 
 class SkillAIBeautifyRequest(BaseModel):
     style_hint: str = ""
+    theme: str = "default"
 
 
 @router.post("/articles/{article_id}/ai-beautify")
@@ -1122,6 +1129,8 @@ async def skill_ai_beautify_article(
 ):
     """Use LLM to produce WeChat-optimized HTML from the article content.
 
+    When the article has Markdown, it is first rendered through wenyan (with
+    the specified theme) to produce a clean base, then the LLM enhances it.
     Optionally pass style_hint to guide the AI formatting direction.
     """
     email = _get_skill_email(request)
@@ -1140,7 +1149,8 @@ async def skill_ai_beautify_article(
     article_svc = ArticleService(db)
     try:
         style_hint = (data.style_hint if data else None) or ""
-        html = await article_svc.ai_beautify_html(article, style_hint=style_hint)
+        theme = (data.theme if data else None) or "default"
+        html = await article_svc.ai_beautify_html(article, style_hint=style_hint, theme=theme)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"AI 美化失败：{e}")
 

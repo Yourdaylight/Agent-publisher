@@ -332,21 +332,27 @@ class TestGetPublishHtmlIntegration:
 class TestWenyanOutputSafetyNet:
     """_markdown_to_html should apply style injection even for wenyan output."""
 
-    def test_wenyan_output_gets_style_injection(self, monkeypatch):
-        """Simulate wenyan returning unstyled HTML — style injection should fix it."""
+    def test_wenyan_output_gets_supplement_injection(self, monkeypatch):
+        """Simulate wenyan returning HTML — only strong/em get supplementary styles."""
         from agent_publisher.services.article_service import ArticleService
 
         # Mock shutil.which to return a fake path (simulates wenyan installed)
         monkeypatch.setattr("shutil.which", lambda _: "/fake/wenyan")
-        # Mock subprocess.run to return unstyled HTML (simulates wenyan output)
+        # Mock subprocess.run to return HTML similar to real wenyan output
+        # (h1/p already have inline styles, strong does not)
         import subprocess
 
         fake_result = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="<h1>Title</h1><p>Body</p>", stderr=""
+            args=[],
+            returncode=0,
+            stdout='<h1 style="font-size:24px">Title</h1><p style="margin:10px 0">Body with <strong>bold</strong></p>',
+            stderr="",
         )
         monkeypatch.setattr("subprocess.run", lambda *a, **kw: fake_result)
 
-        html = ArticleService._markdown_to_html("# Title\n\nBody")
-        # After integration, wenyan output should also get style injection
-        assert "font-size: 24px" in html, "wenyan output should get h1 style injection"
-        assert "font-size: 16px" in html, "wenyan output should get paragraph style injection"
+        html = ArticleService._markdown_to_html("# Title\n\nBody with **bold**")
+        # Supplement injection should add style to <strong> (wenyan misses it)
+        assert "font-weight: bold" in html, "wenyan output should get <strong> supplement style"
+        # h1 and p already have styles — they should be preserved, not overwritten
+        assert 'font-size:24px' in html, "existing h1 style should be preserved"
+        assert 'margin:10px 0' in html, "existing p style should be preserved"

@@ -267,6 +267,7 @@ class AIBeautifyRequest(BaseModel):
     """Optional params for AI beautify endpoint."""
 
     style_hint: str = ""
+    theme: str = "default"
 
 
 @router.post("/{article_id}/ai-beautify")
@@ -298,7 +299,8 @@ async def ai_beautify_article(
     article_svc = ArticleService(db)
     try:
         style_hint = (data.style_hint if data else None) or ""
-        html = await article_svc.ai_beautify_html(article, style_hint=style_hint)
+        theme = (data.theme if data else None) or "default"
+        html = await article_svc.ai_beautify_html(article, style_hint=style_hint, theme=theme)
     except Exception as e:
         # Refund on failure
         await credits_svc.refund(
