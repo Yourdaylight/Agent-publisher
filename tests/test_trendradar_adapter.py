@@ -223,6 +223,8 @@ class TestEndToEndPipeline:
     async def test_full_pipeline_with_mocked_bridge(self):
         """fetch → dedup → score → store end-to-end."""
         db = AsyncMock()
+        # Fix: db.add() is not async in SQLAlchemy, so configure it as regular Mock
+        db.add = MagicMock()
 
         # Mock dedup: no existing URLs
         mock_result = MagicMock()
