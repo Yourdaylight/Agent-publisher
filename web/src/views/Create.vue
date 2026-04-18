@@ -23,7 +23,86 @@
     <!-- ====== 主内容区（编辑器 + 右侧面板）====== -->
     <div class="main-content">
 
-      <!-- === 左侧编辑器面板 === -->
+      <!-- === 左侧：热点素材面板 === -->
+      <aside class="material-panel">
+        <div class="material-header">热点素材</div>
+        <t-input v-model="hotspotKeyword" placeholder="搜索热点..." size="small" clearable style="margin-bottom:10px" />
+
+        <div class="hotspot-list">
+          <div
+            v-for="item in filteredHotspots"
+            :key="item.id"
+            class="hotspot-item"
+            :class="{ selected: selectedHotspotIds.includes(item.id) }"
+            @click="toggleHotspot(item)"
+          >
+            <div class="hs-header">
+              <span v-if="item.metadata?.platform_name" class="hs-platform">{{ item.metadata.platform_name }}</span>
+              <span v-if="item.quality_score >= 0.8" class="hs-badge hot">🔥超热</span>
+              <span v-else-if="item.quality_score >= 0.6" class="hs-badge warm">🟠高热</span>
+            </div>
+            <div class="hs-title">{{ item.title }}</div>
+          </div>
+          <div v-if="!filteredHotspots.length" class="hotspot-empty">
+            {{ hotspotKeyword ? '无匹配热点' : '暂无热点数据' }}
+          </div>
+        </div>
+
+        <div v-if="selectedHotspotIds.length" class="selected-tags">
+          已选 {{ selectedHotspotIds.length }}/3 个素材
+          <button type="button" class="clear-btn" @click="selectedHotspotIds = []; selectedHotspot = null; aiAngles = []">清空</button>
+        </div>
+
+        <div v-if="aiAngles.length > 0" class="angle-chips" style="margin-top:8px">
+          <button
+            v-for="(angle, idx) in aiAngles"
+            :key="idx"
+            type="button"
+            class="angle-chip"
+            :class="{ active: selectedAngleIndex === idx }"
+            @click="selectAngle(idx)"
+          >{{ angle }}</button>
+        </div>
+
+        <div class="create-controls">
+          <div class="ai-prompt-label">创作模式</div>
+          <div class="mode-chips">
+            <button v-for="m in modeOptions" :key="m.value" type="button" class="mode-chip" :class="{ active: selectedMode === m.value }" @click="selectedMode = m.value">
+              {{ m.icon }} {{ m.label }}
+            </button>
+          </div>
+          <div class="ai-prompt-label" style="margin-top:8px">创作指令</div>
+          <textarea
+            v-model="userPrompt"
+            class="ai-prompt-box"
+            placeholder="描述你想写的内容（选填）..."
+            rows="2"
+          ></textarea>
+          <button
+            type="button"
+            class="ai-generate-btn"
+            :disabled="creating || hotspotLoading || generating || !selectedHotspotIds.length"
+            @click="doAIWrite"
+          >
+            <span v-if="!creating && !hotspotLoading && !generating">
+              {{ form.id ? 'AI 基于素材创作新文章' : 'AI 生成文章' }}
+              <span v-if="selectedHotspotIds.length > 1" style="font-size:11px;opacity:0.85"> · {{ selectedHotspotIds.length }} 个素材</span>
+            </span>
+            <span v-else-if="hotspotLoading">加载话题中...</span>
+            <template v-else>
+              <t-loading size="small" theme="dots" />
+              <span style="margin-left: 6px">{{ generationStatus || '生成中...' }}</span>
+            </template>
+          </button>
+          <div v-if="generating" class="ai-progress">
+            <t-progress :percentage="Math.round(generationPercent)" size="small" />
+          </div>
+          <div class="ai-cost" v-else-if="selectedHotspotIds.length">消耗 ~3 Credits · 约30秒</div>
+          <div class="ai-cost" v-else style="color:#f5222d">请先选择至少一个热点素材</div>
+        </div>
+      </aside>
+
+      <!-- === 中间编辑器面板 === -->
       <section class="editor-panel">
         <div class="editor-scroll" ref="editorScrollRef">
           <!-- 标题 -->
@@ -125,10 +204,9 @@
         </div>
       </section>
 
-      <!-- === 右侧面板（热点素材 / AI助手 / 微信预览）=== -->
+      <!-- === 右侧面板（AI助手 / 微信预览）=== -->
       <aside class="side-panel">
         <div class="side-tabs">
-          <button type="button" class="side-tab" :class="{ active: sideTab === 'hotspot' }" @click="sideTab = 'hotspot'">热点素材</button>
           <button type="button" class="side-tab" :class="{ active: sideTab === 'ai' }" @click="sideTab = 'ai'">AI 助手</button>
           <button type="button" class="side-tab" :class="{ active: sideTab === 'preview' }" @click="sideTab = 'preview'">
             微信预览
@@ -137,89 +215,6 @@
         </div>
 
         <div class="side-body">
-          <!-- ====== 热点素材 Tab ====== -->
-          <div v-show="sideTab === 'hotspot'" class="hotspot-section">
-            <!-- 搜索 -->
-            <t-input v-model="hotspotKeyword" placeholder="搜索热点..." size="small" clearable style="margin-bottom:10px" />
-
-            <!-- 热点列表 -->
-            <div class="hotspot-list">
-              <div
-                v-for="item in filteredHotspots"
-                :key="item.id"
-                class="hotspot-item"
-                :class="{ selected: selectedHotspotIds.includes(item.id) }"
-                @click="toggleHotspot(item)"
-              >
-                <div class="hs-header">
-                  <span v-if="item.metadata?.platform_name" class="hs-platform">{{ item.metadata.platform_name }}</span>
-                  <span v-if="item.quality_score >= 0.8" class="hs-badge hot">🔥超热</span>
-                  <span v-else-if="item.quality_score >= 0.6" class="hs-badge warm">🟠高热</span>
-                </div>
-                <div class="hs-title">{{ item.title }}</div>
-              </div>
-              <div v-if="!filteredHotspots.length" class="hotspot-empty">
-                {{ hotspotKeyword ? '无匹配热点' : '暂无热点数据' }}
-              </div>
-            </div>
-
-            <!-- 已选素材 -->
-            <div v-if="selectedHotspotIds.length" class="selected-tags">
-              已选 {{ selectedHotspotIds.length }}/3 个素材
-              <button type="button" class="clear-btn" @click="selectedHotspotIds = []; selectedHotspot = null; aiAngles = []">清空</button>
-            </div>
-
-            <!-- AI 角度 chips -->
-            <div v-if="aiAngles.length > 0" class="angle-chips" style="margin-top:8px">
-              <button
-                v-for="(angle, idx) in aiAngles"
-                :key="idx"
-                type="button"
-                class="angle-chip"
-                :class="{ active: selectedAngleIndex === idx }"
-                @click="selectAngle(idx)"
-              >{{ angle }}</button>
-            </div>
-
-            <!-- 创作控制 -->
-            <div class="create-controls">
-              <div class="ai-prompt-label">创作模式</div>
-              <div class="mode-chips">
-                <button v-for="m in modeOptions" :key="m.value" type="button" class="mode-chip" :class="{ active: selectedMode === m.value }" @click="selectedMode = m.value">
-                  {{ m.icon }} {{ m.label }}
-                </button>
-              </div>
-              <div class="ai-prompt-label" style="margin-top:8px">创作指令</div>
-              <textarea
-                v-model="userPrompt"
-                class="ai-prompt-box"
-                placeholder="描述你想写的内容（选填）..."
-                rows="2"
-              ></textarea>
-              <button
-                type="button"
-                class="ai-generate-btn"
-                :disabled="creating || hotspotLoading || generating || !selectedHotspotIds.length"
-                @click="doAIWrite"
-              >
-                <span v-if="!creating && !hotspotLoading && !generating">
-                  {{ form.id ? 'AI 基于素材创作新文章' : 'AI 生成文章' }}
-                  <span v-if="selectedHotspotIds.length > 1" style="font-size:11px;opacity:0.85"> · {{ selectedHotspotIds.length }} 个素材</span>
-                </span>
-                <span v-else-if="hotspotLoading">加载话题中...</span>
-                <template v-else>
-                  <t-loading size="small" theme="dots" />
-                  <span style="margin-left: 6px">{{ generationStatus || '生成中...' }}</span>
-                </template>
-              </button>
-              <div v-if="generating" class="ai-progress">
-                <t-progress :percentage="Math.round(generationPercent)" size="small" />
-              </div>
-              <div class="ai-cost" v-else-if="selectedHotspotIds.length">消耗 ~3 Credits · 约30秒</div>
-              <div class="ai-cost" v-else style="color:#f5222d">请先选择至少一个热点素材</div>
-            </div>
-          </div>
-
           <!-- ====== AI 助手 Tab ====== -->
           <div v-show="sideTab === 'ai'" class="ai-section">
 
@@ -436,7 +431,7 @@ const activeTab = ref('rich');
 const editorScrollRef = ref<HTMLElement | null>(null);
 const tiptapRef = ref<InstanceType<typeof TiptapEditor> | null>(null);
 const coverFileInput = ref<HTMLInputElement | null>(null);
-const sideTab = ref<'hotspot' | 'ai' | 'preview'>('hotspot');
+const sideTab = ref<'ai' | 'preview'>('ai');
 
 // --- 样式主题 ---
 const styleThemes: StyleTheme[] = [
@@ -795,8 +790,7 @@ const doAIWrite = async () => {
     return;
   }
   if (!selectedHotspot.value || !selectedHotspotIds.value.length) {
-    sideTab.value = 'hotspot';
-    MessagePlugin.warning('请先在「热点素材」面板中选择话题');
+    MessagePlugin.warning('请先在左侧面板中选择热点素材');
     return;
   }
   creating.value = true;
@@ -1045,9 +1039,6 @@ const openVideoGenerate = () => {
 watch(() => route.query.hotspot_id, () => loadSelectedHotspot(), { immediate: true });
 watch(() => route.query.article_id, () => {
   fetchArticle();
-  // Default tab based on mode: edit → AI assistant, create → hotspot
-  const aid = route.query.article_id;
-  sideTab.value = aid ? 'ai' : 'hotspot';
 }, { immediate: true });
 
 onMounted(async () => {
@@ -1167,9 +1158,32 @@ onMounted(async () => {
   flex: 1; display: flex; overflow: hidden; min-height: 0;
 }
 
-/* === 编辑器面板（左侧，可滚动）=== */
+/* === 左侧素材面板 === */
+.material-panel {
+  width: 300px; flex-shrink: 0;
+  background: #f8f9fb;
+  border-right: 1px solid var(--td-border-level-1-color, #e5e7eb);
+  display: flex; flex-direction: column;
+  overflow: hidden;
+  padding: 14px;
+}
+.material-header {
+  font-size: 14px; font-weight: 700; color: #1a1a1a;
+  margin-bottom: 10px; padding-bottom: 8px;
+  border-bottom: 1px solid #e5e7eb;
+}
+.material-panel .hotspot-list {
+  flex: 1; overflow-y: auto; margin-bottom: 8px;
+  scrollbar-width: thin;
+}
+.material-panel .create-controls {
+  flex-shrink: 0; margin-top: auto; padding-top: 8px;
+  border-top: 1px solid #f0f1f3;
+}
+
+/* === 编辑器面板（中间，可滚动）=== */
 .editor-panel {
-  flex: 1; min-width: 520px; display: flex; flex-direction: column;
+  flex: 1; min-width: 400px; display: flex; flex-direction: column;
   background: #fff; overflow: hidden;
 }
 .editor-scroll {
@@ -1305,7 +1319,7 @@ onMounted(async () => {
 
 /* === 右侧面板 === */
 .side-panel {
-  width: 380px; flex-shrink: 0; background: #f8f9fb;
+  width: 340px; flex-shrink: 0; background: #f8f9fb;
   border-left: 1px solid var(--td-border-level-1-color, #e5e7eb);
   display: flex; flex-direction: column; overflow: hidden;
 }
@@ -1607,18 +1621,24 @@ onMounted(async () => {
 .bottom-actions { display: flex; align-items: center; gap: 10px; }
 
 /* ==================== 响应式 ==================== */
-@media (max-width: 1100px) {
+@media (max-width: 1200px) {
+  .material-panel { width: 260px; }
   .side-panel { width: 300px; }
-  .editor-panel { min-width: 420px; }
+  .editor-panel { min-width: 360px; }
 }
 @media (max-width: 960px) {
   .main-content { flex-direction: column; }
+  .material-panel {
+    width: 100% !important; border-right: none; border-bottom: 1px solid #eee;
+    max-height: 200px; flex-direction: row; flex-wrap: wrap; gap: 8px;
+  }
+  .material-panel .hotspot-list { max-height: 120px; }
+  .material-panel .create-controls { display: none; }
   .side-panel {
     width: 100% !important; border-left: none; border-top: 1px solid #eee;
     max-height: 350px;
   }
   .editor-panel { min-width: 0; }
   .editor-scroll { padding: 20px 24px; }
-  .angle-chips { display: none; }
 }
 </style>
