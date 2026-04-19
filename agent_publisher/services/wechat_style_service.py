@@ -66,7 +66,7 @@ _STRONG_STYLE = "font-weight: bold; color: #1a1a1a;"
 _EM_STYLE = "font-style: italic; color: #3f3f3f;"
 
 
-# Tag → default style mapping
+# Tag → default style mapping (full set, used for unstyled HTML)
 _TAG_STYLES: dict[str, str] = {
     "p": _PARAGRAPH_STYLE,
     **_HEADING_STYLES,
@@ -79,6 +79,12 @@ _TAG_STYLES: dict[str, str] = {
     "ol": _LIST_STYLE,
     "li": _LIST_ITEM_STYLE,
     "hr": _HR_STYLE,
+    "strong": _STRONG_STYLE,
+    "em": _EM_STYLE,
+}
+
+# Tags that wenyan does NOT style — lightweight supplement for wenyan output
+_SUPPLEMENT_TAG_STYLES: dict[str, str] = {
     "strong": _STRONG_STYLE,
     "em": _EM_STYLE,
 }
@@ -164,12 +170,39 @@ class _StyleInjector(HTMLParser):
         self._output.append(f"<![{data}]>")
 
 
+class _SupplementInjector(_StyleInjector):
+    """Injects styles only for the supplement tag set (strong, em).
+
+    Used on wenyan output where most tags already have inline styles.
+    """
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self._tag_stack.append(tag)
+        style_def = _SUPPLEMENT_TAG_STYLES.get(tag)
+
+        if style_def and not self._has_style_attr(attrs):
+            attrs_with_style = list(attrs) + [("style", style_def)]
+            self._output.append(self._build_open_tag(tag, attrs_with_style, self_closing=False))
+        else:
+            self._output.append(self._build_open_tag(tag, attrs, self_closing=False))
+
+    def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        style_def = _SUPPLEMENT_TAG_STYLES.get(tag)
+        if style_def and not self._has_style_attr(attrs):
+            attrs_with_style = list(attrs) + [("style", style_def)]
+            self._output.append(self._build_open_tag(tag, attrs_with_style, self_closing=True))
+        else:
+            self._output.append(self._build_open_tag(tag, attrs, self_closing=True))
+
+
 class WeChatStyleService:
     """Deterministic inline-style injection for WeChat Official Account HTML.
 
     Usage::
 
         styled_html = WeChatStyleService.inject_styles(raw_html)
+        # For wenyan output (already has most styles):
+        styled_html = WeChatStyleService.inject_styles_supplement(wenyan_html)
     """
 
     @staticmethod
@@ -193,5 +226,29 @@ class WeChatStyleService:
             return html
 
         injector = _StyleInjector()
+        injector.feed(html)
+        return injector.get_output()
+
+    @staticmethod
+    def inject_styles_supplement(html: str) -> str:
+        """Lightweight style injection for tags wenyan misses (strong, em).
+
+        Use this on wenyan output where most tags already have inline styles.
+        Only injects styles for ``<strong>`` and ``<em>`` — tags that wenyan
+        does not style. Tags with existing ``style`` attributes are preserved.
+
+        Args:
+            html: Wenyan-rendered HTML string.
+
+        Returns:
+            HTML string with supplementary styles applied.
+        """
+        if not html or not html.strip():
+            return html
+
+        if not re.search(r"<[a-zA-Z]", html):
+            return html
+
+        injector = _SupplementInjector()
         injector.feed(html)
         return injector.get_output()

@@ -379,6 +379,8 @@ class TestAdapterCollectionPipeline:
     async def test_adapter_fetch_dedup_score_store_flow(self):
         """Complete pipeline: fetch → dedup → score → store."""
         db = AsyncMock()
+        # Fix: db.add() is not async in SQLAlchemy
+        db.add = MagicMock()
         adapter = TrendRadarAdapter(db, feature_flag_enabled=True)
 
         mock_items = [
@@ -412,6 +414,8 @@ class TestAdapterCollectionPipeline:
     async def test_adapter_with_filter_keywords(self):
         """Adapter applies keyword filtering for agent fit."""
         db = AsyncMock()
+        # Fix: db.add() is not async in SQLAlchemy
+        db.add = MagicMock()
         adapter = TrendRadarAdapter(db, feature_flag_enabled=True)
 
         mock_items = [

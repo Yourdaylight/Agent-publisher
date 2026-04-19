@@ -125,13 +125,19 @@ class SkillAccountOut(BaseModel):
 
 
 class SkillArticleCreate(BaseModel):
-    """Request body for creating an article manually via skill API."""
+    """Request body for creating an article manually via skill API.
+
+    Prefer using ``content`` (Markdown) over ``html_content``.
+    Markdown articles get wenyan theme rendering and full beautify support.
+    ``html_content`` is kept for backwards compatibility (web frontend use)
+    but skill/CLI users should always provide Markdown.
+    """
 
     agent_id: int
     title: str
     digest: str = ""
-    content: str = ""  # Markdown content
-    html_content: str = ""  # Pre-rendered HTML (used if content is empty)
+    content: str = ""  # Markdown content (RECOMMENDED)
+    html_content: str = ""  # Pre-rendered HTML (deprecated for skill use; kept for web compat)
     cover_image_url: str = ""  # URL or media library path e.g. media:<id>
     status: str = "draft"
     target_account_ids: list[int] | None = None
@@ -1057,6 +1063,102 @@ async def skill_sync_article(
         raise HTTPException(status_code=404, detail=str(e))
     except RuntimeError as e:
         raise HTTPException(status_code=502, detail=f"WeChat sync failed: {e}")
+
+
+# ---------------------------------------------------------------------------
+# Article Beautify (Skills)
+# ---------------------------------------------------------------------------
+
+
+class SkillBeautifyRequest(BaseModel):
+    theme: str = "default"
+
+
+@router.post("/articles/{article_id}/beautify")
+async def skill_beautify_article(
+    article_id: int,
+    data: SkillBeautifyRequest | None = None,
+    request: Request = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """Re-render article Markdown via wenyan with a chosen theme.
+
+    Available themes: default, orangeheart, rainbow, lapis, pie, maize, purple, phycat.
+    """
+    email = _get_skill_email(request)
+    is_admin = settings.is_admin(email)
+
+    article = await db.get(Article, article_id)
+    if not article:
+        raise HTTPException(status_code=404, detail="Article not found")
+    if not is_admin:
+        agent = await db.get(Agent, article.agent_id)
+        if agent:
+            account = await db.get(Account, agent.account_id)
+            if not account or account.owner_email != email:
+                raise HTTPException(status_code=403, detail="Access denied")
+
+    if not article.content:
+        raise HTTPException(status_code=400, detail="文章没有 Markdown 内容，无法美化排版")
+
+    theme = (data.theme if data else None) or "default"
+    html = ArticleService._markdown_to_html(article.content, theme=theme)
+    article.html_content = html
+    await db.commit()
+    await db.refresh(article)
+
+    return {
+        "ok": True,
+        "article_id": article.id,
+        "html_content": html,
+        "theme": theme,
+    }
+
+
+class SkillAIBeautifyRequest(BaseModel):
+    style_hint: str = ""
+    theme: str = "default"
+
+
+@router.post("/articles/{article_id}/ai-beautify")
+async def skill_ai_beautify_article(
+    article_id: int,
+    data: SkillAIBeautifyRequest | None = None,
+    request: Request = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """Use LLM to produce WeChat-optimized HTML from the article content.
+
+    When the article has Markdown, it is first rendered through wenyan (with
+    the specified theme) to produce a clean base, then the LLM enhances it.
+    Optionally pass style_hint to guide the AI formatting direction.
+    """
+    email = _get_skill_email(request)
+    is_admin = settings.is_admin(email)
+
+    article = await db.get(Article, article_id)
+    if not article:
+        raise HTTPException(status_code=404, detail="Article not found")
+    if not is_admin:
+        agent = await db.get(Agent, article.agent_id)
+        if agent:
+            account = await db.get(Account, agent.account_id)
+            if not account or account.owner_email != email:
+                raise HTTPException(status_code=403, detail="Access denied")
+
+    article_svc = ArticleService(db)
+    try:
+        style_hint = (data.style_hint if data else None) or ""
+        theme = (data.theme if data else None) or "default"
+        html = await article_svc.ai_beautify_html(article, style_hint=style_hint, theme=theme)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"AI 美化失败：{e}")
+
+    return {
+        "ok": True,
+        "article_id": article.id,
+        "html_content": html,
+    }
 
 
 # ---------------------------------------------------------------------------

@@ -1,312 +1,179 @@
 ---
 name: agent-publisher
-description: Manage WeChat Official Accounts and AI content agents via Agent Publisher. Authenticate with your email, bind accounts, create content agents, generate articles, and publish to WeChat draft box.
+description: "微信公众号发布工具：本地写好文章 → 上传到平台 → 排版美化 → 一键发布到微信草稿箱。"
 metadata:
   {
     "openclaw":
       {
-        "emoji": "📢",
-        "requires": { "bins": ["uv", "curl"] },
+        "emoji": "�",
+        "requires": { "bins": ["uv"] },
         "primaryEnv": "AP_EMAIL",
       },
   }
 ---
 
-# Agent Publisher — WeChat Content Automation Skill
+# Agent Publisher — 微信公众号发布工具
 
-Manage WeChat Official Accounts and AI-powered content agents. Authenticate with your whitelisted email, bind accounts, create agents, generate articles, and publish to WeChat draft box — all through a single CLI script.
+本地编辑好内容，通过 CLI 上传、美化排版、发布到微信草稿箱。
 
-## Prerequisites
+## 前置条件
 
-- **Agent Publisher backend** running (default: `http://<your-server-ip>:9099`)
-- Your email must be whitelisted on the backend
-- `uv` installed (for running the bundled Python script)
+- Agent Publisher 后端运行中（默认 `http://localhost:9099`）
+- 邮箱已加入白名单
+- 已安装 `uv`
 
-## Quick Start
+## 环境变量
 
-The user provides two pieces of info:
-1. **Email** — their whitelisted email address
-2. **Backend URL** — (optional, defaults to `http://<your-server-ip>:9099`)
+| 变量 | 说明 | 默认值 |
+|------|------|--------|
+| `AP_URL` | 后端地址 | `http://localhost:9099` |
+| `AP_EMAIL` | 认证邮箱 | — |
 
-### Step 1: Authenticate
+---
+
+## 核心工作流
+
+### 1. 认证
 
 ```bash
-uv run {baseDir}/scripts/agent_publisher.py --url "$AP_URL" auth --email "user@example.com"
+uv run {baseDir}/scripts/agent_publisher.py auth --email "you@example.com"
 ```
 
-This saves a token to `~/.agent-publisher-token`. All subsequent commands auto-use this token.
-
-### Step 2: Check identity
+### 2. 绑定公众号（首次使用）
 
 ```bash
-uv run {baseDir}/scripts/agent_publisher.py whoami
+uv run {baseDir}/scripts/agent_publisher.py create-account --name "我的公众号" --appid wx123 --appsecret sec456
+```
+
+获取 AppID/AppSecret：登录 https://mp.weixin.qq.com → 设置与开发 → 基本配置。
+
+### 3. 上传文章
+
+**从 Markdown 文件创建（推荐，自动通过 wenyan 引擎转为精美排版）：**
+
+```bash
+uv run {baseDir}/scripts/agent_publisher.py create-article --agent-id 1 --title "文章标题" --content-file ./article.md
+```
+
+> **强烈推荐使用 Markdown**：Markdown 文件会通过 wenyan 渲染引擎自动转为精美排版，
+> 并支持 `beautify` 主题切换和 `ai-beautify` 增强美化。HTML 文件无法使用这些功能。
+
+**从 HTML 文件创建（不推荐，仅向后兼容）：**
+
+```bash
+uv run {baseDir}/scripts/agent_publisher.py create-article --agent-id 1 --title "文章标题" --content-file ./article.html --force-html
+```
+
+**设置封面图（素材库 ID 或外部 URL）：**
+
+```bash
+uv run {baseDir}/scripts/agent_publisher.py create-article --agent-id 1 --title "标题" --content-file ./article.md --cover media:5
+uv run {baseDir}/scripts/agent_publisher.py create-article --agent-id 1 --title "标题" --content-file ./article.md --cover "https://example.com/cover.jpg"
+```
+
+### 4. 排版美化
+
+**wenyan 主题美化（8 个内置主题，纯本地渲染）：**
+
+```bash
+uv run {baseDir}/scripts/agent_publisher.py beautify <article_id>
+uv run {baseDir}/scripts/agent_publisher.py beautify <article_id> --theme orangeheart
+```
+
+可选主题：`default`、`orangeheart`、`rainbow`、`lapis`、`pie`、`maize`、`purple`、`phycat`
+
+**AI 增强美化（基于 wenyan 排版，LLM 做装饰增强）：**
+
+```bash
+uv run {baseDir}/scripts/agent_publisher.py ai-beautify <article_id>
+uv run {baseDir}/scripts/agent_publisher.py ai-beautify <article_id> --style-hint "科技极简风，大量留白"
+uv run {baseDir}/scripts/agent_publisher.py ai-beautify <article_id> --theme orangeheart --style-hint "暖色调"
+```
+
+> 推荐工作流：先 `beautify` 选主题 → 再 `ai-beautify` 做精细调整。
+> `ai-beautify` 会自动先用 wenyan 渲染基底，再让 AI 在此基础上增强，不会从零重建排版。
+
+### 5. 发布到微信
+
+```bash
+uv run {baseDir}/scripts/agent_publisher.py publish <article_id>
+```
+
+发布后文章进入微信草稿箱，在微信后台确认群发。
+
+**编辑后重新同步到草稿箱：**
+
+```bash
+uv run {baseDir}/scripts/agent_publisher.py edit-article <article_id> --content-file ./updated.md
+uv run {baseDir}/scripts/agent_publisher.py beautify <article_id> --theme lapis
+uv run {baseDir}/scripts/agent_publisher.py sync-article <article_id>
 ```
 
 ---
 
-## All Commands
+## 命令速查
 
-Every command below uses the saved token automatically. Add `--url <URL>` if the backend is not the default.
+以下省略前缀 `uv run {baseDir}/scripts/agent_publisher.py`。
 
-### Account Management
+### 认证
 
-**List your WeChat accounts:**
+| 命令 | 说明 |
+|------|------|
+| `auth --email <email>` | 邮箱认证 |
+| `whoami` | 查看当前身份 |
 
-```bash
-uv run {baseDir}/scripts/agent_publisher.py accounts
-```
+### 公众号
 
-**Bind a new WeChat Official Account:**
+| 命令 | 说明 |
+|------|------|
+| `accounts` | 列出我的公众号 |
+| `create-account --name <名称> --appid <ID> --appsecret <Secret>` | 绑定公众号 |
 
-```bash
-uv run {baseDir}/scripts/agent_publisher.py create-account --name "My Account" --appid "wx1234567890" --appsecret "secret_here"
-```
+### 文章（核心）
 
-**List ALL accounts (admin only):**
+| 命令 | 说明 |
+|------|------|
+| `create-article --agent-id <ID> --title <标题> --content-file <file>` | 上传文章（推荐 .md） |
+| `edit-article <ID> --title/--content-file/--cover` | 编辑文章 |
+| `article <ID>` | 查看文章详情 |
+| `articles [--status draft]` | 列出文章 |
 
-```bash
-uv run {baseDir}/scripts/agent_publisher.py accounts-all
-```
+### 美化排版
 
-### Agent Management
+| 命令 | 说明 |
+|------|------|
+| `beautify <ID> [--theme orangeheart]` | wenyan 主题排版 |
+| `ai-beautify <ID> [--theme lapis] [--style-hint "风格描述"]` | AI 增强美化（基于 wenyan 基底） |
 
-**List your content agents:**
+### 发布
 
-```bash
-uv run {baseDir}/scripts/agent_publisher.py agents
-```
+| 命令 | 说明 |
+|------|------|
+| `publish <article_id>` | 发布到微信草稿箱 |
+| `sync-article <article_id>` | 同步编辑到草稿箱 |
+| `batch-publish <id1> <id2> ...` | 批量发布（管理员） |
 
-**Create a content agent:**
+### 素材库
 
-```bash
-uv run {baseDir}/scripts/agent_publisher.py create-agent \
-  --name "Tech Observer" \
-  --topic "AI and Technology" \
-  --account-id 1 \
-  --cron "0 8 * * *" \
-  --llm-model "Kimi-K2.5"
-```
+| 命令 | 说明 |
+|------|------|
+| `media` | 列出素材 |
+| `upload-media <文件路径>` | 上传图片 |
 
-Optional flags:
-- `--description "Agent description"`
-- `--rss "TechCrunch=https://feeds.feedburner.com/TechCrunch"` (repeatable)
-- `--llm-provider openai`
-- `--image-style "Modern minimalist"`
+### 数据
 
-### Article Generation
-
-**Trigger generation for an agent:**
-
-```bash
-uv run {baseDir}/scripts/agent_publisher.py generate 1
-```
-
-**Trigger and wait for completion:**
-
-```bash
-uv run {baseDir}/scripts/agent_publisher.py generate 1 --wait
-```
-
-**Check task status:**
-
-```bash
-uv run {baseDir}/scripts/agent_publisher.py task 42
-```
-
-### Article Management
-
-**List articles:**
-
-```bash
-uv run {baseDir}/scripts/agent_publisher.py articles
-```
-
-**Filter by status:**
-
-```bash
-uv run {baseDir}/scripts/agent_publisher.py articles --status draft
-```
-
-**Get article detail:**
-
-```bash
-uv run {baseDir}/scripts/agent_publisher.py article 1
-```
-
-### Publishing
-
-**Publish a single article to WeChat draft box:**
-
-```bash
-uv run {baseDir}/scripts/agent_publisher.py publish 1
-```
-
-**Publish to specific target accounts (multi-account):**
-
-```bash
-uv run {baseDir}/scripts/agent_publisher.py publish 1 --account-id 2 --account-id 3
-```
-
-**Sync article edits to specific accounts:**
-
-```bash
-uv run {baseDir}/scripts/agent_publisher.py sync-article 1 --account-id 2
-```
-
-**Batch publish articles (admin only):**
-
-```bash
-uv run {baseDir}/scripts/agent_publisher.py batch-publish 1 2 3
-```
-
-**Batch publish to specific accounts (admin only):**
-
-```bash
-uv run {baseDir}/scripts/agent_publisher.py batch-publish 1 2 3 --account-id 4 --account-id 5
-```
-
-**Enable test mode for detailed JSON output:**
-
-```bash
-uv run {baseDir}/scripts/agent_publisher.py publish 1 --account-id 2 --test-mode
-uv run {baseDir}/scripts/agent_publisher.py sync-article 1 --account-id 2 --test-mode
-```
-
-The `--test-mode` flag prints the full structured JSON response, including per-account results with `status`, `wechat_media_id`, `stage`, and `error` for each target account.
+| 命令 | 说明 |
+|------|------|
+| `followers <account_id>` | 粉丝趋势 |
+| `article-stats <account_id>` | 阅读数据 |
 
 ---
 
-## Environment Variables
+## 注意事项
 
-| Variable   | Description                                          | Default                          |
-|------------|------------------------------------------------------|----------------------------------|
-| `AP_URL`   | Agent Publisher backend URL                          | `http://localhost:9099`          |
-| `AP_EMAIL` | Email for auto-authentication                        | —                                |
-| `AP_TOKEN` | Skill token (alternative to saved token file)        | —                                |
-
-You can set `AP_URL` and `AP_EMAIL` to skip passing `--url` and `--email` every time:
-
-```bash
-export AP_URL="http://<your-server-ip>:9099"
-export AP_EMAIL="user@example.com"
-uv run {baseDir}/scripts/agent_publisher.py auth
-```
-
-## Typical Workflow
-
-1. **Auth** → `auth --email "me@company.com"`
-2. **Bind account** → `create-account --name "My GZH" --appid wx123 --appsecret sec456`
-3. **Create agent** → `create-agent --name "Daily Tech" --topic "AI" --account-id 1 --default-style tech`
-4. **Generate** → `generate 1 --wait`
-5. **Review** → `articles` then `article <id>`
-6. **Publish** → `publish <id>` (or `publish <id> --account-id 1 --account-id 2` for multi-account)
-
-### Multi-Account Testing Workflow
-
-1. **Auth** → `auth --email "tester@company.com"`
-2. **Check accounts** → `accounts` to see available account IDs
-3. **Publish to remote with explicit accounts** → `publish <id> --account-id 2 --account-id 3 --test-mode`
-4. **Review results** → Test mode prints full structured JSON including per-account status, media IDs, and errors
-5. **Sync edits** → `sync-article <id> --account-id 2 --test-mode`
-
-This workflow allows testing against a remote environment by explicitly specifying target accounts and enabling test mode output, without modifying any database bindings.
-
-### Style & Variant Workflow
-
-1. **Browse styles** → `list-styles`
-2. **Bind style to agent** → `update-agent 1 --default-style tech`
-3. **Edit a style prompt** → `edit-style tech --prompt "你是一位科技编辑..."`
-4. **Create custom style** → `create-style humor --name "幽默风" --prompt "你是一位段子手..."`
-5. **Generate variants** → `generate-variants 42 --agents 1,2,3 --styles tech,uncle,clickbait --wait`
-6. **Check variants** → `variants 42`
-
----
-
-## All Commands Reference
-
-### Style Preset Management
-
-**List all style presets (built-in + custom):**
-
-```bash
-uv run {baseDir}/scripts/agent_publisher.py list-styles
-uv run {baseDir}/scripts/agent_publisher.py list-styles --full  # show full prompt content
-```
-
-**Edit a style preset's name/description/prompt:**
-
-```bash
-uv run {baseDir}/scripts/agent_publisher.py edit-style tech --prompt "新的提示词内容"
-uv run {baseDir}/scripts/agent_publisher.py edit-style tech --name "新名称" --description "新描述"
-uv run {baseDir}/scripts/agent_publisher.py edit-style tech --prompt-file /path/to/prompt.txt
-```
-
-**Create a custom style preset:**
-
-```bash
-uv run {baseDir}/scripts/agent_publisher.py create-style humor --name "幽默风" --prompt "你是一位段子手..."
-uv run {baseDir}/scripts/agent_publisher.py create-style humor --name "幽默风" --prompt-file /path/to/prompt.txt
-```
-
-**Delete a custom style preset:**
-
-```bash
-uv run {baseDir}/scripts/agent_publisher.py delete-style humor
-```
-
-### Agent Configuration (incl. Style Binding)
-
-**Update agent config and bind a default style:**
-
-```bash
-uv run {baseDir}/scripts/agent_publisher.py update-agent 1 --default-style tech
-uv run {baseDir}/scripts/agent_publisher.py update-agent 1 --default-style ""   # clear binding
-uv run {baseDir}/scripts/agent_publisher.py update-agent 1 --name "New Name" --topic "New Topic" --cron "0 10 * * *"
-```
-
-**Create agent with default style binding:**
-
-```bash
-uv run {baseDir}/scripts/agent_publisher.py create-agent \
-  --name "Tech Observer" \
-  --topic "AI and Technology" \
-  --account-id 1 \
-  --default-style tech
-```
-
-### Variant Article Generation
-
-**Generate variant articles from a source article:**
-
-```bash
-uv run {baseDir}/scripts/agent_publisher.py generate-variants 42 --agents 1,2,3 --styles tech,uncle,clickbait
-uv run {baseDir}/scripts/agent_publisher.py generate-variants 42 --agents 1,2,3 --styles tech,uncle --wait
-```
-
-**Check variant generation task status:**
-
-```bash
-uv run {baseDir}/scripts/agent_publisher.py variant-status 99
-```
-
-**List variant articles for a source article:**
-
-```bash
-uv run {baseDir}/scripts/agent_publisher.py variants 42
-```
-
-## Roles
-
-- **Normal user**: Can manage their own accounts, agents, and articles
-- **Admin**: Can see all accounts/articles and batch-publish
-
-## Notes
-
-- Token expires after 30 days. Re-run `auth` to refresh.
-- AppSecret is sensitive — the script never prints it.
-- The `--wait` flag on `generate` polls every 5 seconds for up to 5 minutes.
-- If the user hasn't provided their WeChat AppID/AppSecret yet, guide them to:
-  1. Log in to https://mp.weixin.qq.com
-  2. Go to "设置与开发" → "基本配置"
-  3. Copy the AppID and reset/copy the AppSecret
-  4. Add the server IP to the IP whitelist
+- Token 有效期 30 天，过期重新 `auth`
+- `create-article` 需要 `--agent-id`，用 `agents` 命令查看可用的 Agent ID
+- **文章内容建议使用 Markdown 格式**，wenyan 会自动渲染为微信适配的精美 HTML
+- HTML 文件虽然支持，但无法使用 beautify 主题美化和 AI 增强美化
+- 封面图支持 `media:<id>`（素材库 ID）或 `http(s)://` URL
+- AppSecret 敏感信息不会被打印
